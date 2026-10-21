@@ -131,10 +131,9 @@ class MainActivity : ComponentActivity() {
                     0 -> {
                         if (session.messages.isEmpty()) {
                             Column(Modifier.weight(1f).fillMaxWidth().padding(28.dp), verticalArrangement = Arrangement.Center) {
-                                Text("PERSONAL / CYBER OPERATIVE", color = Muted, fontSize = 10.sp, letterSpacing = 2.sp, fontFamily = FontFamily.Monospace)
+                                Text("CAPRI / 摩羯", color = Muted, fontSize = 12.sp, letterSpacing = 2.sp)
                                 Spacer(Modifier.height(20.dp)); Mark(Modifier.size(94.dp)); Spacer(Modifier.height(18.dp))
-                                Text("你的意志。\n我的执行。", color = White, fontSize = 34.sp, lineHeight = 46.sp, fontWeight = FontWeight.SemiBold)
-                                Spacer(Modifier.height(14.dp)); Text("我是 Capri，摩羯。\n从一个想法开始，把它变成现实。", color = Muted, fontSize = 14.sp, lineHeight = 23.sp)
+                                Text("好了，\n你想改写什么？", color = White, fontSize = 32.sp, lineHeight = 46.sp, fontWeight = FontWeight.SemiBold)
                                 Spacer(Modifier.height(30.dp))
                                 listOf("介绍一下你自己", "帮我整理这个工作区").forEach { label ->
                                     OutlinedButton(onClick = { input = label }, shape = RoundedCornerShape(8.dp), border = BorderStroke(1.dp, Line), modifier = Modifier.padding(bottom = 8.dp)) { Text(label, color = White, fontSize = 12.sp); Spacer(Modifier.width(20.dp)); Icon(Icons.Outlined.NorthEast, null, Modifier.size(14.dp), tint = Green) }
