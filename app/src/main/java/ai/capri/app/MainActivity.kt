@@ -29,6 +29,8 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import android.content.Intent
 import kotlinx.coroutines.launch
+import androidx.lifecycle.withResumed
+import androidx.lifecycle.compose.LocalLifecycleOwner
 
 private val Ink = Color(0xFF080B09)
 private val Panel = Color(0xFF111612)
@@ -40,6 +42,8 @@ private val Muted = Color(0xFF939E94)
 
 class MainActivity : ComponentActivity() {
     private val model: CapriModel by viewModels()
+    override fun onResume() { super.onResume(); model.androidTools.permissions.attach(this) }
+    override fun onPause() { model.androidTools.permissions.detach(this); super.onPause() }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent { MaterialTheme(colorScheme = darkColorScheme(primary = Green, onPrimary = Ink, background = Ink, surface = Panel, onSurface = White, outline = Line, error = Red)) { Capri(model) } }
@@ -63,6 +67,16 @@ class MainActivity : ComponentActivity() {
     val notice = vm.notices[session.id]
     var tab by remember { mutableIntStateOf(0) }
     var settings by remember { mutableStateOf(false) }
+    var nativeCapabilities by remember { mutableStateOf(false) }
+    val pendingNativePermission by vm.androidTools.permissions.pending.collectAsState()
+    val nativePermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { vm.androidTools.permissions.complete(it); vm.refresh() }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    LaunchedEffect(pendingNativePermission?.id, lifecycleOwner) {
+        val pending = pendingNativePermission ?: return@LaunchedEffect
+        lifecycleOwner.lifecycle.withResumed {
+            vm.androidTools.permissions.take(pending.id)?.let { nativePermissionLauncher.launch(it.toTypedArray()) }
+        }
+    }
     var input by remember(session.id) { mutableStateOf("") }
     var banner by remember { mutableStateOf("") }
     val drawer = rememberDrawerState(DrawerValue.Closed)
@@ -178,6 +192,8 @@ class MainActivity : ComponentActivity() {
                     2 -> {
                         Column(Modifier.verticalScroll(rememberScrollState()).padding(24.dp)) {
                             Text("执行环境", fontSize = 26.sp); Spacer(Modifier.height(20.dp))
+                            OutlinedButton(onClick = { nativeCapabilities = true }) { Icon(Icons.Outlined.PhonelinkSetup, null, Modifier.size(16.dp)); Spacer(Modifier.width(8.dp)); Text("Android 原生能力") }
+                            Text("设备、网络、Wi-Fi、定位、应用与系统操作统一由 android 工具调用。", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(vertical = 12.dp))
                             Text("ON DEVICE / ARM64", color = Green, fontSize = 11.sp, fontFamily = FontFamily.Monospace, letterSpacing = 2.sp)
                             Spacer(Modifier.height(16.dp)); Text(vm.runtime.status(), color = White, lineHeight = 24.sp)
                             Spacer(Modifier.height(16.dp))
@@ -194,6 +210,7 @@ class MainActivity : ComponentActivity() {
         }
     }
     if(settings) Settings(vm, onDismiss = { settings = false })
+    if(nativeCapabilities) NativeCapabilities(vm, onDismiss = { nativeCapabilities = false })
 }
 
 @Composable private fun Empty(title: String, subtitle: String) { Column(Modifier.fillMaxWidth().padding(36.dp)) { Text(title, color = White); Spacer(Modifier.height(8.dp)); Text(subtitle, color = Muted, fontSize = 13.sp) } }
@@ -216,4 +233,24 @@ class MainActivity : ComponentActivity() {
     }, confirmButton = { TextButton(onClick = {
         if(!endpoint.startsWith("https://") || model.isBlank() || key.isBlank()) error = "请填写 HTTPS 地址、模型和密钥" else { vm.store.configure(ModelConfig(endpoint.trim(), model.trim(), key.trim())); vm.refresh(); onDismiss() }
     }) { Text("保存") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } })
+}
+
+@Composable private fun NativeCapabilities(vm: CapriModel, onDismiss: () -> Unit) {
+    val capabilities = vm.androidTools.capabilities()
+    val actions = capabilities.getJSONArray("actions")
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Android 原生能力") }, text = {
+        Column {
+            Text("${actions.length()} 项已接入动作 · 无 root / ADB / Shizuku。授权按任务需要申请，系统开关和厂商限制仍可能影响结果。", color = Muted, fontSize = 12.sp)
+            Spacer(Modifier.height(12.dp))
+            LazyColumn(Modifier.heightIn(max = 400.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                items(actions.length()) { index ->
+                    val action = actions.getJSONObject(index)
+                    Column {
+                        Text(action.getString("title"), fontSize = 14.sp)
+                        Text(when(action.getString("status")) { "available" -> "已接入"; "permission_required" -> "需要授权"; else -> "设备不支持" }, color = if(action.getString("status") == "available") Green else Muted, fontSize = 11.sp)
+                    }
+                }
+            }
+        }
+    }, confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } })
 }
