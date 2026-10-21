@@ -35,6 +35,11 @@ private val ToolMuted = Color(0xFF939E94)
     val label = remember(name, json) {
         when (name) {
             "android" -> json?.optString("action")?.let { ai.capri.app.nativebridge.NativeCatalog.find(it)?.title } ?: "Android 原生工具"
+            "terminal" -> when (json?.optString("action")) {
+                "open" -> "创建终端"; "list", "attach" -> "查看终端"; "run" -> "执行命令"
+                "read" -> "读取终端输出"; "input" -> "输入终端"; "cancel" -> "停止命令"
+                "close" -> "关闭终端"; "clear_history", "delete" -> "清理终端记录"; else -> "终端"
+            }
             "python_run" -> "运行 Python"
             "list_files" -> "查看工作区"
             "read_file" -> "读取文件"
@@ -43,7 +48,7 @@ private val ToolMuted = Color(0xFF939E94)
         }
     }
     val status = json?.optString("status").orEmpty()
-    val failed = status in setOf("error", "restricted", "permission_denied", "invalid_argument", "unsupported", "timeout", "unavailable") || body.startsWith("工具失败") || (name == "python_run" && body.startsWith("exit=") && !body.startsWith("exit=0\n"))
+    val failed = status in setOf("error", "restricted", "permission_denied", "invalid_argument", "unsupported", "timeout", "unavailable", "not_found", "not_running") || body.startsWith("工具失败") || (name == "python_run" && body.startsWith("exit=") && !body.startsWith("exit=0\n"))
     val summary = when (status) {
         "partial" -> "返回部分信息"
         "permission_required" -> "需要授权"

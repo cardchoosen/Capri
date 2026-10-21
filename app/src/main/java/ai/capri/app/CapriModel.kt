@@ -17,6 +17,7 @@ import java.util.concurrent.TimeUnit
 class CapriModel(app: Application) : AndroidViewModel(app) {
     val store = Store(app)
     val runtime = PythonRuntime(app, store.workspace)
+    internal val terminals = ai.capri.app.terminal.TerminalManager.get(app)
     val androidTools = ai.capri.app.nativebridge.AndroidTool(app)
     val sessions = store.load()
     init { store.save(sessions) }
@@ -79,6 +80,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
             .put(tool("write_file", "写入当前工作区文本文件", props("path", "content"), listOf("path", "content")))
             .put(tool("python_run", "在手机当前会话PRoot中执行Python，超时60秒。未安装时会失败。", props("code"), listOf("code")))
             .put(androidTools.specification())
+            .put(ai.capri.app.terminal.TerminalContract.specification())
         repeat(12) {
             currentCoroutineContext().ensureActive()
             notices[session.id] = "思考中"; refresh()
@@ -120,6 +122,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                     val args = JSONObject(function.getString("arguments"))
                     withContext(Dispatchers.IO) {
                         when (name) {
+                            "terminal" -> terminals.execute(session.id, args)
                             "android" -> androidTools.execute(args)
                             "profile_search" -> store.profile(args.getString("query"))
                             "list_files" -> store.workspace.list(session.id).joinToString("\n") { it.relativeTo(store.workspace.folder(session.id, "workspace")).path }

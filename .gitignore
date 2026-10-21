@@ -10,3 +10,4 @@ outputs/
 *.keystore
 runtime-bundles/
 .DS_Store
+__pycache__/
