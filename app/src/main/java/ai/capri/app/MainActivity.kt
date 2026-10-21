@@ -2,6 +2,8 @@ package ai.capri.app
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.enableEdgeToEdge
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -10,6 +12,7 @@ import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -24,6 +27,9 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
@@ -46,6 +52,10 @@ class MainActivity : ComponentActivity() {
     override fun onPause() { model.androidTools.permissions.detach(this); super.onPause() }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+        )
         setContent { MaterialTheme(colorScheme = darkColorScheme(primary = Green, onPrimary = Ink, background = Ink, surface = Panel, onSurface = White, outline = Line, error = Red)) { Capri(model) } }
     }
 }
@@ -65,6 +75,9 @@ class MainActivity : ComponentActivity() {
     val entries = session.messages.filter(ToolPresentation::visible)
     val busy = vm.jobs.containsKey(session.id)
     val notice = vm.notices[session.id]
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+    val keyboardVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     var tab by remember { mutableIntStateOf(0) }
     var settings by remember { mutableStateOf(false) }
     var nativeCapabilities by remember { mutableStateOf(false) }
@@ -120,7 +133,7 @@ class MainActivity : ComponentActivity() {
             } }
         }
     }) {
-        Scaffold(containerColor = Ink, topBar = {
+        Scaffold(modifier = Modifier.fillMaxSize().imePadding(), containerColor = Ink, topBar = {
             Column {
                 Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = { scope.launch { drawer.open() } }) { Icon(Icons.Outlined.Menu, "会话列表", tint = White) }
@@ -133,7 +146,7 @@ class MainActivity : ComponentActivity() {
                 HorizontalDivider(color = Line)
             }
         }, bottomBar = {
-            Column(Modifier.navigationBarsPadding()) {
+            if (!keyboardVisible) Column(Modifier.navigationBarsPadding()) {
                 HorizontalDivider(color = Line)
                 Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
                     listOf("对话" to Icons.Outlined.ChatBubbleOutline, "文件" to Icons.Outlined.FolderOpen, "运行" to Icons.Outlined.Terminal).forEachIndexed { index, pair ->
@@ -142,12 +155,12 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }) { padding ->
-            Column(Modifier.padding(padding).fillMaxSize()) {
+            Column(Modifier.padding(padding).consumeWindowInsets(padding).fillMaxSize()) {
                 if (banner.isNotEmpty()) { TextButton(onClick = { banner = "" }) { Text(banner, color = Green, fontSize = 12.sp) } }
                 when (tab) {
                     0 -> {
                         if (entries.isEmpty()) {
-                            Column(Modifier.weight(1f).fillMaxWidth().padding(28.dp), verticalArrangement = Arrangement.Center) {
+                            Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(28.dp), verticalArrangement = Arrangement.Center) {
                                 Text("CAPRI / 摩羯", color = Muted, fontSize = 12.sp, letterSpacing = 2.sp)
                                 Spacer(Modifier.height(20.dp)); Mark(Modifier.size(94.dp)); Spacer(Modifier.height(18.dp))
                                 Text("好了，\n你想改写什么？", color = White, fontSize = 32.sp, lineHeight = 46.sp, fontWeight = FontWeight.SemiBold)
@@ -160,8 +173,9 @@ class MainActivity : ComponentActivity() {
                             val listState = rememberLazyListState()
                             LaunchedEffect(session.id, entries.size, update) { if (entries.isNotEmpty()) listState.animateScrollToItem(entries.lastIndex) }
                             LazyColumn(state = listState, modifier = Modifier.weight(1f), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
-                                items(entries) { message ->
-                                    Column(Modifier.fillMaxWidth().then(if (message.role == "user") Modifier.background(Panel, RoundedCornerShape(12.dp)).padding(16.dp) else Modifier)) {
+                                itemsIndexed(entries, key = { index, _ -> "${session.id}:$index" }) { _, message ->
+                                    if (message.role == "tool") ToolOutputCard(message.text)
+                                    else Column(Modifier.fillMaxWidth().then(if (message.role == "user") Modifier.background(Panel, RoundedCornerShape(12.dp)).padding(16.dp) else Modifier)) {
                                         Text(when(message.role) { "user" -> "YOU"; "assistant" -> "CAPRI"; "tool" -> "TOOL / 本机"; else -> "SYSTEM" }, color = if(message.role == "assistant") Green else if(message.role == "status") Red else Muted, fontFamily = FontFamily.Monospace, fontSize = 10.sp, letterSpacing = 2.sp)
                                         Spacer(Modifier.height(8.dp))
                                         if (message.role == "assistant") MarkdownReply(message.text)
@@ -171,10 +185,10 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                         notice?.let { Text(it, color = Green, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp)) }
-                        Row(Modifier.fillMaxWidth().imePadding().padding(12.dp).border(1.dp, Line, RoundedCornerShape(14.dp)).background(Panel, RoundedCornerShape(14.dp)).padding(4.dp), verticalAlignment = Alignment.Bottom) {
+                        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp).border(1.dp, Line, RoundedCornerShape(14.dp)).background(Panel, RoundedCornerShape(14.dp)).padding(4.dp), verticalAlignment = Alignment.Bottom) {
                             IconButton(onClick = { importer.launch(arrayOf("*/*")) }) { Icon(Icons.Outlined.Add, "导入文件", tint = Muted) }
                             TextField(value = input, onValueChange = { input = it }, modifier = Modifier.weight(1f), placeholder = { Text("下达你的指令…", fontSize = 14.sp) }, maxLines = 5, colors = TextFieldDefaults.colors(focusedContainerColor = Panel, unfocusedContainerColor = Panel, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent))
-                            FilledIconButton(onClick = { if (busy) vm.stop() else if(input.isNotBlank()) { if(vm.send(input)) input = "" } }, colors = IconButtonDefaults.filledIconButtonColors(containerColor = if(busy) Red else Green, contentColor = Ink), modifier = Modifier.padding(bottom = 4.dp)) { Icon(if(busy) Icons.Outlined.Stop else Icons.Outlined.ArrowUpward, if(busy) "停止" else "发送") }
+                            FilledIconButton(onClick = { if (busy) vm.stop() else if(input.isNotBlank()) { if(vm.send(input)) { input = ""; focusManager.clearFocus(force = true); keyboard?.hide() } } }, colors = IconButtonDefaults.filledIconButtonColors(containerColor = if(busy) Red else Green, contentColor = Ink), modifier = Modifier.padding(bottom = 4.dp)) { Icon(if(busy) Icons.Outlined.Stop else Icons.Outlined.ArrowUpward, if(busy) "停止" else "发送") }
                         }
                     }
                     1 -> {
@@ -202,7 +216,12 @@ class MainActivity : ComponentActivity() {
                             Spacer(Modifier.height(24.dp)); Text("会话独立目录", color = Green); Text("workspace / 任务文件\nhome / 用户目录\ntmp / 临时文件\nruns / 脚本与执行日志", color = Muted, lineHeight = 28.sp, modifier = Modifier.padding(vertical = 12.dp), fontFamily = FontFamily.Monospace)
                             Text("运行模型：单 APK · Android 原生调度 · PRoot/Python。PRoot 与 Android 共用内核，各会话属于同一应用 UID；目录分离不构成恶意代码安全隔离。", color = Muted, lineHeight = 24.sp, fontSize = 13.sp)
                             Spacer(Modifier.height(24.dp)); Text("当前会话工具记录", fontSize = 16.sp)
-                            entries.filter { it.role == "tool" || it.role == "status" }.takeLast(10).forEach { Text(it.text, color = Muted, fontSize = 12.sp, modifier = Modifier.padding(vertical = 10.dp)) }
+                            entries.withIndex().filter { it.value.role == "tool" || it.value.role == "status" }.takeLast(10).forEach { (index, entry) ->
+                                key(session.id, index) {
+                                    if (entry.role == "tool") ToolOutputCard(entry.text, Modifier.padding(vertical = 6.dp))
+                                    else Text(entry.text, color = Muted, fontSize = 12.sp, modifier = Modifier.padding(vertical = 10.dp))
+                                }
+                            }
                         }
                     }
                 }
