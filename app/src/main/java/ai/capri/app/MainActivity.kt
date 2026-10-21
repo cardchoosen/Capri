@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
@@ -76,7 +75,9 @@ class MainActivity : ComponentActivity() {
 @Composable private fun Capri(vm: CapriModel) {
     val update = vm.updates.collectAsState().value
     val session = vm.current()
-    val entries = session.messages.filter(ToolPresentation::visible)
+    val entries = remember(session.id, update) { session.messages.filter(ToolPresentation::visible) }
+    val chatPositions = remember { mutableMapOf<String, ChatScrollState>() }
+    val chatPosition = chatPositions.getOrPut(session.id) { ChatScrollState(entries.size) }
     val busy = vm.jobs.containsKey(session.id)
     val notice = vm.notices[session.id]
     val keyboard = LocalSoftwareKeyboardController.current
@@ -175,10 +176,22 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                         } else {
-                            val listState = rememberLazyListState()
-                            LaunchedEffect(session.id, entries.size, update) { if (entries.isNotEmpty()) listState.animateScrollToItem(entries.lastIndex) }
-                            LazyColumn(state = listState, modifier = Modifier.weight(1f), contentPadding = PaddingValues(16.dp)) {
-                                itemsIndexed(entries, key = { index, _ -> "${session.id}:$index" }) { index, message ->
+                            val listState = chatPosition.list
+                            LaunchedEffect(chatPosition) {
+                                snapshotFlow {
+                                    if (listState.isScrollInProgress) listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0 else null
+                                }.collect { atBottom -> if (atBottom != null) chatPosition.followLatest = atBottom }
+                            }
+                            LaunchedEffect(chatPosition, entries.size) {
+                                if (chatPosition.messageCount != entries.size) {
+                                    chatPosition.messageCount = entries.size
+                                    if (chatPosition.followLatest) listState.scrollToItem(0)
+                                }
+                            }
+                            val timeline = remember(entries) { entries.asReversed() }
+                            LazyColumn(state = listState, reverseLayout = true, modifier = Modifier.weight(1f), contentPadding = PaddingValues(16.dp)) {
+                                itemsIndexed(timeline, key = { index, _ -> "${session.id}:${entries.lastIndex - index}" }) { reverseIndex, message ->
+                                    val index = entries.lastIndex - reverseIndex
                                     if (index > 0) Spacer(Modifier.height(if (message.role == "tool" || entries[index - 1].role == "tool") 6.dp else 18.dp))
                                     if (message.role == "tool") ToolOutputRow(message.text)
                                     else Column(Modifier.fillMaxWidth().then(if (message.role == "user") Modifier.background(Panel, RoundedCornerShape(2.dp)).padding(12.dp) else Modifier)) {
@@ -194,7 +207,7 @@ class MainActivity : ComponentActivity() {
                         Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp).border(1.dp, if (busy) Red else Line, RoundedCornerShape(2.dp)).background(Panel, RoundedCornerShape(2.dp)).padding(2.dp), verticalAlignment = Alignment.Bottom) {
                             IconButton(onClick = { importer.launch(arrayOf("*/*")) }) { Icon(Icons.Outlined.Add, "导入文件", tint = Muted) }
                             TextField(value = input, onValueChange = { input = it }, modifier = Modifier.weight(1f), placeholder = { Text("下达你的指令…", fontSize = 14.sp) }, maxLines = 5, colors = TextFieldDefaults.colors(focusedContainerColor = Panel, unfocusedContainerColor = Panel, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent))
-                            FilledIconButton(shape = RoundedCornerShape(2.dp), onClick = { if (busy) vm.stop() else if(input.isNotBlank()) { if(vm.send(input)) { input = ""; focusManager.clearFocus(force = true); keyboard?.hide() } } }, colors = IconButtonDefaults.filledIconButtonColors(containerColor = if(busy) Red else Green, contentColor = Ink), modifier = Modifier.padding(bottom = 4.dp)) { Icon(if(busy) Icons.Outlined.Stop else Icons.Outlined.ArrowUpward, if(busy) "停止" else "发送") }
+                            FilledIconButton(shape = RoundedCornerShape(2.dp), onClick = { if (busy) vm.stop() else if(input.isNotBlank()) { if(vm.send(input)) { chatPosition.followLatest = true; input = ""; focusManager.clearFocus(force = true); keyboard?.hide() } } }, colors = IconButtonDefaults.filledIconButtonColors(containerColor = if(busy) Red else Green, contentColor = Ink), modifier = Modifier.padding(bottom = 4.dp)) { Icon(if(busy) Icons.Outlined.Stop else Icons.Outlined.ArrowUpward, if(busy) "停止" else "发送") }
                         }
                     }
                     1 -> {
