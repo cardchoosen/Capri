@@ -58,6 +58,9 @@ class MainActivity : ComponentActivity() {
 @Composable private fun Capri(vm: CapriModel) {
     val update = vm.updates.collectAsState().value
     val session = vm.current()
+    val entries = session.messages.toList()
+    val busy = vm.jobs.containsKey(session.id)
+    val notice = vm.notices[session.id]
     var tab by remember { mutableIntStateOf(0) }
     var settings by remember { mutableStateOf(false) }
     var input by remember(session.id) { mutableStateOf("") }
@@ -109,7 +112,7 @@ class MainActivity : ComponentActivity() {
                     IconButton(onClick = { scope.launch { drawer.open() } }) { Icon(Icons.Outlined.Menu, "会话列表", tint = White) }
                     Column(Modifier.weight(1f).padding(start = 8.dp)) {
                         Text("C A P R I", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                        Text(if (vm.jobs.containsKey(session.id)) "●  ${vm.notices[session.id]}" else "●  随时待命", color = Green, fontSize = 10.sp, letterSpacing = 1.sp)
+                        Text(if (busy) "●  ${notice ?: "思考中"}" else "●  随时待命", color = Green, fontSize = 10.sp, letterSpacing = 1.sp)
                     }
                     IconButton(onClick = { settings = true }) { Icon(Icons.Outlined.Tune, "设置", tint = Muted) }
                 }
@@ -129,7 +132,7 @@ class MainActivity : ComponentActivity() {
                 if (banner.isNotEmpty()) { TextButton(onClick = { banner = "" }) { Text(banner, color = Green, fontSize = 12.sp) } }
                 when (tab) {
                     0 -> {
-                        if (session.messages.isEmpty()) {
+                        if (entries.isEmpty()) {
                             Column(Modifier.weight(1f).fillMaxWidth().padding(28.dp), verticalArrangement = Arrangement.Center) {
                                 Text("CAPRI / 摩羯", color = Muted, fontSize = 12.sp, letterSpacing = 2.sp)
                                 Spacer(Modifier.height(20.dp)); Mark(Modifier.size(94.dp)); Spacer(Modifier.height(18.dp))
@@ -141,9 +144,9 @@ class MainActivity : ComponentActivity() {
                             }
                         } else {
                             val listState = rememberLazyListState()
-                            LaunchedEffect(session.id, session.messages.size, update) { if (session.messages.isNotEmpty()) listState.animateScrollToItem(session.messages.lastIndex) }
+                            LaunchedEffect(session.id, entries.size, update) { if (entries.isNotEmpty()) listState.animateScrollToItem(entries.lastIndex) }
                             LazyColumn(state = listState, modifier = Modifier.weight(1f), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
-                                items(session.messages.toList()) { message ->
+                                items(entries) { message ->
                                     Column(Modifier.fillMaxWidth().then(if (message.role == "user") Modifier.background(Panel, RoundedCornerShape(12.dp)).padding(16.dp) else Modifier)) {
                                         Text(when(message.role) { "user" -> "YOU"; "assistant" -> "CAPRI"; "tool" -> "TOOL / 本机"; else -> "SYSTEM" }, color = if(message.role == "assistant") Green else if(message.role == "status") Red else Muted, fontFamily = FontFamily.Monospace, fontSize = 10.sp, letterSpacing = 2.sp)
                                         Spacer(Modifier.height(8.dp)); androidx.compose.foundation.text.selection.SelectionContainer { Text(message.text, fontSize = if(message.role == "tool") 12.sp else 15.sp, color = if(message.role == "tool") Muted else White, lineHeight = 24.sp, fontFamily = if(message.role == "tool") FontFamily.Monospace else FontFamily.Default) }
@@ -151,11 +154,10 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                         }
-                        vm.notices[session.id]?.let { Text(it, color = Green, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp)) }
+                        notice?.let { Text(it, color = Green, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp)) }
                         Row(Modifier.fillMaxWidth().imePadding().padding(12.dp).border(1.dp, Line, RoundedCornerShape(14.dp)).background(Panel, RoundedCornerShape(14.dp)).padding(4.dp), verticalAlignment = Alignment.Bottom) {
                             IconButton(onClick = { importer.launch(arrayOf("*/*")) }) { Icon(Icons.Outlined.Add, "导入文件", tint = Muted) }
                             TextField(value = input, onValueChange = { input = it }, modifier = Modifier.weight(1f), placeholder = { Text("下达你的指令…", fontSize = 14.sp) }, maxLines = 5, colors = TextFieldDefaults.colors(focusedContainerColor = Panel, unfocusedContainerColor = Panel, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent))
-                            val busy = vm.jobs.containsKey(session.id)
                             FilledIconButton(onClick = { if (busy) vm.stop() else if(input.isNotBlank()) { vm.send(input); if(vm.jobs.containsKey(session.id)) input = "" } }, colors = IconButtonDefaults.filledIconButtonColors(containerColor = if(busy) Red else Green, contentColor = Ink), modifier = Modifier.padding(bottom = 4.dp)) { Icon(if(busy) Icons.Outlined.Stop else Icons.Outlined.ArrowUpward, if(busy) "停止" else "发送") }
                         }
                     }
@@ -182,7 +184,7 @@ class MainActivity : ComponentActivity() {
                             Spacer(Modifier.height(24.dp)); Text("会话独立目录", color = Green); Text("workspace / 任务文件\nhome / 用户目录\ntmp / 临时文件\nruns / 脚本与执行日志", color = Muted, lineHeight = 28.sp, modifier = Modifier.padding(vertical = 12.dp), fontFamily = FontFamily.Monospace)
                             Text("运行模型：单 APK · Android 原生调度 · PRoot/Python。PRoot 与 Android 共用内核，各会话属于同一应用 UID；目录分离不构成恶意代码安全隔离。", color = Muted, lineHeight = 24.sp, fontSize = 13.sp)
                             Spacer(Modifier.height(24.dp)); Text("当前会话工具记录", fontSize = 16.sp)
-                            session.messages.filter { it.role == "tool" || it.role == "status" }.takeLast(10).forEach { Text(it.text, color = Muted, fontSize = 12.sp, modifier = Modifier.padding(vertical = 10.dp)) }
+                            entries.filter { it.role == "tool" || it.role == "status" }.takeLast(10).forEach { Text(it.text, color = Muted, fontSize = 12.sp, modifier = Modifier.padding(vertical = 10.dp)) }
                         }
                     }
                 }
