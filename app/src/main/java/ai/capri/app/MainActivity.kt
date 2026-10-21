@@ -149,7 +149,9 @@ class MainActivity : ComponentActivity() {
                                 items(entries) { message ->
                                     Column(Modifier.fillMaxWidth().then(if (message.role == "user") Modifier.background(Panel, RoundedCornerShape(12.dp)).padding(16.dp) else Modifier)) {
                                         Text(when(message.role) { "user" -> "YOU"; "assistant" -> "CAPRI"; "tool" -> "TOOL / 本机"; else -> "SYSTEM" }, color = if(message.role == "assistant") Green else if(message.role == "status") Red else Muted, fontFamily = FontFamily.Monospace, fontSize = 10.sp, letterSpacing = 2.sp)
-                                        Spacer(Modifier.height(8.dp)); androidx.compose.foundation.text.selection.SelectionContainer { Text(message.text, fontSize = if(message.role == "tool") 12.sp else 15.sp, color = if(message.role == "tool") Muted else White, lineHeight = 24.sp, fontFamily = if(message.role == "tool") FontFamily.Monospace else FontFamily.Default) }
+                                        Spacer(Modifier.height(8.dp))
+                                        if (message.role == "assistant") MarkdownReply(message.text)
+                                        else androidx.compose.foundation.text.selection.SelectionContainer { Text(message.text, fontSize = if(message.role == "tool") 12.sp else 15.sp, color = if(message.role == "tool") Muted else White, lineHeight = 24.sp, fontFamily = if(message.role == "tool") FontFamily.Monospace else FontFamily.Default) }
                                     }
                                 }
                             }
