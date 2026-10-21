@@ -1,0 +1,5 @@
+{
+  "app/src/main/jniLibs/arm64-v8a/libproot.so": "cb40a1ced11cee76569b4008a9e478c87883ce831152be4eb9570763b82e580d",
+  "app/src/main/jniLibs/arm64-v8a/libproot-loader.so": "f149774236db1e69b36cc1e4ed3866c7094db2eee52da0d4956aa63a9bb26929",
+  "app/src/main/assets/runtime/rootfs.bundle": "d75e4639162f26a43dd5ee5702192dcf30fb8cea2a8adf453743ad27b02e76f0"
+}
