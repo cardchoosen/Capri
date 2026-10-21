@@ -9,7 +9,7 @@ Android 原生的个人 Agent。单 APK，Kotlin/Compose 界面与调度器，�
 1. 打开「运行」，初始化内置 Python 环境。无需 root、外部终端或运行时下载。
 2. 右上角设置模型 HTTPS Base URL、模型 ID、API Key。接口须兼容 Chat Completions 和函数工具调用；Base URL 包含 `/v1` 等前缀，不包含 `/chat/completions`。
 3. 新建会话，下达任务或通过加号导入资料。「文件」查看当前工作区，点击文件通过 Android 分享导出。
-4. Agent 可以检索自己的档案、读写工作区、运行 Python。停止按钮取消网络请求及当前 Python 任务；每个会话一次任务，不同会话可以并行。
+4. 基础身份问答由本地固定模板直接回答，不需要模型或密钥。其他任务中，Agent 可以检索自己的档案、读写工作区、运行 Python。停止按钮取消网络请求及当前 Python 任务；每个会话一次任务，不同会话可以并行。
 
 推理使用用户配置的模型 API；Agent 循环、会话、工具和脚本在手机执行。目前没有内置离线大模型。
 
@@ -66,3 +66,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 - 重新评估更强隔离方案；保持单APK与真实权限边界说明一致。
 
 第三方组件与分发注意事项见 [docs/THIRD_PARTY.md](docs/THIRD_PARTY.md)。本仓库尚未选择自身代码的开源许可证。
+
+## 对话呈现
+
+`ConversationPolicy.kt` 管理基础身份模板与工具可见性。明确、独立的身份问句直接返回固定文案；引用、代码任务与复合请求继续交给Agent。档案检索的工具名、参数、结果和前置播报不展示，内部结果仅供当前调用链使用，不新增到用户会话历史；旧版已保存的档案工具条目仍保留在数据文件中，但对话与运行页均隐藏。文件与Python工具记录照常展示。

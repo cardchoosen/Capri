@@ -58,7 +58,7 @@ class MainActivity : ComponentActivity() {
 @Composable private fun Capri(vm: CapriModel) {
     val update = vm.updates.collectAsState().value
     val session = vm.current()
-    val entries = session.messages.toList()
+    val entries = session.messages.filter(ToolPresentation::visible)
     val busy = vm.jobs.containsKey(session.id)
     val notice = vm.notices[session.id]
     var tab by remember { mutableIntStateOf(0) }
@@ -158,7 +158,7 @@ class MainActivity : ComponentActivity() {
                         Row(Modifier.fillMaxWidth().imePadding().padding(12.dp).border(1.dp, Line, RoundedCornerShape(14.dp)).background(Panel, RoundedCornerShape(14.dp)).padding(4.dp), verticalAlignment = Alignment.Bottom) {
                             IconButton(onClick = { importer.launch(arrayOf("*/*")) }) { Icon(Icons.Outlined.Add, "导入文件", tint = Muted) }
                             TextField(value = input, onValueChange = { input = it }, modifier = Modifier.weight(1f), placeholder = { Text("下达你的指令…", fontSize = 14.sp) }, maxLines = 5, colors = TextFieldDefaults.colors(focusedContainerColor = Panel, unfocusedContainerColor = Panel, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent))
-                            FilledIconButton(onClick = { if (busy) vm.stop() else if(input.isNotBlank()) { vm.send(input); if(vm.jobs.containsKey(session.id)) input = "" } }, colors = IconButtonDefaults.filledIconButtonColors(containerColor = if(busy) Red else Green, contentColor = Ink), modifier = Modifier.padding(bottom = 4.dp)) { Icon(if(busy) Icons.Outlined.Stop else Icons.Outlined.ArrowUpward, if(busy) "停止" else "发送") }
+                            FilledIconButton(onClick = { if (busy) vm.stop() else if(input.isNotBlank()) { if(vm.send(input)) input = "" } }, colors = IconButtonDefaults.filledIconButtonColors(containerColor = if(busy) Red else Green, contentColor = Ink), modifier = Modifier.padding(bottom = 4.dp)) { Icon(if(busy) Icons.Outlined.Stop else Icons.Outlined.ArrowUpward, if(busy) "停止" else "发送") }
                         }
                     }
                     1 -> {

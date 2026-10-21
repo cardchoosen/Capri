@@ -41,11 +41,19 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
     fun select(id: String) { selected = id; refresh() }
     fun persist() { store.save(sessions); refresh() }
     fun stop() { jobs[selected]?.cancel(); notices[selected] = "已请求停止"; refresh() }
-    fun send(text: String) {
-        if (text.isBlank() || jobs.containsKey(selected)) return
-        val config = store.config()
+    fun send(text: String): Boolean {
+        if (text.isBlank() || jobs.containsKey(selected)) return false
         val session = current()
-        if (config.model.isBlank() || config.key.isBlank()) { notices[session.id] = "请先在设置中配置模型与 API Key"; refresh(); return }
+        if (IdentityReply.matches(text)) {
+            session.messages.add(Entry("user", text.trim()))
+            session.messages.add(Entry("assistant", IdentityReply.TEXT))
+            if (session.title == "新会话") session.title = text.trim().take(20)
+            notices.remove(session.id)
+            persist()
+            return true
+        }
+        val config = store.config()
+        if (config.model.isBlank() || config.key.isBlank()) { notices[session.id] = "请先在设置中配置模型与 API Key"; refresh(); return false }
         session.messages.add(Entry("user", text.trim()))
         if (session.title == "新会话") session.title = text.take(20)
         persist()
@@ -56,6 +64,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
             finally { jobs.remove(session.id); notices.remove(session.id); persist() }
         }
         jobs[session.id] = job; notices[session.id] = "思考中"; refresh(); job.start()
+        return true
     }
     private fun tool(name: String, description: String, properties: JSONObject, required: List<String>) = JSONObject().put("type", "function").put("function", JSONObject().put("name", name).put("description", description).put("parameters", JSONObject().put("type", "object").put("properties", properties).put("required", JSONArray(required))))
     private fun props(vararg names: String) = JSONObject().apply { names.forEach { put(it, JSONObject().put("type", "string")) } }
@@ -92,14 +101,19 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
             val message = response.getJSONArray("choices").getJSONObject(0).getJSONObject("message")
             messages.put(message)
             val content = if (message.isNull("content")) "" else message.optString("content")
-            if (content.isNotBlank()) { session.messages.add(Entry("assistant", content)); persist() }
-            val calls = message.optJSONArray("tool_calls") ?: return
-            if (calls.length() == 0) return
+            val calls = message.optJSONArray("tool_calls")
+            val names = if (calls == null) emptyList() else (0 until calls.length()).map {
+                calls.getJSONObject(it).getJSONObject("function").getString("name")
+            }
+            if (content.isNotBlank() && ToolPresentation.showPreamble(names)) {
+                session.messages.add(Entry("assistant", content)); persist()
+            }
+            if (calls == null || calls.length() == 0) return
             for (i in 0 until calls.length()) {
                 val call = calls.getJSONObject(i)
                 val function = call.getJSONObject("function")
                 val name = function.getString("name")
-                notices[session.id] = "执行 · $name"; refresh()
+                notices[session.id] = ToolPresentation.progress(name); refresh()
                 val result = try {
                     val args = JSONObject(function.getString("arguments"))
                     withContext(Dispatchers.IO) {
@@ -113,7 +127,9 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                         }
                     }
                 } catch (e: CancellationException) { throw e } catch (e: Exception) { "工具失败：${e.message}" }
-                session.messages.add(Entry("tool", "$name\n${result.take(40_000)}")); persist()
+                if (!ToolPresentation.isInternal(name)) {
+                    session.messages.add(Entry("tool", "$name\n${result.take(40_000)}")); persist()
+                }
                 messages.put(JSONObject().put("role", "tool").put("tool_call_id", call.getString("id")).put("content", result.take(40_000)))
             }
         }
