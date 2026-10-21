@@ -141,7 +141,7 @@ internal fun replyBlocks(markdown: String, engine: Markwon): List<ReplyBlock> {
 @Composable private fun CodeCard(code: ReplyBlock.Code) {
     val clipboard = LocalClipboardManager.current
     var copied by remember(code.text) { mutableStateOf(false) }
-    Column(Modifier.fillMaxWidth().border(1.dp, MarkdownLine, RoundedCornerShape(10.dp)).background(MarkdownPanel, RoundedCornerShape(10.dp))) {
+    Column(Modifier.fillMaxWidth().border(1.dp, MarkdownLine, RoundedCornerShape(2.dp)).background(MarkdownPanel, RoundedCornerShape(2.dp))) {
         Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(code.language.ifEmpty { "CODE" }, color = MarkdownGreen, fontFamily = FontFamily.Monospace, fontSize = 11.sp, modifier = Modifier.weight(1f))
             TextButton(onClick = { clipboard.setText(AnnotatedString(code.text)); copied = true }) {
@@ -150,7 +150,7 @@ internal fun replyBlocks(markdown: String, engine: Markwon): List<ReplyBlock> {
         }
         HorizontalDivider(color = MarkdownLine)
         SelectionContainer {
-            Box(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(14.dp)) {
+            Box(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(10.dp)) {
                 Text(code.text.trimEnd('\n'), color = MarkdownWhite, fontFamily = FontFamily.Monospace, fontSize = 13.sp, lineHeight = 21.sp, softWrap = false)
             }
         }
@@ -163,7 +163,7 @@ internal fun replyBlocks(markdown: String, engine: Markwon): List<ReplyBlock> {
         rows.forEachIndexed { index, row ->
             Row(Modifier.height(IntrinsicSize.Min)) {
                 repeat(columns) { column ->
-                    Box(Modifier.width(180.dp).fillMaxHeight().border(0.5.dp, MarkdownLine).background(if (index == 0) MarkdownPanel else Color.Transparent).padding(12.dp)) {
+                    Box(Modifier.width(180.dp).fillMaxHeight().border(0.5.dp, MarkdownLine).background(if (index == 0) MarkdownPanel else Color.Transparent).padding(8.dp)) {
                         row.getOrNull(column)?.let { RichText(it, header = index == 0, selectable = false) }
                     }
                 }
