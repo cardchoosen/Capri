@@ -172,9 +172,10 @@ class MainActivity : ComponentActivity() {
                         } else {
                             val listState = rememberLazyListState()
                             LaunchedEffect(session.id, entries.size, update) { if (entries.isNotEmpty()) listState.animateScrollToItem(entries.lastIndex) }
-                            LazyColumn(state = listState, modifier = Modifier.weight(1f), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
-                                itemsIndexed(entries, key = { index, _ -> "${session.id}:$index" }) { _, message ->
-                                    if (message.role == "tool") ToolOutputCard(message.text)
+                            LazyColumn(state = listState, modifier = Modifier.weight(1f), contentPadding = PaddingValues(20.dp)) {
+                                itemsIndexed(entries, key = { index, _ -> "${session.id}:$index" }) { index, message ->
+                                    if (index > 0) Spacer(Modifier.height(if (message.role == "tool" || entries[index - 1].role == "tool") 6.dp else 24.dp))
+                                    if (message.role == "tool") ToolOutputRow(message.text)
                                     else Column(Modifier.fillMaxWidth().then(if (message.role == "user") Modifier.background(Panel, RoundedCornerShape(12.dp)).padding(16.dp) else Modifier)) {
                                         Text(when(message.role) { "user" -> "YOU"; "assistant" -> "CAPRI"; "tool" -> "TOOL / 本机"; else -> "SYSTEM" }, color = if(message.role == "assistant") Green else if(message.role == "status") Red else Muted, fontFamily = FontFamily.Monospace, fontSize = 10.sp, letterSpacing = 2.sp)
                                         Spacer(Modifier.height(8.dp))
@@ -218,7 +219,7 @@ class MainActivity : ComponentActivity() {
                             Spacer(Modifier.height(24.dp)); Text("当前会话工具记录", fontSize = 16.sp)
                             entries.withIndex().filter { it.value.role == "tool" || it.value.role == "status" }.takeLast(10).forEach { (index, entry) ->
                                 key(session.id, index) {
-                                    if (entry.role == "tool") ToolOutputCard(entry.text, Modifier.padding(vertical = 6.dp))
+                                    if (entry.role == "tool") ToolOutputRow(entry.text, Modifier.padding(top = 4.dp))
                                     else Text(entry.text, color = Muted, fontSize = 12.sp, modifier = Modifier.padding(vertical = 10.dp))
                                 }
                             }
