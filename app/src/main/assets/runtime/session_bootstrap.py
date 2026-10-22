@@ -59,7 +59,8 @@ def main():
     environment = dict(os.environ)
     environment.update(VIRTUAL_ENV='/root/.venv', PYTHONNOUSERSITE='1',
                        PATH='/root/.venv/bin:/opt/capri/bootstrap/bin:/opt/capri/tools/usr/bin:/usr/local/bin:/usr/bin:/bin',
-                       LD_LIBRARY_PATH='/opt/capri/tools/usr/lib:/opt/capri/tools/lib',
+                       LD_LIBRARY_PATH='/opt/capri/python-packages/usr/lib:/opt/capri/python-packages/lib:/opt/capri/tools/usr/lib:/opt/capri/tools/lib',
+                       MPLBACKEND='Agg', MPLCONFIGDIR='/root/.cache/matplotlib', OPENBLAS_NUM_THREADS='1',
                        GIT_EXEC_PATH='/opt/capri/tools/usr/libexec/git-core',
                        GIT_TEMPLATE_DIR='/opt/capri/tools/usr/share/git-core/templates',
                        GIT_TERMINAL_PROMPT='0', GIT_PAGER='cat',

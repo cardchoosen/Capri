@@ -40,7 +40,7 @@ APK资源使用 `rootfs.bundle` 文件名保存gzip压缩tar，避免AAPT自动�
 
 ## 会话 pip 引导
 
-沿用 rootfs 中 Python 自带的 ensurepip/_bundled/pip-25.0.1-py3-none-any.whl（未额外下载或捆绑第二份 pip）。由 session_bootstrap.py 在各会话 .venv 中离线安装 pip；既有虚拟环境保留，安装第三方包时才访问 PyPI。
+沿用 rootfs 中 Python 自带的 ensurepip/_bundled/pip-25.0.1-py3-none-any.whl（未额外下载或捆绑第二份 pip）。由 session_bootstrap.py 在各会话 .venv 中离线安装 pip；既有虚拟环境保留；第三方安装按包和版本选择内置预编译渠道或 PyPI。
 
 - 版本、路径、SHA-256 与来源：`python-bootstrap.json`。
 - pip MIT 许可证副本：`PIP-LICENSE.txt`；原 wheel 内包含 vendored 依赖的许可说明。
@@ -63,3 +63,13 @@ APK资源使用 `rootfs.bundle` 文件名保存gzip压缩tar，避免AAPT自动�
 - 上游许可证副本：OPENSSH-LICENCE.txt，来源 https://github.com/openssh/openssh-portable/blob/V_10_0_P1/LICENCE；其他依赖按清单分别记录，公开发行所需材料沿用前述待完善要求。
 - 默认配置与包装器依据 https://man.openbsd.org/ssh_config、https://man.openbsd.org/ssh-keygen、https://man.openbsd.org/sftp；PRoot兼容身份映射见 https://proot-me.github.io/ 的-0说明。
 - tools/verify_ssh_device.py使用开发机Paramiko（https://docs.paramiko.org/），仅供loopback测试，不打包进APK或手机Python环境。
+
+## Python 科学计算与绘图预编译渠道
+
+`python-packages.bundle` 固定取自 Alpine v3.22 main/community aarch64：Matplotlib 3.9.3-r0、NumPy 2.2.4-r1、Pillow 11.2.1-r0及其依赖，52项来源记录、34个实际附带APK。完整版本、上游/aports、许可证、URL、APK SHA-256见 `python-native-packages.json`。它与系统 Python 3.12 ABI匹配，不代表最新上游版本。
+
+- `tools/build_python_packages.py`校验锁定APK摘要，把11个Python发行包转换为仅供Capri本地使用的wheel，native tag为`cp312-cp312-linux_aarch64`，不伪称manylinux/musllinux通用轮子；保留发行包元数据/许可文件并增加capri-origin.json。共享动态依赖独立放入版本层，正常pip仍负责会话venv安装、依赖解析和卸载。
+- Alpine Matplotlib的数据和字体通过wheel `.data/data/share/matplotlib/mpl-data`方案进入venv，沿用发行版sys.prefix相对查找，不修改Matplotlib源码。默认Agg无图形后端；OpenBLAS默认单线程，适合手机执行。现有DejaVu字体不含完整中文字形，未增加中文字体包。
+- 初次解析官方HTTPS索引/APK，未执行APK签名验证；之后重建校验固定SHA-256。APK维护脚本不执行；不改基础rootfs或其不完整的apk数据库，不提供通用apk包管理。
+- 资源包约22.8MB，版本目录部署一次；Python依赖按会话安装。匹配内置无extras及版本条件时可离线安装；其余请求使用PyPI兼容wheel加本地候选，不自动放宽版本或切换源码编译。系统Python/musl不替换；旧版本不自动回收。
+- 各组件许可证随来源清单分别记录（包括Matplotlib、NumPy、Pillow、OpenBLAS、字体及图像库），公开发行前仍需补齐对应源码、许可和再分发材料；本地重打包不等同已完成发行审计。

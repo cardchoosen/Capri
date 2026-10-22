@@ -30,7 +30,7 @@ class PythonEnvironmentContractTest {
     }
     @Test fun managedCommandsUseCurrentVenvAndExposeJobLifecycle() {
         val command = PythonEnvironmentContract.command("install", listOf("packaging==24.2"))
-        assertTrue(command.contains("/root/.venv/bin/python3 -I -m pip"))
+        assertTrue(command.contains("/root/.venv/bin/python3 -I /opt/capri/bootstrap/python_packages.py"))
         assertFalse(command.contains("--user"))
         assertFalse(command.contains("--target"))
         assertTrue(PythonEnvironmentContract.command("check", emptyList()).endsWith(" check"))

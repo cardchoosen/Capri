@@ -14,7 +14,7 @@ class PythonRuntime(private val context: Context, private val workspace: Workspa
     companion object { private val bootstrapLock = Any() }
     private fun prepareBootstrap(): File = synchronized(bootstrapLock) {
         val directory = File(context.filesDir, "runtime/bootstrap-v1").apply { mkdirs() }
-        for (name in listOf("session_bootstrap.py", "environment_probe.py", "git_credential.py", "ssh_config", "ssh_identity.py", "bin/ssh", "bin/sftp", "bin/scp")) {
+        for (name in listOf("session_bootstrap.py", "environment_probe.py", "git_credential.py", "ssh_config", "ssh_identity.py", "python_packages.py", "bin/ssh", "bin/sftp", "bin/scp")) {
             val script = File(directory, name)
             script.parentFile!!.mkdirs()
             val bytes = context.assets.open("runtime/$name").use { it.readBytes() }
@@ -80,6 +80,8 @@ class PythonRuntime(private val context: Context, private val workspace: Workspa
         check(ready) { status() }
         val bootstrap = prepareBootstrap()
         val tools = DevelopmentTools.prepare(context)
+        val pythonPackages = NativePythonPackages.prepare(context)
+        File(rootfs, "opt/capri/python-packages").mkdirs()
         val gitSocket = ai.capri.app.git.GitCredentialBroker.start(context)
         val ssh = SshEnvironment.prepare(context)
         File(rootfs, "opt/capri/ssh").mkdirs()
@@ -90,7 +92,7 @@ class PythonRuntime(private val context: Context, private val workspace: Workspa
         val args = listOf(proot.path, "--kill-on-exit", "-0", "-r", rootfs.path,
             "-b", "/dev", "-b", "/proc", "-b", "${cwd.path}:/workspace", "-b", "${home.path}:/root",
             "-b", "${tmp.path}:/tmp", "-b", "${run.path}:/run/capri", "-b", "${bootstrap.path}:/opt/capri/bootstrap",
-            "-b", "${tools.path}:/opt/capri/tools", "-b", "${ssh.path}:/opt/capri/ssh", "-w", "/workspace",
+            "-b", "${tools.path}:/opt/capri/tools", "-b", "${pythonPackages.path}:/opt/capri/python-packages", "-b", "${ssh.path}:/opt/capri/ssh", "-w", "/workspace",
             "/usr/bin/env", "-i", "HOME=/root", "TMPDIR=/tmp", "PATH=/usr/local/bin:/usr/bin:/bin",
             "LANG=C.UTF-8", "PYTHONUNBUFFERED=1", "PYTHONNOUSERSITE=1", "VIRTUAL_ENV=/root/.venv", "CAPRI_GIT_SOCKET=$gitSocket",
             "/usr/bin/python3", "/opt/capri/bootstrap/session_bootstrap.py") + command
