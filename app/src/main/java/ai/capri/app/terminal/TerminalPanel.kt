@@ -8,6 +8,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -23,6 +24,7 @@ import org.json.JSONObject
     var result by remember(chat) { mutableStateOf("") }
     var working by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     LaunchedEffect(chat, revision) {
         terminals = manager.list(chat)
         if (selected == null) selected = terminals.lastOrNull { it.optString("state") in setOf("ready", "running") }?.getString("terminal_id")
@@ -49,6 +51,8 @@ import org.json.JSONObject
     AlertDialog(onDismissRequest = onDismiss, title = { Text("持续终端") }, text = {
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("保留目录与环境 · 关闭面板不停止任务", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
+            Text("后台可能被系统暂停，可在应用电池设置中允许运行。", fontSize = 11.sp)
+            TextButton(onClick = { TerminalBackgroundPolicy.openSettings(context) }) { Text("后台电池设置", fontSize = 11.sp) }
             Column(Modifier.fillMaxWidth().heightIn(max = 120.dp).verticalScroll(rememberScrollState())) {
                 terminals.forEach { terminal ->
                     val id = terminal.getString("terminal_id")

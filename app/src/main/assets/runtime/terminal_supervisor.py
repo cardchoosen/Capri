@@ -6,6 +6,7 @@ from pathlib import Path
 import pty
 import select
 import signal
+import shlex
 import termios
 import time
 import traceback
@@ -20,9 +21,16 @@ def atomic(path, value):
     temporary.replace(path)
 
 
+# Interactive ash aborts the rest of a command line on Ctrl+C, so an inline trailing
+# completion command is not reliable. Publish the exit status when the next prompt is ready.
+prompt = "$(/bin/busybox printf '%s' \"$?\" > /run/capri/prompt.tmp; /bin/busybox mv /run/capri/prompt.tmp /run/capri/prompt)"
+(BASE / 'shell_init.sh').write_text(
+    "unset PS1 PS2\nPS1=''\nPS2=''\n"
+    "if [ \"$$\" = \"$CAPRI_SHELL_PID\" ]; then\nPS1=" + shlex.quote(prompt) +
+    "\nreadonly PS1 CAPRI_SHELL_PID\nfi\n")
 pid, master = pty.fork()
 if pid == 0:
-    os.environ.update(PS1='', PS2='', TERM='dumb', ENV='')
+    os.environ.update(TERM='dumb', ENV='/run/capri/shell_init.sh', CAPRI_SHELL_PID=str(os.getpid()))
     os.chdir('/workspace')
     os.execv('/bin/sh', ['/bin/sh', '-i'])
 
@@ -36,6 +44,8 @@ output = None
 written = 0
 started = 0
 pending_input = b''
+dispatched = False
+initialized = False
 interrupt_reason = None
 interrupt_at = None
 terminal_reason = 'closed'
@@ -44,12 +54,10 @@ transcript = (BASE / 'output.bin').open('ab', buffering=0)
 
 def interrupt():
     try:
-        group = os.tcgetpgrp(master)
-        if group > 1 and group != os.getpgrp():
-            os.killpg(group, signal.SIGINT)
-        else:
-            os.kill(pid, signal.SIGINT)
-    except (OSError, ProcessLookupError):
+        # Let the tty driver deliver Ctrl+C to its real foreground job. Under Android/PRoot,
+        # a userspace tcgetpgrp/killpg fallback can target the shell instead of that job.
+        os.write(master, b'\x03')
+    except OSError:
         pass
 
 
@@ -66,7 +74,7 @@ def finish(exit_code=None, reason=None):
         interrupt_at = None
 
 
-atomic(BASE / 'state.json', dict(state='ready', shell_pid=pid))
+atomic(BASE / 'state.json', dict(state='starting', shell_pid=pid))
 try:
     while True:
         if (BASE / 'close').exists():
@@ -104,6 +112,8 @@ try:
             try:
                 count = os.write(master, pending_input[:4096])
                 pending_input = pending_input[count:]
+                if not pending_input:
+                    dispatched = True
             except BlockingIOError:
                 pass
         if active:
@@ -119,6 +129,13 @@ try:
                 target = (BASE / 'cancel').read_text()
                 (BASE / 'cancel').unlink()
                 if target == active['id'] and interrupt_at is None:
+                    if not dispatched:
+                        pending_input = b''
+                        # Discard any partially queued tty input without running the script.
+                        termios.tcflush(master, termios.TCIOFLUSH)
+                        finish(reason='cancelled')
+                        atomic(BASE / 'state.json', dict(state='ready', shell_pid=pid))
+                        continue
                     interrupt_reason, interrupt_at = 'cancelled', time.monotonic()
                     pending_input = b''
                     interrupt()
@@ -126,7 +143,7 @@ try:
                 interrupt_reason, interrupt_at = 'timeout', time.monotonic()
                 pending_input = b''
                 interrupt()
-            marker = folder / 'exit'
+            marker = BASE / 'prompt'
             if marker.exists():
                 # Read bytes already available before marking this command finished.
                 while select.select([master], [], [], 0)[0]:
@@ -144,8 +161,9 @@ try:
                     written += len(data)
                 raw_code = marker.read_text().strip()
                 if not raw_code:
-                    continue  # The shell creates/truncates the marker before printf writes its bytes.
+                    continue
                 code = int(raw_code)
+                marker.unlink()
                 overflow = written > LIMIT
                 finish(code, 'output_limit' if overflow else interrupt_reason)
                 pending_input = b''
@@ -159,18 +177,24 @@ try:
                 terminal_reason = 'interrupt_failed'
                 break
         else:
+            marker = BASE / 'prompt'
+            if marker.exists():
+                marker.unlink()
+                initialized = True
+                atomic(BASE / 'state.json', dict(state='ready', shell_pid=pid))
             request = BASE / 'request.json'
-            if request.exists():
+            if initialized and request.exists():
                 candidate = json.loads(request.read_text())
                 request.unlink()
                 identifier = candidate['id']
                 if len(identifier) != 36 or any(c not in '0123456789abcdef-' for c in identifier):
                     raise ValueError('invalid command id')
                 active = candidate
+                dispatched = False
                 written, started = 0, time.monotonic()
                 output = (BASE / 'commands' / identifier / 'output.bin').open('ab', buffering=0)
-                # One parsed line prevents a command's stdin read from eating its completion wrapper.
-                wrapper = ". /run/capri/commands/{0}/main.sh; /bin/busybox printf '%s' \"$?\" > /run/capri/commands/{0}/exit.tmp; /bin/busybox mv /run/capri/commands/{0}/exit.tmp /run/capri/commands/{0}/exit\n".format(identifier)
+                # The prompt hook reports completion even when Ctrl+C aborts this source command.
+                wrapper = ". /run/capri/commands/{0}/main.sh\n".format(identifier)
                 pending_input = wrapper.encode()
                 atomic(BASE / 'state.json', dict(state='running', shell_pid=pid, command_id=identifier))
 except BaseException:

@@ -16,9 +16,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.RandomAccessFile
-import java.nio.ByteBuffer
-import java.nio.CharBuffer
-import java.nio.charset.CodingErrorAction
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
@@ -207,6 +204,7 @@ internal class TerminalManager private constructor(private val context: Context)
                 when (validated) {
                     "open" -> open(chat, params.optString("title", "终端"))
                     "list" -> JSONObject().put("terminals", JSONArray(records.values.filter { it.getString("chat_id") == chat }.map { snapshot(it, 1) }))
+                        .put("background_policy", TerminalBackgroundPolicy.status(context))
                     else -> {
                         val record = owned(chat, params.getString("terminal_id"))
                         if (reconcile(record)) persist()
@@ -235,8 +233,9 @@ internal class TerminalManager private constructor(private val context: Context)
                             "close" -> { close(record); persist(); stopServiceIfIdle(); snapshot(record) }
                             "clear_history" -> {
                                 if (active(record) != null) throw TerminalProblem("busy", "运行中的命令不能清理日志")
-                                File(folder(record), "commands").deleteRecursively()
-                                File(folder(record), "commands").mkdirs()
+                                val commands = File(folder(record), "commands")
+                                check(!commands.exists() || commands.deleteRecursively()) { "命令日志清理失败，记录已保留" }
+                                check(commands.mkdirs() || commands.isDirectory) { "无法创建命令目录" }
                                 File(folder(record), "output.bin").writeText("")
                                 record.put("commands", JSONArray()); persist(); snapshot(record)
                             }
@@ -335,20 +334,18 @@ internal class TerminalManager private constructor(private val context: Context)
         val bytes = if (file.exists()) RandomAccessFile(file, "r").use { f ->
             f.seek(offset.toLong()); ByteArray(minOf(limit.toLong(), size - offset).toInt()).also { f.readFully(it) }
         } else ByteArray(0)
-        val buffer = ByteBuffer.wrap(bytes)
-        val text = CharBuffer.allocate(bytes.size + 1)
         val ended = if (cmd != null) cmd.getString("state") != "running" else record.getString("state") !in liveStates
-        Charsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPLACE).onUnmappableCharacter(CodingErrorAction.REPLACE)
-            .decode(buffer, text, ended && offset + bytes.size == size.toInt())
-        text.flip()
+        val decoded = TerminalOutput.decode(bytes, ended && offset.toLong() + bytes.size == size)
         return JSONObject().put("terminal_id", record.getString("terminal_id")).put("terminal_state", record.getString("state"))
             .put("command", cmd?.let { JSONObject(it.toString()) } ?: JSONObject.NULL)
-            .put("output", text.toString()).put("offset", offset).put("next_offset", offset + buffer.position())
-            .put("total_bytes", size).put("has_more", offset + buffer.position() < size).put("complete", ended)
+            .put("output", decoded.text).put("offset", offset).put("next_offset", offset + decoded.consumed)
+            .put("total_bytes", size).put("has_more", offset + decoded.consumed < size).put("complete", ended)
     }
     private fun close(record: JSONObject) {
         val id = record.getString("terminal_id")
-        File(folder(record), "close").writeText("")
+        // An already closed/interrupted record may outlive a partially deleted log directory.
+        val root = folder(record)
+        if (root.isDirectory) File(root, "close").writeText("")
         processes.remove(id)?.let { process ->
             if (!process.waitFor(1500, TimeUnit.MILLISECONDS)) { process.destroyForcibly(); process.waitFor(500, TimeUnit.MILLISECONDS) }
         }

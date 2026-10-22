@@ -14,6 +14,8 @@ import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
+import java.net.InetSocketAddress
+import java.net.Socket
 
 @RunWith(AndroidJUnit4::class)
 class TerminalDeviceTest {
@@ -39,7 +41,29 @@ class TerminalDeviceTest {
         } while (!result.getBoolean("complete"))
         result
     }
-    @Test fun terminalsKeepShellStateInputAndCancelableLongTasks() = runBlocking {
+    private fun httpStatus(port: Int): String = Socket().use { socket ->
+        socket.connect(InetSocketAddress("127.0.0.1", port), 3000)
+        socket.soTimeout = 3000
+        socket.getOutputStream().write("GET / HTTP/1.0\r\nHost: localhost\r\n\r\n".toByteArray())
+        socket.getOutputStream().flush()
+        socket.getInputStream().bufferedReader().readLine().orEmpty()
+    }
+    private fun reachable(port: Int): Boolean = runCatching {
+        Socket().use { it.connect(InetSocketAddress("127.0.0.1", port), 300) }
+        true
+    }.getOrDefault(false)
+    @Test fun cleanupTestArtifacts() = runBlocking<Unit> {
+        for (chat in listOf("terminal-device-first", "terminal-device-second", "terminal-recovery-test", "terminal-protocol-test")) {
+            manager.list(chat).forEach { record ->
+                val id = record.getString("terminal_id")
+                if (record.getString("state") in setOf("starting", "ready", "running")) call(chat, "close", terminal(id))
+                call(chat, "delete", terminal(id))
+            }
+            Store(context).workspace.root(chat).deleteRecursively()
+        }
+        File(context.filesDir, "terminal-recovery-test.json").delete()
+    }
+    @Test fun terminalsKeepShellStateInputAndCancelableLongTasks() = runBlocking<Unit> {
         val store = Store(context)
         PythonRuntime(context, store.workspace).install()
         foreground()
@@ -78,19 +102,25 @@ class TerminalDeviceTest {
             }
             val port = Regex("port: (\\d+)").find(ready.getString("output"))!!.groupValues[1].toInt()
             println("CAPRI_TEST_STEP: server ready")
-            instrumentation.uiAutomation.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)
-            println("CAPRI_TEST_STEP: home action returned")
-            delay(63_000)
-            println("CAPRI_TEST_STEP: background wait complete")
+            val background = InstrumentationRegistry.getArguments().getString("terminal_background") == "true"
+            if (background) {
+                assertTrue(instrumentation.uiAutomation.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME))
+                println("CAPRI_TEST_STEP: background mode, home action returned")
+            } else println("CAPRI_TEST_STEP: foreground mode")
+            val seconds = InstrumentationRegistry.getArguments().getString("terminal_wait_seconds")?.toInt() ?: 63
+            require(seconds in 1..90)
+            delay(seconds * 1000L)
+            println("CAPRI_TEST_STEP: long wait complete ($seconds seconds)")
             val stillRunning = call(firstChat, "read", terminal(first).put("command_id", server))
             assertFalse(stillRunning.toString(), stillRunning.getBoolean("complete"))
             println("CAPRI_TEST_STEP: long command confirmed running")
-            val response = PythonRuntime(context, store.workspace).execute(secondChat, "import urllib.request\nprint(urllib.request.urlopen('http://127.0.0.1:$port',timeout=3).status)")
+            val response = httpStatus(port)
             println("CAPRI_TEST_STEP: localhost HTTP returned")
             assertTrue(response, response.contains("200"))
             call(firstChat, "cancel", terminal(first).put("command_id", server))
             println("CAPRI_TEST_STEP: cancellation submitted")
             assertEquals("cancelled", settled(firstChat, first, server).getJSONObject("command").getString("state"))
+            withTimeout(3000) { while (reachable(port)) delay(80) }
             assertEquals("completed", settled(firstChat, first, run(firstChat, first, "echo shell-survived")).getJSONObject("command").getString("state"))
             assertEquals("timeout", settled(firstChat, first, run(firstChat, first, "sleep 10", 1)).getJSONObject("command").getString("state"))
 
@@ -107,6 +137,16 @@ class TerminalDeviceTest {
             val capped = settled(secondChat, second, overflow)
             assertEquals("output_limit", capped.getJSONObject("command").getString("state"))
             assertTrue(capped.getLong("total_bytes") <= 2_000_000)
+            foreground(); delay(400)
+            val childTerminal = call(secondChat, "open").getString("terminal_id").also { created += secondChat to it }
+            val readyFile = "/tmp/child-$childTerminal.ready"
+            val child = run(secondChat, childTerminal, "python3 -u -c 'from http.server import HTTPServer,SimpleHTTPRequestHandler; from pathlib import Path; s=HTTPServer((\"127.0.0.1\",0),SimpleHTTPRequestHandler); print(\"child-port:\",s.server_port,flush=True); Path(\"$readyFile\").write_text(\"ready\"); s.serve_forever()' & while [ ! -f $readyFile ]; do sleep 0.1; done")
+            val childOutput = settled(secondChat, childTerminal, child).getString("output")
+            val childPort = Regex("child-port: (\\d+)").find(childOutput)!!.groupValues[1].toInt()
+            assertTrue(reachable(childPort))
+            call(secondChat, "close", terminal(childTerminal))
+            withTimeout(5000) { while (reachable(childPort)) delay(80) }
+            println("CAPRI_TEST_STEP: close released background child port")
         } catch (failure: Throwable) { primaryFailure = failure; throw failure } finally {
             created.forEach { (chat, id) ->
                 val diagnostic = File(context.filesDir, "sessions/$chat/terminals/$id/supervisor.log")
@@ -120,7 +160,7 @@ class TerminalDeviceTest {
         }
     }
 
-    @Test fun prepareProcessDeath() = runBlocking {
+    @Test fun prepareProcessDeath() = runBlocking<Unit> {
         assumeTrue(InstrumentationRegistry.getArguments().getString("terminal_recovery") == "prepare")
         PythonRuntime(context, Store(context).workspace).install()
         foreground(); delay(500)
@@ -131,7 +171,7 @@ class TerminalDeviceTest {
         File(context.filesDir, "terminal-recovery-test.json").writeText(JSONObject().put("terminal_id", id).put("command_id", command).toString())
     }
 
-    @Test fun verifyProcessDeathIsInterruptedNotReattached() = runBlocking {
+    @Test fun verifyProcessDeathIsInterruptedNotReattached() = runBlocking<Unit> {
         assumeTrue(InstrumentationRegistry.getArguments().getString("terminal_recovery") == "verify")
         val chat = "terminal-recovery-test"
         val proof = File(context.filesDir, "terminal-recovery-test.json")

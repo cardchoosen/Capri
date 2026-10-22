@@ -9,7 +9,7 @@ Android 原生的个人 Agent。单 APK，Kotlin/Compose 界面与调度器，�
 1. 打开「运行」，初始化内置 Python 环境。无需 root、外部终端或运行时下载。
 2. 右上角设置模型 HTTPS Base URL、模型 ID、API Key。接口须兼容 Chat Completions 和函数工具调用；Base URL 包含 `/v1` 等前缀，不包含 `/chat/completions`。
 3. 新建会话，下达任务或通过加号导入资料。「文件」查看当前工作区，点击文件通过 Android 分享导出。
-4. 基础身份问答由本地固定模板直接回答，不需要模型或密钥。其他任务中，Agent 可以检索自己的档案、读写工作区、运行 Python。停止按钮取消网络请求及当前 Python 任务；每个会话一次任务，不同会话可以并行。
+4. 基础身份问答由本地固定模板直接回答，不需要模型或密钥。其他任务中，Agent 可以检索自己的档案、读写工作区、运行 Python。停止按钮取消网络请求及当前 Python 任务；持续终端须单独中断或关闭。每个会话一次模型任务，不同会话可以并行。
 
 推理使用用户配置的模型 API；Agent 循环、会话、工具和脚本在手机执行。目前没有内置离线大模型。
 
@@ -19,6 +19,7 @@ Android 原生的个人 Agent。单 APK，Kotlin/Compose 界面与调度器，�
 - `CapriModel.kt`：生命周期 ViewModel、会话任务状态、模型接口、工具循环与取消。
 - `Runtime.kt`：环境初始化、PRoot 启动、Python 超时与日志。
 - `MainActivity.kt`：Compose 页面与基础视觉组件。
+- `terminal/`：持续 PTY Shell、终端/命令记录、前台服务、后台策略提示及按需终端面板。
 - `assets/persona/`：短人格核心与独立档案。只有短人格常驻提示词，完整档案通过 `profile_search` 按需检索。
 - `assets/runtime/` / `jniLibs/`：内置 ARM64 Linux 与 PRoot 组件。
 
@@ -29,12 +30,15 @@ Android 原生的个人 Agent。单 APK，Kotlin/Compose 界面与调度器，�
 ```text
 files/
   sessions.json
+  terminals.json                  # 终端与命令元数据（AtomicFile）
   runtime/rootfs/                 # 共享基础环境
   sessions/<session-id>/
     workspace/                    # 用户/Agent任务文件
     home/                         # 当前会话HOME，含.venv
     tmp/                          # 当前会话临时目录
-    runs/<timestamp>/             # main.py与output.txt
+    runs/<run-uuid>/              # bootstrap.py、main.py与output.txt
+    terminals/<terminal-uuid>/     # PTY监督器、控制文件、终端日志
+      commands/<command-uuid>/    # main.sh、output.bin与result.json
 shared_prefs/config.xml           # 配置；API Key为Keystore AES-GCM密文
 ```
 
@@ -44,7 +48,13 @@ PRoot把当前会话的workspace、home、tmp映射到 `/workspace`、`/root`、
 
 档案内置于签名APK资源中，没有运行期修改工具。用户现阶段修改源文件后重建；尚无应用内档案编辑器。Android签名和安装权限保护包内容，PRoot不承担这个保护职责。
 
-运行任务跟随应用进程；暂未实现前台服务及系统杀进程后的任务恢复。不要把当前版本视为可靠的长时间后台执行器。
+持续终端由应用级管理器和 specialUse 前台服务承载；命令运行期间持有 CPU 唤醒锁。系统/厂商仍可暂停或终止应用，首次使用请检查 Capri 的后台电池设置。应用进程终止后，下次启动将旧终端标为 interrupted，保留日志，不重新绑定旧 PID，也不自动恢复原 Shell。聊天和短 Python 任务仍跟随 ViewModel/应用进程。
+
+## 持续终端
+
+Agent 可使用 `terminal` 的 open/list/attach/run/read/input/cancel/close/clear_history/delete；「运行 → 持续终端」提供手动管理入口。每个终端保留 cwd、变量、export 和函数，聊天切换或模型调用结束不销毁它。PTY 合并 stdout/stderr；read 使用 UTF-8 安全的字节游标，后台子进程输出不承诺严格归属单条命令。
+
+命令默认 60 秒，最长 24 小时；每次调用最多短等 2 秒，之后通过 ID 查询。每条命令及终端日志各上限 2MB，全局最多 8 个活跃终端，每聊天 32 条终端记录、每终端 200 条命令记录。中断通过 PTY Ctrl+C；2 秒内不响应则关闭整个终端。关闭会结束关联 PRoot 执行器及其跟踪进程。终端使用提示符钩子报告退出码，根 Shell 的 PS1 为内部保留只读变量；当前没有 ANSI 全屏终端模拟器。
 
 ## 构建
 
@@ -59,8 +69,8 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 ## 接下来
 
-- 流式输出、上下文预算、工具调用的可折叠界面与结构化历史。
-- 前台运行服务、进程重启恢复、任务队列与更严谨的进程树回收。
+- 流式输出、上下文预算与结构化工具历史（单行折叠展示已实现）。
+- 任务队列及用户主动重启中断任务；前台终端服务与进程死亡中断识别已实现。
 - 会话文件预览/删除/重命名、配额与回收、用户档案编辑入口。
 - 每会话依赖环境、rootfs恢复/版本迁移、运行时可复现构建。
 - 重新评估更强隔离方案；保持单APK与真实权限边界说明一致。

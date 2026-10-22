@@ -31,7 +31,7 @@ class SupervisorTest(unittest.TestCase):
         executable.write_text(source)
         self.log = (self.base / 'supervisor.log').open('w')
         self.process = subprocess.Popen([sys.executable, str(executable)], stdout=self.log, stderr=self.log, start_new_session=True)
-        self.wait(lambda: (self.base / 'state.json').exists())
+        self.wait(lambda: (self.base / 'state.json').exists() and json.loads((self.base / 'state.json').read_text())['state'] == 'ready')
 
     def tearDown(self):
         (self.base / 'close').touch()
@@ -99,6 +99,20 @@ class SupervisorTest(unittest.TestCase):
         folder = self.submit("printf '摩羯\\n'")
         self.assertEqual(0, self.result(folder)['exit_code'])
         self.assertIn('摩羯', (folder / 'output.bin').read_text())
+
+    def test_nested_interactive_shell_cannot_complete_its_parent_command(self):
+        folder = self.submit("printf 'echo nested; exit\\n' | /bin/sh -i; sleep .2; echo outer-done")
+        self.assertEqual(0, self.result(folder)['exit_code'])
+        self.assertIn('outer-done', (folder / 'output.bin').read_text())
+
+    def test_ignored_interrupt_closes_terminal_instead_of_claiming_ready(self):
+        folder = self.submit("trap '' INT; sleep 20")
+        self.wait(lambda: json.loads((self.base / 'state.json').read_text()).get('command_id') == folder.name)
+        time.sleep(.1)
+        self.publish('cancel', folder.name)
+        self.assertEqual('cancelled', self.result(folder)['reason'])
+        self.process.wait(timeout=4)
+        self.assertEqual('closed', json.loads((self.base / 'state.json').read_text())['state'])
 
     def test_output_limit_closes_terminal_and_caps_both_logs(self):
         folder = self.submit('yes x')
