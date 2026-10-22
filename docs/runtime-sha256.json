@@ -9,5 +9,6 @@
   "app/src/main/assets/runtime/ssh_config": "021d570ed3940235a336864fea7294a3da5ad5d799b395d6d412ac5e8921ccc9",
   "app/src/main/assets/runtime/bin/ssh": "fcabdf01f4bac5f2161fcd7ecd560b35b47768149f36b766b026cf99363769fa",
   "app/src/main/assets/runtime/bin/sftp": "96b72134bde785fb6e637ea401e68c832739e79aff168c717d5e62e9fc066ddc",
-  "app/src/main/assets/runtime/bin/scp": "d36e2938df35a49abe4029b1704e083adab39466aa01693ef3e6986d4717b7f8"
+  "app/src/main/assets/runtime/bin/scp": "d36e2938df35a49abe4029b1704e083adab39466aa01693ef3e6986d4717b7f8",
+  "app/src/main/assets/runtime/ssh_identity.py": "809b54bb5f9455346ba2486ab3b89914fef4c2284b733d4a93f6600f51b32b87"
 }

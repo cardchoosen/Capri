@@ -15,6 +15,13 @@ internal object SshEnvironment {
         }
         return directory
     }
+    suspend fun identities(runtime: PythonRuntime, chat: String, name: String = "", pending: String = ""): String {
+        val request = org.json.JSONObject().put("action", if (pending.isEmpty()) "list" else "import")
+            .put("name", name).put("pending", pending).toString()
+        // Only metadata enters the runtime script and persisted run record.
+        return runtime.execute(chat, "import subprocess\np=subprocess.run(['/usr/bin/python3','/opt/capri/bootstrap/ssh_identity.py'],input=" +
+            org.json.JSONObject.quote(request) + ",text=True,capture_output=True)\nprint(p.stdout,end='')\nraise SystemExit(p.returncode)")
+    }
     fun inspection(generate: Boolean, root: String = "/opt/capri/ssh"): String {
         require(root.matches(Regex("[a-zA-Z0-9/_-]+")))
         return """

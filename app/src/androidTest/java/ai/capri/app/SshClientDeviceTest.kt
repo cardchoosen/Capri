@@ -23,6 +23,45 @@ class SshClientDeviceTest {
     private fun foreground() = InstrumentationRegistry.getInstrumentation().runOnMainSync {
         context.startActivity(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
+    @Test fun importedIdentitiesStayGlobalAndNeverExposePrivateBytes() = runBlocking<Unit> {
+        foreground()
+        val output = runtime.execute(chat, """
+            import runpy,pathlib,subprocess,shutil,json,os
+            root=pathlib.Path('/workspace/import-fixture')
+            shutil.rmtree(root,ignore_errors=True);root.mkdir()
+            manage=runpy.run_path('/opt/capri/bootstrap/ssh_identity.py')['manage']
+            keygen='/opt/capri/tools/usr/bin/ssh-keygen'
+            try:
+                subprocess.run([keygen,'-q','-t','ed25519','-N','','-f',str(root/'source')],check=True)
+                shutil.copyfile(root/'source',root/'import-123')
+                first=manage(root,'import','server','import-123')
+                assert first['identities'][0]['name']=='server'
+                assert 'PRIVATE KEY' not in json.dumps(first)
+                assert not (root/'import-123').exists()
+                assert (root/'identities/server').stat().st_mode & 0o777 == 0o600
+                original=(root/'identities/server').read_bytes()
+                shutil.copyfile(root/'source',root/'import-456')
+                try: manage(root,'import','server','import-456');raise AssertionError('overwritten')
+                except ValueError: pass
+                assert (root/'identities/server').read_bytes()==original
+                assert not (root/'import-456').exists()
+                (root/'import-789').write_text('invalid-private-key')
+                try: manage(root,'import','invalid','import-789');raise AssertionError('accepted invalid')
+                except ValueError: pass
+                assert not (root/'identities/invalid').exists()
+                subprocess.run([keygen,'-q','-t','ed25519','-N','fixture-passphrase','-f',str(root/'encrypted')],check=True)
+                shutil.copyfile(root/'encrypted',root/'import-abc')
+                try: manage(root,'import','locked','import-abc');raise AssertionError('accepted encrypted')
+                except ValueError: pass
+                assert not (root/'identities/locked').exists()
+                assert len(manage(root,'list')['identities'])==1
+                assert 'PRIVATE KEY' not in (root/'identities.json').read_text()
+                print('identity import, validation, no overwrite, permissions and public-only inventory passed')
+            finally: shutil.rmtree(root)
+        """.trimIndent())
+        assertTrue(output, output.startsWith("exit=0\n"))
+        assertTrue(output, output.contains("public-only inventory passed"))
+    }
     @Test fun prepareFixture() = runBlocking<Unit> {
         assumeTrue(arguments.getString("ssh_fixture") == "prepare")
         foreground(); runtime.install()

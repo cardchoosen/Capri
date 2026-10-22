@@ -14,7 +14,7 @@ class PythonRuntime(private val context: Context, private val workspace: Workspa
     companion object { private val bootstrapLock = Any() }
     private fun prepareBootstrap(): File = synchronized(bootstrapLock) {
         val directory = File(context.filesDir, "runtime/bootstrap-v1").apply { mkdirs() }
-        for (name in listOf("session_bootstrap.py", "environment_probe.py", "git_credential.py", "ssh_config", "bin/ssh", "bin/sftp", "bin/scp")) {
+        for (name in listOf("session_bootstrap.py", "environment_probe.py", "git_credential.py", "ssh_config", "ssh_identity.py", "bin/ssh", "bin/sftp", "bin/scp")) {
             val script = File(directory, name)
             script.parentFile!!.mkdirs()
             val bytes = context.assets.open("runtime/$name").use { it.readBytes() }
