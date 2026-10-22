@@ -65,6 +65,14 @@ def main():
                        GIT_TERMINAL_PROMPT='0', GIT_PAGER='cat',
                        GIT_SSL_CAINFO='/opt/capri/tools/etc/ssl/cert.pem',
                        CURL_CA_BUNDLE='/opt/capri/tools/etc/ssl/cert.pem')
+    # Runtime configuration, not credential material. Empty helper resets file-based helpers.
+    git_config = [('credential.helper', ''),
+                  ('credential.helper', '!/root/.venv/bin/python3 -I /opt/capri/bootstrap/git_credential.py'),
+                  ('credential.useHttpPath', 'true'), ('http.followRedirects', 'false')]
+    environment['GIT_CONFIG_COUNT'] = str(len(git_config))
+    for index, (key, value) in enumerate(git_config):
+        environment['GIT_CONFIG_KEY_%d' % index] = key
+        environment['GIT_CONFIG_VALUE_%d' % index] = value
     command = sys.argv[1:]
     if not command:
         raise RuntimeError('Missing runtime command')

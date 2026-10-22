@@ -43,6 +43,7 @@ files/
     terminals/<terminal-uuid>/     # PTY监督器、控制文件、终端日志
       commands/<command-uuid>/    # main.sh、output.bin与result.json
 shared_prefs/config.xml           # 配置；API Key为Keystore AES-GCM密文
+shared_prefs/git-accounts.xml     # 应用级 Git 主机/用户名及 Keystore 加密 Token
 ```
 
 PRoot把当前会话的workspace、home、tmp映射到 `/workspace`、`/root`、`/tmp`。每次脚本以独立进程启动，工作目录为 `/workspace`，60秒超时、2MB输出上限。脚本与输出保留在runs中。文件工具拒绝绝对路径、`..`越界与符号链接越界。导入使用 Android SAF 用户选择器，单文件20MB；导出通过临时URI授权。
@@ -69,9 +70,19 @@ python_run 与持续终端统一使用当前会话 `/root/.venv`；首次使用�
 
 持续终端和 Python 子进程可直接使用 `git`、`curl`。支持本地仓库/差异/提交及 HTTP(S) 克隆、拉取等 Git 命令，以及 HTTP 请求、重定向与文件下载；沿用 terminal 的等待/取消/超时/日志机制，不新增聊天工具或专门面板。建议下载用 `curl --fail --location --connect-timeout 15 --max-time 120 --output file.part URL`，成功后改名；原始 curl 的超时/覆盖/重试需由命令显式指定，并非受管下载队列。
 
-项目与下载优先放当前 `/workspace`，Git 全局配置在当前 `/root/.gitconfig`，不同会话默认分开；仍共享 Android UID。Git 不预设用户身份，禁止交互式口令提示以免后台挂起；没有专门凭据管理、SSH/SFTP 或搜索/网页提取工具。共享工具层 bind 到 `/opt/capri/tools`，PATH、动态库、Git helper/模板和 CA 路径由启动器配置；保持 TLS 校验，不注入模型密钥。首次启动校验/解压 APK 内独立资源包，按完整 SHA-256 分目录、临时解包后原子提交；旧版本不自动回收，已有终端继续使用其版本，新的终端/短 Python 使用新版本。不会覆盖原有 rootfs、venv 或用户工作区。
+项目与下载优先放当前 `/workspace`，Git 配置在当前 `/root/.gitconfig`，不同会话默认分开；认证账号由下述应用级设置共用，仍共享 Android UID。Git 不预设提交署名，禁止交互式口令提示以免后台挂起；SSH/SFTP 与搜索/网页提取工具尚未加入。共享工具层 bind 到 `/opt/capri/tools`，PATH、动态库、Git helper/模板和 CA 路径由启动器配置；保持 TLS 校验，不注入模型密钥。首次启动校验/解压 APK 内独立资源包，按完整 SHA-256 分目录、临时解包后原子提交；旧版本不自动回收，已有终端继续使用其版本，新的终端/短 Python 使用新版本。不会覆盖原有 rootfs、venv 或用户工作区。
 
 工具版本/来源与摘要见 `docs/devtools-packages.json`，构建见 `tools/build_devtools.py`。Node、SSH、编译工具及基础环境升级修复仍待后续，V2-02 整体未完成。
+
+## 全局 Git Token 账号
+
+入口：运行 → Git 账号 · 全局。每个 HTTPS 主机（含可选端口）保存一个用户名/Token，供所有会话的 Git 认证共用；支持多主机、更新、删除及指定仓库读取测试。界面不回显已保存 Token，编辑留空保留原值。认证与提交署名分开，署名仍按仓库/会话设置；支持采用 HTTPS 用户名/Token 认证的 GitHub/GitLab/自建服务，不含浏览器 OAuth、SSH 或同主机多账号切换。
+
+Token 用独立 Android Keystore AES-GCM 密钥加密，AAD绑定主机和用户名，存入应用私有偏好设置；默认不写入仓库URL、会话文件、命令/日志、进程参数或环境变量，也不作为模型工具结果返回。Git运行时重置文件凭据助手链，调用Python helper，经有长度/超时限制的抽象Unix socket向Android broker取值；broker验证对端真实UID、HTTPS、精确主机/端口及显式用户名。凭据仅通过内存/管道传给Git，不为curl注入认证。Git store/erase不改写用户维护的全局账号；更新/删除影响既有终端的后续认证，已发出的请求不撤销，本地删除不等于撤销平台Token。
+
+自动跟随Git HTTP重定向关闭；仓库测试也不跟随重定向，使用最终HTTPS仓库地址，保留TLS校验。测试只证明读取接口可用，不证明推送权限。正常流程的隐藏和加密不构成同UID恶意代码隔离：任意本应用代码仍可能主动调用凭据助手或读取进程数据。
+
+真机使用测试专用本地TLS私有Git服务验证跨会话克隆/推送、既有终端凭据更换/删除、失效提示、密文存储及会话记录无Token；测试证书/私钥仅在androidTest APK，不在主APK。真实托管平台需用户在界面配置其有效Token后使用，未用用户真实账号做远端推送验收。
 
 ## 模型通信与任务续接
 
