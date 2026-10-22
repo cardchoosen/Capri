@@ -33,9 +33,8 @@ class TimelineDeviceTest {
         repeat(60) {
             var found: MainActivity? = null
             instrumentation.runOnMainSync {
-                found = listOf(Stage.RESUMED, Stage.STARTED, Stage.PAUSED).flatMap {
-                    ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(it)
-                }.filterIsInstance<MainActivity>().firstOrNull()
+                found = ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED)
+                    .filterIsInstance<MainActivity>().firstOrNull { !it.isChangingConfigurations && !it.isFinishing && !it.isDestroyed && it.hasWindowFocus() }
             }
             if (found != null) return found!!
             Thread.sleep(100)
@@ -56,7 +55,7 @@ class TimelineDeviceTest {
                 } }
             }
             Thread.sleep(300)
-            instrumentation.runOnMainSync { assertEquals(6, position.list.layoutInfo.totalItemsCount) }
+            instrumentation.runOnMainSync { assertEquals(3, position.list.layoutInfo.totalItemsCount) }
             val text = (1..220).joinToString("\n\n") { "READ_ANCHOR $it：这里是供阅读的长段落，后续内容显示时，已阅读位置应该保持稳定。".repeat(3) }
             val freshReveal = FinalReplyReveal()
             instrumentation.runOnMainSync { entries.add(Entry("assistant", text, freshReveal)) }

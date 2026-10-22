@@ -1,5 +1,8 @@
 package ai.capri.app
 
+import androidx.compose.animation.*
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -20,6 +23,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -29,8 +33,8 @@ import androidx.compose.ui.unit.sp
 
 private val TimelineMuted = Color(0xFF939E94)
 
-@Composable internal fun ConversationTimeline(entries: List<Entry>, busy: Boolean, position: ChatScrollState, modifier: Modifier = Modifier) {
-    val rows = remember(entries, busy) { timelineRows(entries, busy) }
+@Composable internal fun ConversationTimeline(entries: List<Entry>, busy: Boolean, position: ChatScrollState, modifier: Modifier = Modifier, activity: ToolActivity? = null, workspace: Workspace? = null, chat: String = "") {
+    val rows = remember(entries, busy, activity) { timelineRows(entries, busy, activity) }
     val list = position.list
     val input = remember(position) { object : NestedScrollConnection {
         override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
@@ -65,7 +69,7 @@ private val TimelineMuted = Color(0xFF939E94)
             Column {
                 if (row.index > 0) Spacer(Modifier.height(if (row is TimelineRow.Message && row.entry.role == "tool") 6.dp else 18.dp))
                 when (row) {
-                    is TimelineRow.Message -> TimelineMessage(row.entry)
+                    is TimelineRow.Message -> TimelineMessage(row.entry, workspace, chat)
                     is TimelineRow.History -> {
                         val expanded = position.expandedGroups[row.index] == true
                         Row(Modifier.fillMaxWidth().heightIn(min = 28.dp)
@@ -74,13 +78,24 @@ private val TimelineMuted = Color(0xFF939E94)
                                 position.expandedGroups[row.index] = !expanded
                             }.semantics { stateDescription = if (expanded) "已展开" else "已折叠" }
                             .padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text("工具记录 · ${row.toolCount} 条", color = TimelineMuted, fontSize = 13.sp, lineHeight = 20.sp)
+                            val label = if (row.running) row.activity?.label ?: row.entries.lastOrNull { it.role == "tool" }?.let(::toolRecordLabel) ?: "准备执行工具"
+                                else "工具记录 · ${row.toolCount} 条"
+                            AnimatedContent(targetState = label, label = "tool-carousel", modifier = Modifier.weight(1f, fill = false).clipToBounds(),
+                                transitionSpec = {
+                                    (slideInVertically { it } + fadeIn()).togetherWith(slideOutVertically { -it } + fadeOut())
+                                        .using(SizeTransform(clip = true))
+                                }) { current -> Text(current, color = TimelineMuted, fontSize = 13.sp, lineHeight = 20.sp,
+                                    maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }
+                            if (row.activity != null) {
+                                Spacer(Modifier.width(6.dp))
+                                CircularProgressIndicator(Modifier.size(12.dp).semantics { contentDescription = "工具调用中" }, strokeWidth = 1.5.dp, color = Color(0xFFA5FF75))
+                            }
                             Spacer(Modifier.width(4.dp))
                             Icon(if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
                                 null, tint = TimelineMuted, modifier = Modifier.size(16.dp))
                         }
                         if (expanded) Column(Modifier.padding(start = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            row.entries.forEachIndexed { i, entry -> key(row.index + i) { TimelineMessage(entry) } }
+                            row.entries.forEachIndexed { i, entry -> key(row.index + i) { TimelineMessage(entry, workspace, chat) } }
                         }
                     }
                 }
@@ -91,8 +106,11 @@ private val TimelineMuted = Color(0xFF939E94)
     }
 }
 
-@Composable private fun TimelineMessage(message: Entry) {
-    if (message.role == "tool") ToolOutputRow(message.text)
+@Composable private fun TimelineMessage(message: Entry, workspace: Workspace?, chat: String) {
+    if (message.role == "attachment") {
+        if (workspace != null) AttachmentView(message.text, workspace, chat)
+        else Text("附件不可用", color = TimelineMuted)
+    } else if (message.role == "tool") ToolOutputRow(message.text)
     else Column(Modifier.fillMaxWidth().then(if (message.role == "user")
         Modifier.background(Color(0xFF111612), RoundedCornerShape(2.dp)).padding(12.dp) else Modifier)) {
         Text(when (message.role) { "user" -> "YOU"; "assistant" -> "CAPRI"; else -> "SYSTEM" },
