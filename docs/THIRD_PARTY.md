@@ -46,3 +46,12 @@ APK资源使用 `rootfs.bundle` 文件名保存gzip压缩tar，避免AAPT自动�
 - pip MIT 许可证副本：`PIP-LICENSE.txt`；原 wheel 内包含 vendored 依赖的许可说明。
 - 官方安装说明：https://pip.pypa.io/en/stable/installation/；ensurepip：https://docs.python.org/3.12/library/ensurepip.html。
 - 当前包管理入口安装兼容 wheel，不编译源码包；编译工具和开发头文件属于后续环境扩展。
+
+## Git / curl 独立工具层
+
+`devtools.bundle` 包含 Alpine v3.22/main/aarch64 的 Git 2.49.1-r0、curl 8.14.1-r4、Git 模板、证书及其动态依赖。musl ELF 解释器沿用基础 rootfs，不在工具层替换。包版本、下载地址、源码 aports commit、上游地址、许可证和 APK SHA-256 全部记录在 `devtools-packages.json`；该版本沿用发行版维护分支，并非上游最新版本。
+
+- 构建：`python3 tools/build_devtools.py`，按锁定清单校验 APK SHA-256 后生成确定性资源包；首次解析索引的命令见脚本。索引和初次 APK 均经官方 HTTPS 获取，未执行 Alpine APK 签名验证。后续重建校验已记录摘要，摘要不等同签名认证。
+- 运行期：校验 APK 内资源包 SHA-256，解压到版本目录并原子切换可见性，不覆盖基础 rootfs、会话 HOME/venv 或工作区。总计18项元数据，实际附带17个包（musl只记录依赖来源）。首次部署无需联网，后续 Git/HTTP 访问按任务联网。
+- Git GPL-2.0 文本：`GIT-COPYING.txt`，来源 https://github.com/git/git/blob/v2.49.1/COPYING；curl 许可证：`CURL-COPYING.txt`，来源 https://github.com/curl/curl/blob/curl-8_14_1/COPYING。其他依赖许可证分别见清单，公开发行前仍需完成对应源码/许可材料收集。
+- Git 路径配置：https://git-scm.com/docs/git；curl 证书策略：https://curl.se/docs/sslcerts.html。工具层提供 CA bundle，默认保持证书校验；不配置全局 Git 作者或收集凭据。

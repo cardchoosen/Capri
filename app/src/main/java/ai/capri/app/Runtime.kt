@@ -14,13 +14,15 @@ class PythonRuntime(private val context: Context, private val workspace: Workspa
     companion object { private val bootstrapLock = Any() }
     private fun prepareBootstrap(): File = synchronized(bootstrapLock) {
         val directory = File(context.filesDir, "runtime/bootstrap-v1").apply { mkdirs() }
-        val script = File(directory, "session_bootstrap.py")
-        val bytes = context.assets.open("runtime/session_bootstrap.py").use { it.readBytes() }
-        if (!script.exists() || !script.readBytes().contentEquals(bytes)) {
-            val target = android.util.AtomicFile(script)
-            val output = target.startWrite()
-            try { output.write(bytes); target.finishWrite(output) }
-            catch (error: Exception) { target.failWrite(output); throw error }
+        for (name in listOf("session_bootstrap.py", "environment_probe.py")) {
+            val script = File(directory, name)
+            val bytes = context.assets.open("runtime/$name").use { it.readBytes() }
+            if (!script.exists() || !script.readBytes().contentEquals(bytes)) {
+                val target = android.util.AtomicFile(script)
+                val output = target.startWrite()
+                try { output.write(bytes); target.finishWrite(output) }
+                catch (error: Exception) { target.failWrite(output); throw error }
+            }
         }
         File(rootfs, "opt/capri/bootstrap").mkdirs()
         directory
@@ -75,12 +77,15 @@ class PythonRuntime(private val context: Context, private val workspace: Workspa
     internal fun processBuilder(id: String, run: File, command: List<String>): ProcessBuilder {
         check(ready) { status() }
         val bootstrap = prepareBootstrap()
+        val tools = DevelopmentTools.prepare(context)
+        File(rootfs, "opt/capri/tools").mkdirs()
         val home = workspace.folder(id, "home")
         val tmp = workspace.folder(id, "tmp")
         val cwd = workspace.folder(id, "workspace")
         val args = listOf(proot.path, "--kill-on-exit", "-r", rootfs.path,
             "-b", "/dev", "-b", "/proc", "-b", "${cwd.path}:/workspace", "-b", "${home.path}:/root",
-            "-b", "${tmp.path}:/tmp", "-b", "${run.path}:/run/capri", "-b", "${bootstrap.path}:/opt/capri/bootstrap", "-w", "/workspace",
+            "-b", "${tmp.path}:/tmp", "-b", "${run.path}:/run/capri", "-b", "${bootstrap.path}:/opt/capri/bootstrap",
+            "-b", "${tools.path}:/opt/capri/tools", "-w", "/workspace",
             "/usr/bin/env", "-i", "HOME=/root", "TMPDIR=/tmp", "PATH=/usr/local/bin:/usr/bin:/bin",
             "LANG=C.UTF-8", "PYTHONUNBUFFERED=1", "PYTHONNOUSERSITE=1", "VIRTUAL_ENV=/root/.venv",
             "/usr/bin/python3", "/opt/capri/bootstrap/session_bootstrap.py") + command

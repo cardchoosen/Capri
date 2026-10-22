@@ -34,6 +34,7 @@ files/
   agent-recovery/<chat-id>.json    # 未完成任务检查点，完成后删除
   runtime/rootfs/                 # 共享基础环境
   runtime/bootstrap-v1/           # 管理会话环境的启动脚本
+  runtime/tools/<bundle-sha256>/   # Git/curl、动态依赖、模板与证书；版本目录
   sessions/<session-id>/
     workspace/                    # 用户/Agent任务文件
     home/                         # 当前会话HOME，含.venv及pip
@@ -62,7 +63,15 @@ Agent 可使用 `terminal` 的 open/list/attach/run/read/input/cancel/close/clea
 
 python_run 与持续终端统一使用当前会话 `/root/.venv`；首次使用通过已有 ensurepip 离线补齐 pip，旧会话保留包和文件，不替换共享 rootfs。`python_env` 提供 status/list/install/uninstall/freeze/check，操作只针对当前会话；安装支持 PyPI 包名、extras 和版本条件，仅安装兼容 wheel，不构建源码包。高级 URL/本地包等可在终端手动处理，编译器等尚未集成。
 
-包管理复用一个会话专属的持续终端，返回 terminal_id/command_id；用 terminal.read 等待、读取，terminal.cancel 中断；安装最长10分钟。重复提交时已有操作运行则返回 busy 和已有命令信息。managed 命令使用绝对 venv 解释器和 Python/pip 隔离参数，不依赖手动改动的 Shell PATH。运行页「诊断当前会话 Python」提供解释器、venv、pip、包数量与 TLS 状态；完整依赖清单用工具 list/freeze。不会清空用户虚拟环境；若引导中断，只修复该次引导留下的 pip 自有文件，保留其他依赖。Git/Node/SSH/编译工具及基础环境升级修复仍待后续。
+包管理复用一个会话专属的持续终端，返回 terminal_id/command_id；用 terminal.read 等待、读取，terminal.cancel 中断；安装最长10分钟。重复提交时已有操作运行则返回 busy 和已有命令信息。managed 命令使用绝对 venv 解释器和 Python/pip 隔离参数，不依赖手动改动的 Shell PATH。运行页「诊断当前会话环境」提供解释器、venv、pip、包数量、TLS 及 Git/curl 版本与可用状态；完整依赖清单用工具 list/freeze。不会清空用户虚拟环境；若引导中断，只修复该次引导留下的 pip 自有文件，保留其他依赖。
+
+## Git 与 HTTP/下载（V2-02 第二批）
+
+持续终端和 Python 子进程可直接使用 `git`、`curl`。支持本地仓库/差异/提交及 HTTP(S) 克隆、拉取等 Git 命令，以及 HTTP 请求、重定向与文件下载；沿用 terminal 的等待/取消/超时/日志机制，不新增聊天工具或专门面板。建议下载用 `curl --fail --location --connect-timeout 15 --max-time 120 --output file.part URL`，成功后改名；原始 curl 的超时/覆盖/重试需由命令显式指定，并非受管下载队列。
+
+项目与下载优先放当前 `/workspace`，Git 全局配置在当前 `/root/.gitconfig`，不同会话默认分开；仍共享 Android UID。Git 不预设用户身份，禁止交互式口令提示以免后台挂起；没有专门凭据管理、SSH/SFTP 或搜索/网页提取工具。共享工具层 bind 到 `/opt/capri/tools`，PATH、动态库、Git helper/模板和 CA 路径由启动器配置；保持 TLS 校验，不注入模型密钥。首次启动校验/解压 APK 内独立资源包，按完整 SHA-256 分目录、临时解包后原子提交；旧版本不自动回收，已有终端继续使用其版本，新的终端/短 Python 使用新版本。不会覆盖原有 rootfs、venv 或用户工作区。
+
+工具版本/来源与摘要见 `docs/devtools-packages.json`，构建见 `tools/build_devtools.py`。Node、SSH、编译工具及基础环境升级修复仍待后续，V2-02 整体未完成。
 
 ## 模型通信与任务续接
 

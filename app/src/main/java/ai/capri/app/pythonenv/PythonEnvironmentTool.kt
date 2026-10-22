@@ -41,10 +41,7 @@ internal object PythonEnvironmentContract {
     fun command(action: String, packages: List<String>): String {
         val pip = "/root/.venv/bin/python3 -I -m pip --isolated --disable-pip-version-check --no-input --timeout 20 --retries 2 "
         return when (action) {
-            "status" -> "/root/.venv/bin/python3 -I -c " + quote("""
-                import sys,sysconfig,ssl,json,importlib.metadata as m
-                print(json.dumps({'python':sys.version,'executable':sys.executable,'prefix':sys.prefix,'base_prefix':sys.base_prefix,'in_venv':sys.prefix!=sys.base_prefix,'pip':m.version('pip'),'site_packages':sysconfig.get_path('purelib'),'package_count':len(list(m.distributions())),'tls':ssl.OPENSSL_VERSION,'cert_file':ssl.get_default_verify_paths().cafile,'scope':'current chat'},ensure_ascii=False,indent=2))
-            """.trimIndent())
+            "status" -> "/root/.venv/bin/python3 -I /opt/capri/bootstrap/environment_probe.py"
             "list" -> pip + "list --format=json"
             "freeze" -> pip + "freeze"
             "check" -> pip + "check"
@@ -55,7 +52,7 @@ internal object PythonEnvironmentContract {
     }
     fun specification(): JSONObject = JSONObject().put("type", "function").put("function", JSONObject()
         .put("name", "python_env")
-        .put("description", "管理当前聊天Python虚拟环境，终端python3与python_run共用此环境。status诊断解释器/venv/pip/TLS，list列包和版本，freeze输出依赖清单，check检查依赖，install/uninstall安装卸载。安装从PyPI下载可兼容wheel，不构建源码包；不保证任意原生扩展可用。操作在持续终端执行，返回terminal_id/command_id；后续通过terminal.read等待/读取，terminal.cancel停止，不要重复提交安装。只影响当前聊天venv，pip由引导维护，URL/本地包请用终端。")
+        .put("description", "管理当前聊天Python虚拟环境，终端python3与python_run共用此环境。status诊断解释器/venv/pip/TLS及内置Git/curl版本和可用状态，list列包和版本，freeze输出依赖清单，check检查依赖，install/uninstall安装卸载。安装从PyPI下载可兼容wheel，不构建源码包；不保证任意原生扩展可用。操作在持续终端执行，返回terminal_id/command_id；后续通过terminal.read等待/读取，terminal.cancel停止，不要重复提交安装。只影响当前聊天venv，pip由引导维护，URL/本地包请用终端。")
         .put("parameters", JSONObject().put("type", "object").put("additionalProperties", false)
             .put("required", JSONArray(listOf("action"))).put("properties", JSONObject()
                 .put("action", JSONObject().put("type", "string").put("enum", JSONArray(actions)))

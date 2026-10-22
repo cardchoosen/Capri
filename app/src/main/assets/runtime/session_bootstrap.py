@@ -58,7 +58,13 @@ def main():
     python = ensure_environment('/root')
     environment = dict(os.environ)
     environment.update(VIRTUAL_ENV='/root/.venv', PYTHONNOUSERSITE='1',
-                       PATH='/root/.venv/bin:/usr/local/bin:/usr/bin:/bin')
+                       PATH='/root/.venv/bin:/opt/capri/tools/usr/bin:/usr/local/bin:/usr/bin:/bin',
+                       LD_LIBRARY_PATH='/opt/capri/tools/usr/lib:/opt/capri/tools/lib',
+                       GIT_EXEC_PATH='/opt/capri/tools/usr/libexec/git-core',
+                       GIT_TEMPLATE_DIR='/opt/capri/tools/usr/share/git-core/templates',
+                       GIT_TERMINAL_PROMPT='0', GIT_PAGER='cat',
+                       GIT_SSL_CAINFO='/opt/capri/tools/etc/ssl/cert.pem',
+                       CURL_CA_BUNDLE='/opt/capri/tools/etc/ssl/cert.pem')
     command = sys.argv[1:]
     if not command:
         raise RuntimeError('Missing runtime command')
