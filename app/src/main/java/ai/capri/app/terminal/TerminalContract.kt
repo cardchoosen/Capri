@@ -14,28 +14,54 @@ internal object TerminalContract {
         "close" to setOf("terminal_id"), "clear_history" to setOf("terminal_id"), "delete" to setOf("terminal_id"))
     fun specification(): JSONObject = JSONObject().put("type", "function").put("function", JSONObject()
         .put("name", "terminal")
-        .put("description", "手机本地持续终端，按当前聊天隔离管理。open创建PTY Shell，list/attach恢复连接；run提交Shell命令并返回command_id，cwd/export变量跨命令保留。run默认短等1000ms，可设wait_ms为0..10000；read默认不等，可设wait_ms为0..20000，有新完整字符、命令结束或终端关闭时提前返回。等待结束不会停止命令。run默认超时60秒，持续服务可设timeout_seconds，最大86400秒。read按字节offset增量读取，返回next_offset；command_id省略时读终端整体输出。input向当前命令输入文本（需要换行请带\\n），cancel中断命令，close关闭终端及关联进程，clear_history仅空闲时清理日志，delete删除已关闭终端历史。命令可在模型回复后持续运行，不要循环查询耗尽模型轮数；告知用户终端/命令ID供后续查询。停止聊天不等于关闭终端。需要先初始化Python环境；不提供Root或强安全隔离。")
-        .put("parameters", JSONObject().put("type", "object").put("additionalProperties", false)
-            .put("required", JSONArray(listOf("action"))).put("properties", JSONObject()
-                .put("action", JSONObject().put("type", "string").put("enum", JSONArray(actions)))
-                .put("params", parameterSchema()))))
+        .put("description", "手机本地持续终端，按当前聊天隔离管理。open创建PTY Shell，list/attach恢复连接；run提交Shell命令，直接返回command_id、output、退出状态、complete/has_more/next_offset，cwd/export变量跨命令保留。完成且has_more=false时无需再read；运行中或剩余日志用返回的next_offset续读，勿从0重复。短Python用python_run，相关生成与基本验证尽量一次执行。run通常省略wait_ms，默认短等1000ms；显式传入只能0..10000，不允许30000或按命令时长填写。执行时长用timeout_seconds；read默认不等，可设wait_ms为0..20000，有新完整字符、命令结束或终端关闭时提前返回。等待结束不会停止命令。run默认超时60秒，持续服务可设timeout_seconds，最大86400秒。read按字节offset增量读取，返回next_offset；command_id省略时读终端整体输出。input向当前命令输入文本（需要换行请带\\n），cancel中断命令，close关闭终端及关联进程，clear_history仅空闲时清理日志，delete删除已关闭终端历史。命令可在模型回复后持续运行，不要循环查询耗尽模型轮数；告知用户终端/命令ID供后续查询。停止聊天不等于关闭终端。需要先初始化Python环境；不提供Root或强安全隔离。")
+        .put("parameters", schema()))
 
-    private fun parameterSchema(): JSONObject {
+    private fun schema(): JSONObject {
+        val branches = actions.map { action ->
+            JSONObject().put("type", "object").put("additionalProperties", false)
+                .put("required", JSONArray(if (action in setOf("open", "list")) listOf("action") else listOf("action", "params")))
+                .put("properties", JSONObject()
+                    .put("action", JSONObject().put("type", "string").put("enum", JSONArray(listOf(action))))
+                    .put("params", parameterSchema(action)))
+        }
+        return JSONObject().put("type", "object").put("additionalProperties", false)
+            .put("required", JSONArray(listOf("action")))
+            .put("properties", JSONObject().put("action", JSONObject().put("type", "string").put("enum", JSONArray(actions)))
+                .put("params", JSONObject().put("type", "object")))
+            .put("oneOf", JSONArray(branches))
+    }
+
+    private fun parameterSchema(action: String): JSONObject {
         fun string(max: Int, description: String) = JSONObject().put("type", "string").put("maxLength", max).put("description", description)
         fun integer(min: Int, max: Int, description: String) = JSONObject().put("type", "integer").put("minimum", min).put("maximum", max).put("description", description)
+        fun id(description: String) = string(36, description)
+            .put("pattern", "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+        val available = JSONObject()
+            .put("terminal_id", id("使用工具返回的当前聊天终端UUID，原样复制，不自行编造"))
+            .put("command_id", id("使用工具返回的命令UUID；read省略时读终端整体输出"))
+            .put("title", string(80, "终端名称"))
+            .put("command", string(128000, "Shell脚本；需要持续Shell状态/后台/交互时使用。短Python优先python_run。"))
+            .put("timeout_seconds", integer(1, 86400, "执行超时，默认60秒；与等待返回时间独立"))
+            .put("wait_ms", integer(0, if (action == "run") 10000 else 20000,
+                if (action == "run") "通常省略；默认1000，最大10000，禁止30000。执行超时用timeout_seconds，等待超时不停止命令"
+                else "等待新输出或结束，默认0，最大20000ms；有结果提前返回"))
+            .put("offset", integer(0, 2000000, "默认0；续读用上次next_offset，避免重复读取"))
+            .put("limit", integer(4, 32000, "默认16000字节"))
+            .put("text", string(4096, "最多4096 UTF-8字节；需要换行时包含真实换行"))
         val properties = JSONObject()
-            .put("terminal_id", string(36, "除open/list外必填，使用当前聊天已有的终端UUID"))
-            .put("command_id", string(36, "input/cancel必填；read可选，省略读取整个终端"))
-            .put("title", string(80, "open可选终端名称"))
-            .put("command", string(128000, "run必填Shell脚本；检查既有终端/服务后复用，避免重复启动。主任务与可选诊断分开执行。"))
-            .put("timeout_seconds", integer(1, 86400, "仅run，默认60；命令执行超时，与wait_ms独立"))
-            .put("wait_ms", integer(0, 20000, "仅run/read。run默认1000、最大10000；read默认0、最大20000。有结果提前返回；不停止命令。"))
-            .put("offset", integer(0, 2000000, "仅read，默认0；后续使用next_offset"))
-            .put("limit", integer(4, 32000, "仅read，默认16000字节"))
-            .put("text", string(4096, "仅input必填，最多4096 UTF-8字节；需要换行时包含真实换行"))
-        return JSONObject().put("type", "object").put("additionalProperties", false).put("properties", properties)
-            .put("description", "按action只传所需字段。open可选title；list不传参数；run需要terminal_id/command，wait_ms最大10000；read需要terminal_id，wait_ms最大20000；input需要terminal_id/command_id/text；cancel需要terminal_id/command_id；其余需要terminal_id。")
+        fields.getValue(action).forEach { properties.put(it, available.get(it)) }
+        val required = when (action) {
+            "open", "list" -> emptyList()
+            "run" -> listOf("terminal_id", "command")
+            "input" -> listOf("terminal_id", "command_id", "text")
+            "cancel" -> listOf("terminal_id", "command_id")
+            else -> listOf("terminal_id")
+        }
+        return JSONObject().put("type", "object").put("additionalProperties", false)
+            .put("properties", properties).put("required", JSONArray(required))
     }
+
 
 
     fun validate(args: JSONObject): Pair<String, JSONObject> {
@@ -51,7 +77,10 @@ internal object TerminalContract {
         if (action == "run") {
             text(params, "command", 128_000)
             integer(params, "timeout_seconds", 60, 1, 86_400)
-            integer(params, "wait_ms", 1000, 0, 10_000)
+            try { integer(params, "wait_ms", 1000, 0, 10_000) }
+            catch (_: IllegalArgumentException) {
+                throw IllegalArgumentException("run.wait_ms只能是0..10000的整数；建议省略此字段，默认1000ms。命令执行时长用timeout_seconds设置，长命令返回后用read续读。本次未提交命令，请修正后再调用。")
+            }
         }
         if (action == "input") require(text(params, "text", 4096, blankAllowed = true).toByteArray().size <= 4096) { "输入最多4096字节" }
         if (action == "read") {

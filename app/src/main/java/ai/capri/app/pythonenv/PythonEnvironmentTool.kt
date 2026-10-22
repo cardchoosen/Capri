@@ -52,7 +52,7 @@ internal object PythonEnvironmentContract {
     }
     fun specification(): JSONObject = JSONObject().put("type", "function").put("function", JSONObject()
         .put("name", "python_env")
-        .put("description", "管理当前聊天Python虚拟环境，终端python3与python_run共用此环境。status诊断解释器/venv/pip/TLS及内置Git/curl版本和可用状态，list列包和版本，freeze输出依赖清单，check检查依赖，install/uninstall安装卸载。安装优先使用已收录且满足版本条件的固定Alpine官方预编译包（Pillow、NumPy、Matplotlib及依赖可离线），其他包或版本从PyPI安装兼容wheel；不构建源码包，不保证任意原生扩展可用。status提供真实平台标签、可用内置版本与已安装库来源。操作在持续终端执行，返回terminal_id/command_id；后续通过terminal.read等待/读取，terminal.cancel停止，不要重复提交安装。只影响当前聊天venv，pip由引导维护，URL/本地包请用终端。")
+        .put("description", "管理当前聊天Python虚拟环境，终端python3与python_run共用此环境。status诊断解释器/venv/pip/TLS及内置Git/curl版本和可用状态，list列包和版本，freeze输出依赖清单，check检查依赖，install/uninstall安装卸载。安装优先使用已收录且满足版本条件的固定Alpine官方预编译包（Pillow、NumPy、Matplotlib及依赖可离线），其他包或版本从PyPI安装兼容wheel；不构建源码包，不保证任意原生扩展可用。status提供真实平台标签、可用内置版本与已安装库来源。操作在持续终端执行，返回terminal_id/command_id；已直接返回output/complete/has_more/next_offset；完成且无剩余时无需再read，仅未完成或有剩余时从next_offset用terminal.read续读，terminal.cancel停止，不要重复提交安装。只影响当前聊天venv，pip由引导维护，URL/本地包请用终端。")
         .put("parameters", JSONObject().put("type", "object").put("additionalProperties", false)
             .put("required", JSONArray(listOf("action"))).put("properties", JSONObject()
                 .put("action", JSONObject().put("type", "string").put("enum", JSONArray(actions)))
@@ -60,7 +60,7 @@ internal object PythonEnvironmentContract {
                     .put("items", JSONObject().put("type", "string").put("maxLength", 200))
                     .put("description", "install/uninstall必填；包名及可选extras/版本条件，如requests==2.32.3；uninstall只传包名"))
                 .put("wait_ms", JSONObject().put("type", "integer").put("minimum", 0).put("maximum", 10000)
-                    .put("description", "默认1000，仅影响短等；安装可后台继续，执行最长10分钟")))))
+                    .put("description", "默认5000ms、最大10000，仅影响短等，提前完成立即返回；安装可后台继续，执行最长10分钟")))))
 }
 
 internal class PythonEnvironmentTool(private val terminals: TerminalManager) {
@@ -87,9 +87,13 @@ internal class PythonEnvironmentTool(private val terminals: TerminalManager) {
                 }
                 val result = JSONObject(terminals.execute(chat, JSONObject().put("action", "run").put("params", JSONObject()
                     .put("terminal_id", id).put("command", PythonEnvironmentContract.command(valid, packages))
-                    .put("timeout_seconds", if (valid == "install") 600 else 60).put("wait_ms", args.optInt("wait_ms", 1000)))))
+                    .put("timeout_seconds", if (valid == "install") 600 else 60).put("wait_ms", args.optInt("wait_ms", 5000)))))
                 result.put("action", action)
-                result.optJSONObject("data")?.put("scope", "current chat venv")?.put("read_with", "terminal.read")
+                result.optJSONObject("data")?.let { data ->
+                    data.put("scope", "current chat venv")
+                    if (!data.optBoolean("complete") || data.optBoolean("has_more"))
+                        data.put("read_with", "terminal.read")
+                }
                 result.toString()
             }
         } catch (cancel: kotlinx.coroutines.CancellationException) { throw cancel }

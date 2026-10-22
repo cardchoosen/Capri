@@ -266,6 +266,17 @@ internal class TerminalManager private constructor(private val context: Context)
                     if (current.getString("state") != "running") break
                 }
             }
+            if (validated == "run") {
+                // Return the same bounded, UTF-8-safe output snapshot as read, including
+                // failures and partial output. next_offset continues without replaying it.
+                response = mutex.withLock {
+                    val record = owned(chat, params.getString("terminal_id"))
+                    if (reconcile(record)) persist()
+                    val commandId = response.getString("command_id")
+                    read(record, JSONObject().put("command_id", commandId))
+                        .put("command_id", commandId)
+                }
+            }
             if (validated == "read") {
                 val until = System.nanoTime() + TerminalContract.integer(params, "wait_ms", 0, 0, 20_000) * 1_000_000L
                 while (response.optString("output").isEmpty() && !response.getBoolean("complete") && System.nanoTime() < until) {

@@ -38,10 +38,16 @@ class TerminalContractTest {
         val read = JSONObject().put("terminal_id", id).put("wait_ms", 20000)
         assertEquals("read", TerminalContract.validate(request("read", read)).first)
         rejects { TerminalContract.validate(request("read", JSONObject(read.toString()).put("wait_ms", 20001))) }
-        val props = TerminalContract.specification().getJSONObject("function").getJSONObject("parameters")
-            .getJSONObject("properties").getJSONObject("params").getJSONObject("properties")
-        assertEquals("integer", props.getJSONObject("wait_ms").getString("type"))
-        assertEquals(20000, props.getJSONObject("wait_ms").getInt("maximum"))
+        val branches = TerminalContract.specification().getJSONObject("function").getJSONObject("parameters").getJSONArray("oneOf")
+        fun schema(action: String): JSONObject = (0 until branches.length()).map { branches.getJSONObject(it) }
+            .first { it.getJSONObject("properties").getJSONObject("action").getJSONArray("enum").getString(0) == action }
+            .getJSONObject("properties").getJSONObject("params")
+        assertEquals(10000, schema("run").getJSONObject("properties").getJSONObject("wait_ms").getInt("maximum"))
+        assertEquals(20000, schema("read").getJSONObject("properties").getJSONObject("wait_ms").getInt("maximum"))
+        assertTrue(schema("run").getJSONArray("required").toString().contains("command"))
+        assertFalse(schema("read").getJSONObject("properties").has("command"))
+        assertTrue(schema("run").getJSONObject("properties").getJSONObject("terminal_id").has("pattern"))
+
     }
 
 }
