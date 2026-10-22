@@ -50,6 +50,7 @@ class MainActivity : ComponentActivity() {
     override fun onPause() { model.androidTools.permissions.detach(this); super.onPause() }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        DebugBridge.attach(model)
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
