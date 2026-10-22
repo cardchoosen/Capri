@@ -11,6 +11,20 @@ import java.util.concurrent.TimeUnit
 
 /** PRoot changes filesystem presentation. It is not an Android UID security boundary. */
 class PythonRuntime(private val context: Context, private val workspace: Workspace) {
+    companion object { private val bootstrapLock = Any() }
+    private fun prepareBootstrap(): File = synchronized(bootstrapLock) {
+        val directory = File(context.filesDir, "runtime/bootstrap-v1").apply { mkdirs() }
+        val script = File(directory, "session_bootstrap.py")
+        val bytes = context.assets.open("runtime/session_bootstrap.py").use { it.readBytes() }
+        if (!script.exists() || !script.readBytes().contentEquals(bytes)) {
+            val target = android.util.AtomicFile(script)
+            val output = target.startWrite()
+            try { output.write(bytes); target.finishWrite(output) }
+            catch (error: Exception) { target.failWrite(output); throw error }
+        }
+        File(rootfs, "opt/capri/bootstrap").mkdirs()
+        directory
+    }
     private val rootfs get() = File(context.filesDir, "runtime/rootfs")
     private val proot get() = File(context.applicationInfo.nativeLibraryDir, "libproot.so")
     private val loader get() = File(context.applicationInfo.nativeLibraryDir, "libproot-loader.so")
@@ -38,14 +52,7 @@ class PythonRuntime(private val context: Context, private val workspace: Workspa
         val run = workspace.folder(id, "runs").resolve(java.util.UUID.randomUUID().toString()).apply { mkdirs() }
         val script = File(run, "main.py").apply { writeText(code) }
         val output = File(run, "output.txt")
-        File(run, "bootstrap.py").writeText("""
-            import os, pathlib, venv
-            env = pathlib.Path('/root/.venv')
-            if not (env / 'bin/python3').exists():
-                venv.EnvBuilder(with_pip=False, symlinks=True).create(str(env))
-            os.execv(str(env / 'bin/python3'), [str(env / 'bin/python3'), '/run/capri/main.py'])
-        """.trimIndent())
-        val builder = processBuilder(id, run, listOf("/usr/bin/python3", "/run/capri/bootstrap.py"))
+        val builder = processBuilder(id, run, listOf("/usr/bin/python3", "/run/capri/main.py"))
         val process = builder.redirectErrorStream(true).redirectOutput(output).start()
         try {
             val completed = withTimeoutOrNull(60_000) {
@@ -67,14 +74,16 @@ class PythonRuntime(private val context: Context, private val workspace: Workspa
     /** Shared launch configuration; both short Python and persistent terminals use the same mappings. */
     internal fun processBuilder(id: String, run: File, command: List<String>): ProcessBuilder {
         check(ready) { status() }
+        val bootstrap = prepareBootstrap()
         val home = workspace.folder(id, "home")
         val tmp = workspace.folder(id, "tmp")
         val cwd = workspace.folder(id, "workspace")
         val args = listOf(proot.path, "--kill-on-exit", "-r", rootfs.path,
             "-b", "/dev", "-b", "/proc", "-b", "${cwd.path}:/workspace", "-b", "${home.path}:/root",
-            "-b", "${tmp.path}:/tmp", "-b", "${run.path}:/run/capri", "-w", "/workspace",
+            "-b", "${tmp.path}:/tmp", "-b", "${run.path}:/run/capri", "-b", "${bootstrap.path}:/opt/capri/bootstrap", "-w", "/workspace",
             "/usr/bin/env", "-i", "HOME=/root", "TMPDIR=/tmp", "PATH=/usr/local/bin:/usr/bin:/bin",
-            "LANG=C.UTF-8", "PYTHONUNBUFFERED=1") + command
+            "LANG=C.UTF-8", "PYTHONUNBUFFERED=1", "PYTHONNOUSERSITE=1", "VIRTUAL_ENV=/root/.venv",
+            "/usr/bin/python3", "/opt/capri/bootstrap/session_bootstrap.py") + command
         return ProcessBuilder(args).apply {
             environment().apply { clear(); put("PROOT_LOADER", loader.path); put("PROOT_TMP_DIR", tmp.path) }
         }

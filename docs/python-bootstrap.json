@@ -1,0 +1,8 @@
+{
+  "method": "CPython ensurepip, offline, current-session venv only",
+  "bundled_pip_version": "25.0.1",
+  "wheel": "usr/lib/python3.12/ensurepip/_bundled/pip-25.0.1-py3-none-any.whl",
+  "sha256": "c46efd13b6aa8279f33f2864459c8ce587ea6a1a59ee20de055868d8f7688f7f",
+  "source": "existing Alpine Python 3.12.15 rootfs.bundle",
+  "license": "MIT; vendored notices retained inside the bundled wheel"
+}

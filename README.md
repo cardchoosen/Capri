@@ -33,11 +33,12 @@ files/
   terminals.json                  # 终端与命令元数据（AtomicFile）
   agent-recovery/<chat-id>.json    # 未完成任务检查点，完成后删除
   runtime/rootfs/                 # 共享基础环境
+  runtime/bootstrap-v1/           # 管理会话环境的启动脚本
   sessions/<session-id>/
     workspace/                    # 用户/Agent任务文件
-    home/                         # 当前会话HOME，含.venv
+    home/                         # 当前会话HOME，含.venv及pip
     tmp/                          # 当前会话临时目录
-    runs/<run-uuid>/              # bootstrap.py、main.py与output.txt
+    runs/<run-uuid>/              # main.py与output.txt；旧bootstrap.py保留
     terminals/<terminal-uuid>/     # PTY监督器、控制文件、终端日志
       commands/<command-uuid>/    # main.sh、output.bin与result.json
 shared_prefs/config.xml           # 配置；API Key为Keystore AES-GCM密文
@@ -45,7 +46,7 @@ shared_prefs/config.xml           # 配置；API Key为Keystore AES-GCM密文
 
 PRoot把当前会话的workspace、home、tmp映射到 `/workspace`、`/root`、`/tmp`。每次脚本以独立进程启动，工作目录为 `/workspace`，60秒超时、2MB输出上限。脚本与输出保留在runs中。文件工具拒绝绝对路径、`..`越界与符号链接越界。导入使用 Android SAF 用户选择器，单文件20MB；导出通过临时URI授权。
 
-**同一APK内所有会话共享Android UID和底层内核。PRoot是兼容层，不是恶意脚本隔离边界。** 文件工具的路径校验不能限制任意Python原生代码；共享rootfs也可被脚本修改。此版本面向可信用户自己的任务，不应宣传为不可信代码沙箱。模型密钥不主动传入脚本环境，但同UID并非机密隔离。每会话使用home/.venv隔离Python site-packages（初版不预装pip）；尚未为每会话复制/覆写rootfs。
+**同一APK内所有会话共享Android UID和底层内核。PRoot是兼容层，不是恶意脚本隔离边界。** 文件工具的路径校验不能限制任意Python原生代码；共享rootfs也可被脚本修改。此版本面向可信用户自己的任务，不应宣传为不可信代码沙箱。模型密钥不主动传入脚本环境，但同UID并非机密隔离。每会话使用home/.venv隔离Python site-packages（使用内置 ensurepip 离线引导 pip）；尚未为每会话复制/覆写rootfs。
 
 档案内置于签名APK资源中，没有运行期修改工具。用户现阶段修改源文件后重建；尚无应用内档案编辑器。Android签名和安装权限保护包内容，PRoot不承担这个保护职责。
 
@@ -56,6 +57,12 @@ PRoot把当前会话的workspace、home、tmp映射到 `/workspace`、`/root`、
 Agent 可使用 `terminal` 的 open/list/attach/run/read/input/cancel/close/clear_history/delete；「运行 → 持续终端」提供手动管理入口。每个终端保留 cwd、变量、export 和函数，聊天切换或模型调用结束不销毁它。PTY 合并 stdout/stderr；read 使用 UTF-8 安全的字节游标，后台子进程输出不承诺严格归属单条命令。
 
 命令默认 60 秒，最长 24 小时；run 默认等 1 秒、最多 10 秒，之后通过 ID 查询；read 可等最多 20 秒，有新输出/结束状态即提前返回，取消读取不会停止命令。每条命令及终端日志各上限 2MB，全局最多 8 个活跃终端，每聊天 32 条终端记录、每终端 200 条命令记录。中断通过 PTY Ctrl+C；2 秒内不响应则关闭整个终端。关闭会结束关联 PRoot 执行器及其跟踪进程。终端使用提示符钩子报告退出码，根 Shell 的 PS1 为内部保留只读变量；当前没有 ANSI 全屏终端模拟器。
+
+## Python 依赖管理（V2-02 首批）
+
+python_run 与持续终端统一使用当前会话 `/root/.venv`；首次使用通过已有 ensurepip 离线补齐 pip，旧会话保留包和文件，不替换共享 rootfs。`python_env` 提供 status/list/install/uninstall/freeze/check，操作只针对当前会话；安装支持 PyPI 包名、extras 和版本条件，仅安装兼容 wheel，不构建源码包。高级 URL/本地包等可在终端手动处理，编译器等尚未集成。
+
+包管理复用一个会话专属的持续终端，返回 terminal_id/command_id；用 terminal.read 等待、读取，terminal.cancel 中断；安装最长10分钟。重复提交时已有操作运行则返回 busy 和已有命令信息。managed 命令使用绝对 venv 解释器和 Python/pip 隔离参数，不依赖手动改动的 Shell PATH。运行页「诊断当前会话 Python」提供解释器、venv、pip、包数量与 TLS 状态；完整依赖清单用工具 list/freeze。不会清空用户虚拟环境；若引导中断，只修复该次引导留下的 pip 自有文件，保留其他依赖。Git/Node/SSH/编译工具及基础环境升级修复仍待后续。
 
 ## 模型通信与任务续接
 

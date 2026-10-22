@@ -301,14 +301,14 @@ internal class TerminalManager private constructor(private val context: Context)
                 .redirectErrorStream(true).redirectOutput(File(root, "supervisor.log")).start()
             processes[id] = process
             persist()
-            val ready = withTimeoutOrNull(10_000) {
+            val ready = withTimeoutOrNull(30_000) {
                 while (readJson(File(root, "state.json"))?.optString("state") != "ready") {
                     check(process.isAlive) { "终端启动失败：" + File(root, "supervisor.log").readText().take(1000) }
                     delay(25)
                 }
                 true
             }
-            if (ready != true) throw TerminalProblem("timeout", "PTY Shell启动超时")
+            if (ready != true) throw TerminalProblem("timeout", "会话环境初始化或PTY Shell启动超时")
             val state = readJson(File(root, "state.json"))!!
             record.put("state", "ready").put("shell_pid", state.getLong("shell_pid"))
             persist()

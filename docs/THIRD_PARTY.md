@@ -37,3 +37,12 @@ APK资源使用 `rootfs.bundle` 文件名保存gzip压缩tar，避免AAPT自动�
 
 - 源码与许可证：https://github.com/noties/Markwon
 - 官方文档：https://noties.io/Markwon/docs/v4/
+
+## 会话 pip 引导
+
+沿用 rootfs 中 Python 自带的 ensurepip/_bundled/pip-25.0.1-py3-none-any.whl（未额外下载或捆绑第二份 pip）。由 session_bootstrap.py 在各会话 .venv 中离线安装 pip；既有虚拟环境保留，安装第三方包时才访问 PyPI。
+
+- 版本、路径、SHA-256 与来源：`python-bootstrap.json`。
+- pip MIT 许可证副本：`PIP-LICENSE.txt`；原 wheel 内包含 vendored 依赖的许可说明。
+- 官方安装说明：https://pip.pypa.io/en/stable/installation/；ensurepip：https://docs.python.org/3.12/library/ensurepip.html。
+- 当前包管理入口安装兼容 wheel，不编译源码包；编译工具和开发头文件属于后续环境扩展。
