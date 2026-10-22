@@ -7,6 +7,11 @@ import androidx.test.platform.app.InstrumentationRegistry
 import ai.capri.app.MainActivity
 import ai.capri.app.PythonRuntime
 import ai.capri.app.Store
+import ai.capri.app.ModelRequests
+import ai.capri.app.AgentRecovery
+import ai.capri.app.RecoveryMessages
+import org.json.JSONArray
+import java.io.IOException
 import kotlinx.coroutines.*
 import org.json.JSONObject
 import org.junit.Assert.*
@@ -53,7 +58,7 @@ class TerminalDeviceTest {
         true
     }.getOrDefault(false)
     @Test fun cleanupTestArtifacts() = runBlocking<Unit> {
-        for (chat in listOf("terminal-device-first", "terminal-device-second", "terminal-recovery-test", "terminal-protocol-test")) {
+        for (chat in listOf("terminal-device-first", "terminal-device-second", "terminal-recovery-test", "terminal-protocol-test", "terminal-wait-test")) {
             manager.list(chat).forEach { record ->
                 val id = record.getString("terminal_id")
                 if (record.getString("state") in setOf("starting", "ready", "running")) call(chat, "close", terminal(id))
@@ -157,6 +162,66 @@ class TerminalDeviceTest {
             store.workspace.root(firstChat).deleteRecursively()
             store.workspace.root(secondChat).deleteRecursively()
             foreground()
+        }
+    }
+
+    @Test fun waitWindowsYieldToOutputCancelAndPreserveRecoveryResults() = runBlocking<Unit> {
+        foreground(); delay(400)
+        val store = Store(context)
+        PythonRuntime(context, store.workspace).install()
+        val chat = "terminal-wait-test"
+        val id = call(chat, "open").getString("terminal_id")
+        val recovery = AgentRecovery(File(context.filesDir, "agent-recovery"))
+        try {
+            val short = call(chat, "run", terminal(id).put("command", "sleep 0.4; echo short").put("wait_ms", 3000))
+            assertEquals("completed", short.getJSONObject("command").getString("state"))
+            val command = run(chat, id, "sleep 1; printf delayed; sleep 2")
+            val started = System.nanoTime()
+            val first = call(chat, "read", terminal(id).put("command_id", command).put("wait_ms", 20000))
+            assertTrue(first.toString(), first.getString("output").contains("delayed"))
+            assertFalse(first.getBoolean("complete"))
+            assertTrue((System.nanoTime() - started) / 1_000_000 < 5000)
+            val end = call(chat, "read", terminal(id).put("command_id", command).put("offset", first.getInt("next_offset")).put("wait_ms", 20000))
+            assertTrue(end.getBoolean("complete"))
+
+            val sleeper = run(chat, id, "sleep 30")
+            val waiting = async { call(chat, "read", terminal(id).put("command_id", sleeper).put("wait_ms", 20000)) }
+            delay(150)
+            val cancelStarted = System.nanoTime()
+            call(chat, "cancel", terminal(id).put("command_id", sleeper))
+            val canceled = withTimeout(4000) { waiting.await() }
+            // PTY may emit a newline before the prompt publishes cancellation: output correctly wakes read first.
+            val finalCancel = if (canceled.getBoolean("complete")) canceled else settled(chat, id, sleeper)
+            assertEquals("cancelled", finalCancel.getJSONObject("command").getString("state"))
+            assertTrue((System.nanoTime() - cancelStarted) / 1_000_000 < 4000)
+
+            val survives = run(chat, id, "sleep 0.5; echo survives-read-cancel")
+            assertNull(withTimeoutOrNull(100) { call(chat, "read", terminal(id).put("command_id", survives).put("wait_ms", 20000)) })
+            val still = call(chat, "read", terminal(id).put("command_id", survives).put("wait_ms", 20000))
+            assertTrue(still.getString("output").contains("survives-read-cancel"))
+            settled(chat, id, survives)
+
+            val policy = ModelRequests(pause = {})
+            policy.execute { JSONObject().put("next", "tool") }
+            val once = call(chat, "run", terminal(id).put("command", "echo once >> retry-proof.txt").put("wait_ms", 3000))
+            assertEquals("completed", once.getJSONObject("command").getString("state"))
+            val messages = JSONArray().put(JSONObject().put("role", "system").put("content", "test"))
+                .put(JSONObject().put("role", "assistant").put("tool_calls", JSONArray().put(JSONObject().put("id", "once").put("function", JSONObject().put("name", "terminal")))))
+                .put(JSONObject().put("role", "tool").put("tool_call_id", "once").put("content", once.toString()))
+            recovery.save(chat, messages)
+            var attempts = 0
+            policy.execute { if (++attempts < 3) throw IOException("injected abort"); JSONObject() }
+            assertEquals(1, store.workspace.file(chat, "retry-proof.txt").readLines().size)
+            val loaded = AgentRecovery(File(context.filesDir, "agent-recovery")).load(chat)!!
+            assertEquals(once.getString("command_id"), JSONObject(RecoveryMessages.forResume(loaded).getJSONObject(2).getString("content")).getString("command_id"))
+            call(chat, "close", terminal(id))
+            val closed = call(chat, "read", terminal(id).put("wait_ms", 20000).put("offset", call(chat, "read", terminal(id)).getInt("next_offset")))
+            assertTrue(closed.getBoolean("complete"))
+        } finally {
+            call(chat, "close", terminal(id))
+            call(chat, "delete", terminal(id))
+            recovery.clear(chat)
+            store.workspace.root(chat).deleteRecursively()
         }
     }
 

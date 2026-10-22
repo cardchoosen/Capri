@@ -51,12 +51,25 @@ private val ToolMuted = Color(0xFF939E94)
     val commandState = json?.optJSONObject("data")?.optJSONObject("command")?.optString("state").orEmpty()
     val failed = commandState in setOf("failed", "timeout", "output_limit", "interrupted") || status in setOf("error", "restricted", "permission_denied", "invalid_argument", "unsupported", "timeout", "unavailable", "not_found", "not_running") || body.startsWith("工具失败") || (name == "python_run" && body.startsWith("exit=") && !body.startsWith("exit=0\n"))
     val summary = when (status) {
+        "invalid_argument" -> "参数不合法"
+        "permission_denied", "restricted" -> "权限受限"
+        "not_found" -> "记录不存在"
+        "unavailable" -> "当前不可用"
+        "timeout" -> "调用超时"
         "partial" -> "返回部分信息"
         "permission_required" -> "需要授权"
         "foreground_required" -> "需要返回应用"
         "setting_required", "user_action_required" -> "需要继续操作"
         "busy" -> "等待处理"
-        else -> if (failed) "调用未成功" else if (commandState == "running") "运行中" else ""
+        else -> when (commandState) {
+            "failed" -> "命令退出 ${json?.optJSONObject("data")?.optJSONObject("command")?.optInt("exit_code", -1)}"
+            "timeout" -> "命令超时"
+            "output_limit" -> "输出达到上限"
+            "interrupted" -> "命令已中断"
+            "cancelled" -> "命令已取消"
+            "running" -> "运行中"
+            else -> if (failed) "工具执行失败" else ""
+        }
     }
     val context = LocalContext.current
     Column(modifier.fillMaxWidth().animateContentSize()) {

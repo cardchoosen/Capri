@@ -200,7 +200,7 @@ internal class TerminalManager private constructor(private val context: Context)
         val action = args.optString("action")
         try {
             val (validated, params) = TerminalContract.validate(args)
-            val response = mutex.withLock {
+            var response = mutex.withLock {
                 when (validated) {
                     "open" -> open(chat, params.optString("title", "终端"))
                     "list" -> JSONObject().put("terminals", JSONArray(records.values.filter { it.getString("chat_id") == chat }.map { snapshot(it, 1) }))
@@ -254,7 +254,7 @@ internal class TerminalManager private constructor(private val context: Context)
             }
             // Short optional wait does not hold the manager lock or own command lifetime.
             if (validated == "run") {
-                val until = System.nanoTime() + TerminalContract.integer(params, "wait_ms", 250, 0, 2000) * 1_000_000L
+                val until = System.nanoTime() + TerminalContract.integer(params, "wait_ms", 1000, 0, 10_000) * 1_000_000L
                 while (System.nanoTime() < until) {
                     delay(50)
                     val current = mutex.withLock {
@@ -264,6 +264,17 @@ internal class TerminalManager private constructor(private val context: Context)
                     }
                     response.put("command", current)
                     if (current.getString("state") != "running") break
+                }
+            }
+            if (validated == "read") {
+                val until = System.nanoTime() + TerminalContract.integer(params, "wait_ms", 0, 0, 20_000) * 1_000_000L
+                while (response.optString("output").isEmpty() && !response.getBoolean("complete") && System.nanoTime() < until) {
+                    delay(50)
+                    response = mutex.withLock {
+                        val record = owned(chat, params.getString("terminal_id"))
+                        if (reconcile(record)) persist()
+                        read(record, params)
+                    }
                 }
             }
             JSONObject().put("action", action).put("status", "ok").put("data", response).toString()

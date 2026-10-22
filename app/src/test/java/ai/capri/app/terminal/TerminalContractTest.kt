@@ -31,4 +31,17 @@ class TerminalContractTest {
         rejects { TerminalContract.validate(request("run", JSONObject().put("terminal_id", id).put("command", "echo\u0000bad"))) }
         assertEquals("list", TerminalContract.validate(JSONObject().put("action", "list")).first)
     }
+    @Test fun runAndReadExposeTypedWaitBudgetsAndRejectOutOfRangeValues() {
+        val run = JSONObject().put("terminal_id", id).put("command", "sleep 3").put("wait_ms", 10000)
+        assertEquals("run", TerminalContract.validate(request("run", run)).first)
+        rejects { TerminalContract.validate(request("run", JSONObject(run.toString()).put("wait_ms", 10001))) }
+        val read = JSONObject().put("terminal_id", id).put("wait_ms", 20000)
+        assertEquals("read", TerminalContract.validate(request("read", read)).first)
+        rejects { TerminalContract.validate(request("read", JSONObject(read.toString()).put("wait_ms", 20001))) }
+        val props = TerminalContract.specification().getJSONObject("function").getJSONObject("parameters")
+            .getJSONObject("properties").getJSONObject("params").getJSONObject("properties")
+        assertEquals("integer", props.getJSONObject("wait_ms").getString("type"))
+        assertEquals(20000, props.getJSONObject("wait_ms").getInt("maximum"))
+    }
+
 }
