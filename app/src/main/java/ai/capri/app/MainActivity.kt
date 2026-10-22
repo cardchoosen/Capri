@@ -83,6 +83,7 @@ class MainActivity : ComponentActivity() {
     val keyboard = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
     var tab by remember { mutableIntStateOf(0) }
+    var sshPanel by remember { mutableStateOf(false) }
     var gitAccounts by remember { mutableStateOf(false) }
     var settings by remember { mutableStateOf(false) }
     var nativeCapabilities by remember { mutableStateOf(false) }
@@ -229,6 +230,7 @@ class MainActivity : ComponentActivity() {
                             Text("执行环境", fontSize = 22.sp); Spacer(Modifier.height(12.dp))
                             OutlinedButton(onClick = { nativeCapabilities = true }) { Icon(Icons.Outlined.PhonelinkSetup, null, Modifier.size(16.dp)); Spacer(Modifier.width(8.dp)); Text("Android 原生能力") }
                             OutlinedButton(onClick = { terminalPanel = true }) { Icon(Icons.Outlined.Terminal, null, Modifier.size(16.dp)); Spacer(Modifier.width(8.dp)); Text("持续终端") }
+                            OutlinedButton(onClick = { sshPanel = true }, enabled = vm.runtime.ready) { Text("SSH · 全局") }
                             OutlinedButton(onClick = { gitAccounts = true }) { Text("Git 账号 · 全局") }
                             Text("设备、网络、Wi-Fi、定位、应用与系统操作统一由 android 工具调用。", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(vertical = 12.dp))
                             Text("ON DEVICE / ARM64", color = Green, fontSize = 11.sp, fontFamily = FontFamily.Monospace, letterSpacing = 2.sp)
@@ -246,6 +248,7 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+    if(sshPanel) SshPanel(vm.runtime, session.id, onDismiss = { sshPanel = false })
     if(gitAccounts) ai.capri.app.git.GitAccountsDialog(vm.gitAccounts, onDismiss = { gitAccounts = false })
     if(settings) Settings(vm, onDismiss = { settings = false })
     if(nativeCapabilities) NativeCapabilities(vm, onDismiss = { nativeCapabilities = false })

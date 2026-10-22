@@ -1,0 +1,2 @@
+#!/bin/sh
+exec /opt/capri/tools/usr/bin/sftp -S /opt/capri/bootstrap/bin/ssh "$@"

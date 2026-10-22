@@ -55,3 +55,11 @@ APK资源使用 `rootfs.bundle` 文件名保存gzip压缩tar，避免AAPT自动�
 - 运行期：校验 APK 内资源包 SHA-256，解压到版本目录并原子切换可见性，不覆盖基础 rootfs、会话 HOME/venv 或工作区。总计18项元数据，实际附带17个包（musl只记录依赖来源）。首次部署无需联网，后续 Git/HTTP 访问按任务联网。
 - Git GPL-2.0 文本：`GIT-COPYING.txt`，来源 https://github.com/git/git/blob/v2.49.1/COPYING；curl 许可证：`CURL-COPYING.txt`，来源 https://github.com/curl/curl/blob/curl-8_14_1/COPYING。其他依赖许可证分别见清单，公开发行前仍需完成对应源码/许可材料收集。
 - Git 路径配置：https://git-scm.com/docs/git；curl 证书策略：https://curl.se/docs/sslcerts.html。工具层提供 CA bundle，默认保持证书校验；不配置全局 Git 作者或收集凭据。
+
+## OpenSSH 客户端
+
+独立开发工具层新增 Alpine v3.22/main/aarch64 的 openssh-client-default、openssh-client-common、openssh-keygen 10.0_p1-r10及动态依赖；24项依赖记录，实际附带23个包（musl仍由基础rootfs提供）。Git/curl版本不变；所有版本/URL/aports源码commit/许可证/APK SHA-256记录在devtools-packages.json。APK只增加客户端，没有openssh-server或SSH后台服务。
+
+- 上游许可证副本：OPENSSH-LICENCE.txt，来源 https://github.com/openssh/openssh-portable/blob/V_10_0_P1/LICENCE；其他依赖按清单分别记录，公开发行所需材料沿用前述待完善要求。
+- 默认配置与包装器依据 https://man.openbsd.org/ssh_config、https://man.openbsd.org/ssh-keygen、https://man.openbsd.org/sftp；PRoot兼容身份映射见 https://proot-me.github.io/ 的-0说明。
+- tools/verify_ssh_device.py使用开发机Paramiko（https://docs.paramiko.org/），仅供loopback测试，不打包进APK或手机Python环境。

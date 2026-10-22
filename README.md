@@ -116,3 +116,15 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 `ConversationPolicy.kt` 管理基础身份模板与工具可见性。明确、独立的身份问句直接返回固定文案；引用、代码任务与复合请求继续交给Agent。档案检索的工具名、参数、结果和前置播报不展示，内部结果仅供当前调用链使用，不新增到用户会话历史；旧版已保存的档案工具条目仍保留在数据文件中，但对话与运行页均隐藏。文件与Python工具记录照常展示。
 
 新产生的最终回复渐进显示，过程说明与工具调用即时显示。完整内容先保存；Markdown只解析一次，再逐步揭示正文/代码/表格，最长约8秒。切换页面不重播，应用重启的历史直接完整显示，复制始终获得完整原文。此为展示层效果，模型接口仍为非流式。
+
+## SSH / SFTP / SCP（V2-02 客户端批次）
+
+内置 OpenSSH 10.0_p1-r10（Alpine维护包），通过已有 terminal 使用 ssh、sftp、scp、ssh-keygen、ssh-keyscan；不启动手机SSH服务器。Git也能使用SSH远程地址。运行 → SSH · 全局，可生成一个Ed25519设备密钥、查看指纹和复制公钥；既有密钥不覆盖，核验不通过时返回错误。私钥为应用私有目录内的标准OpenSSH无口令文件（0600、目录0700），没有单独Keystore加密或私钥导入/轮换界面，不向模型输出私钥。公钥需由用户添加至目标服务器/代码托管平台，HTTPS Git Token不用于SSH认证。
+
+应用级 `files/runtime/ssh` 映射到 `/opt/capri/ssh`，所有聊天共用 config、known_hosts 和默认 id_ed25519；workspace中的任务和传输文件仍按聊天分开。连接别名/HostName/User/Port/可选其他IdentityFile通过终端编辑全局config，首版无主机配置表单。默认批处理、严格主机指纹检查、禁止代理转发、15秒连接超时和30秒×3次保活；文件/连接操作仍受terminal的任务期限、取消与日志机制约束，不自动重试远端副作用。
+
+SSH包装脚本使用APK维护的配置，先Include用户全局config，再应用默认值；SFTP/SCP通过同一SSH包装器启动，解决其编译期 `/usr/bin/ssh` 与独立工具层路径不同的问题。未知/变化指纹默认拒绝；ssh-keyscan仅用于获取候选公钥，须与用户/服务器可信来源核对后才写known_hosts，不能直接据扫描结果自动信任。用户明确提供的命令行选项可覆盖默认值，原始终端不构成强制策略沙箱。没有受管的密码登录、加密私钥解锁/ssh-agent或完整ANSI远程终端模拟器。
+
+OpenSSH需要Linux账号查询，因此PRoot增加 `-0` 兼容身份映射：客体getuid显示0，Android真实UID、内核权限和网络/文件访问约束保持不变。新增组件使用现有版本化工具层，不覆盖rootfs、venv、用户文件或旧工具版本；已运行终端需新开后才能使用新版启动配置。
+
+验收入口：`python3 tools/verify_ssh_device.py --adb <adb路径> --dependencies work/ssh-fixture-python`，开发机需Paramiko 4.0.0。测试生成专用密钥，仅连接开发机loopback SSH/SFTP服务；ADB reverse只作开发测试传输，结束后移除，实际连接用户服务器无需ADB或Root。已验证远端退出码、未知/变化指纹、错误密钥拒绝、SFTP/SCP往返、SSH Git及命令超时；测试不使用用户真实SSH私钥。

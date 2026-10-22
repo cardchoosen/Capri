@@ -2,8 +2,12 @@
   "app/src/main/jniLibs/arm64-v8a/libproot.so": "cb40a1ced11cee76569b4008a9e478c87883ce831152be4eb9570763b82e580d",
   "app/src/main/jniLibs/arm64-v8a/libproot-loader.so": "f149774236db1e69b36cc1e4ed3866c7094db2eee52da0d4956aa63a9bb26929",
   "app/src/main/assets/runtime/rootfs.bundle": "d75e4639162f26a43dd5ee5702192dcf30fb8cea2a8adf453743ad27b02e76f0",
-  "app/src/main/assets/runtime/session_bootstrap.py": "d632abc6b8abf4ebd1eaaac63a28b6ebe7c3a95f5367e764dd4a7db77d4ac67f",
-  "app/src/main/assets/runtime/devtools.bundle": "d21eb307db06727e0b48b77e93e38993b659e3b869367e688d490321df20f87a",
-  "app/src/main/assets/runtime/environment_probe.py": "20cd8df5e6a735761d60f28b83acc221b79a9aa57596b075fce0ef6c11fb6d03",
-  "app/src/main/assets/runtime/git_credential.py": "352c4c6f6271b3c5eda843805d6175f6d8e592e3b0e5368e6778ccc8e16356f8"
+  "app/src/main/assets/runtime/session_bootstrap.py": "4107af8469cd3b88d0c13a1d58359aa2e4e4a6b817a8b2be944983513d1b4f92",
+  "app/src/main/assets/runtime/devtools.bundle": "fd15399f87a080a75fffdfa9662856d30038290e3bd9b8ad834d8ac6d75a6f74",
+  "app/src/main/assets/runtime/environment_probe.py": "473dded57c2bff51759c51d3471aa984ef5c9b12c5f68fa0eddaf24753b108c1",
+  "app/src/main/assets/runtime/git_credential.py": "352c4c6f6271b3c5eda843805d6175f6d8e592e3b0e5368e6778ccc8e16356f8",
+  "app/src/main/assets/runtime/ssh_config": "021d570ed3940235a336864fea7294a3da5ad5d799b395d6d412ac5e8921ccc9",
+  "app/src/main/assets/runtime/bin/ssh": "fcabdf01f4bac5f2161fcd7ecd560b35b47768149f36b766b026cf99363769fa",
+  "app/src/main/assets/runtime/bin/sftp": "96b72134bde785fb6e637ea401e68c832739e79aff168c717d5e62e9fc066ddc",
+  "app/src/main/assets/runtime/bin/scp": "d36e2938df35a49abe4029b1704e083adab39466aa01693ef3e6986d4717b7f8"
 }

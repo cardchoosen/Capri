@@ -58,7 +58,7 @@ def main():
     python = ensure_environment('/root')
     environment = dict(os.environ)
     environment.update(VIRTUAL_ENV='/root/.venv', PYTHONNOUSERSITE='1',
-                       PATH='/root/.venv/bin:/opt/capri/tools/usr/bin:/usr/local/bin:/usr/bin:/bin',
+                       PATH='/root/.venv/bin:/opt/capri/bootstrap/bin:/opt/capri/tools/usr/bin:/usr/local/bin:/usr/bin:/bin',
                        LD_LIBRARY_PATH='/opt/capri/tools/usr/lib:/opt/capri/tools/lib',
                        GIT_EXEC_PATH='/opt/capri/tools/usr/libexec/git-core',
                        GIT_TEMPLATE_DIR='/opt/capri/tools/usr/share/git-core/templates',

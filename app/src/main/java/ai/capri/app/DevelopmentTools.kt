@@ -13,7 +13,7 @@ internal object DevelopmentTools {
         val parent = File(context.filesDir, "runtime/tools").apply { mkdirs() }
         val target = File(parent, expected)
         fun complete(folder: File) = File(folder, ".complete").readTextOrEmpty() == expected &&
-            listOf("usr/bin/git", "usr/bin/curl", "usr/libexec/git-core/git-remote-https", "manifest.json")
+            listOf("usr/bin/git", "usr/bin/curl", "usr/bin/ssh", "usr/bin/sftp", "usr/bin/scp", "usr/bin/ssh-keygen", "usr/libexec/git-core/git-remote-https", "manifest.json")
                 .all { File(folder, it).exists() }
         if (complete(target)) return target
         check(!target.exists()) { "开发工具文件损坏，请先诊断；不自动覆盖已有版本" }

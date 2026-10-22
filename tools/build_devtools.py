@@ -1,4 +1,4 @@
-"""Build the pinned ARM64 Git/curl layer without modifying the Python rootfs.
+"""Build the pinned ARM64 Git/curl/OpenSSH layer without modifying the Python rootfs.
 
 First resolve: python3 tools/build_devtools.py --resolve work/devtools-build/APKINDEX
 Rebuild: python3 tools/build_devtools.py (verifies every cached/downloaded APK SHA256).
@@ -47,7 +47,7 @@ def main():
             for dependency in d.get('D', '').split():
                 visit(dependency)
 
-        for name in ('git', 'git-init-template', 'curl'):
+        for name in ('git', 'git-init-template', 'curl', 'openssh-client-default'):
             visit(name)
         lock = {'repository': URL, 'index_sha256': hashlib.sha256(args.resolve.read_bytes()).hexdigest(),
                 'architecture': 'aarch64', 'packages': sorted(chosen.values(), key=lambda d: d['P'])}

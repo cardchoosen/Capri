@@ -1,0 +1,13 @@
+# User profiles take precedence; managed defaults do not overwrite them.
+Include /opt/capri/ssh/config
+Host *
+    BatchMode yes
+    StrictHostKeyChecking yes
+    UserKnownHostsFile /opt/capri/ssh/known_hosts
+    GlobalKnownHostsFile /dev/null
+    IdentityFile /opt/capri/ssh/id_ed25519
+    IdentitiesOnly yes
+    ForwardAgent no
+    ConnectTimeout 15
+    ServerAliveInterval 30
+    ServerAliveCountMax 3
