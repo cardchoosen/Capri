@@ -12,12 +12,12 @@ import sysconfig
 
 def inspect_environment():
     tools = {}
-    for name in ('git', 'curl', 'ssh', 'sftp', 'scp', 'ssh-keygen', 'ssh-keyscan'):
+    for name in ('git', 'curl', 'ssh', 'sftp', 'scp', 'ssh-keygen', 'ssh-keyscan', 'node', 'npm', 'npx', 'gcc', 'g++', 'make', 'pkg-config'):
         executable = shutil.which(name)
         try:
             if not executable:
                 raise RuntimeError('command not found')
-            if name in ('git', 'curl'):
+            if name not in ('ssh', 'sftp', 'scp', 'ssh-keygen', 'ssh-keyscan'):
                 command = [executable, '--version']
             else:
                 # SSH is the package version authority; other tools are probed for presence.
@@ -47,6 +47,13 @@ def inspect_environment():
             'package_count': len(list(importlib.metadata.distributions())), 'tls': ssl.OPENSSL_VERSION,
             'cert_file': ssl.get_default_verify_paths().cafile, 'scope': 'current chat', 'tools': tools,
             'tools_repository': manifest['repository'],
+            'development': {'npm_prefix': os.environ.get('npm_config_prefix'),
+                            'npm_cache': os.environ.get('npm_config_cache'),
+                            'node_icu_data': os.environ.get('NODE_ICU_DATA'),
+                            'compiler_sysroot': '/opt/capri/tools',
+                            'python_headers': Path('/opt/capri/tools/usr/include/python3.12/Python.h').is_file(),
+                            'scope': 'shared binaries; per-chat HOME/cache/global npm and project node_modules',
+                            'source_compilation': 'C/C++ toolchain available; python_env still wheel-only'},
             'platform_tags': list(platform_tags()), 'scientific_libraries': libraries,
             'bundled_alpine_packages': {name: info['version'] for name, info in native_manifest['packages'].items()},
             'matplotlib_backend': os.environ.get('MPLBACKEND'),

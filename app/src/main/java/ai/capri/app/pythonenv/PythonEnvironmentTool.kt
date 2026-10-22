@@ -52,7 +52,7 @@ internal object PythonEnvironmentContract {
     }
     fun specification(): JSONObject = JSONObject().put("type", "function").put("function", JSONObject()
         .put("name", "python_env")
-        .put("description", "管理当前聊天Python虚拟环境，终端python3与python_run共用此环境。status诊断解释器/venv/pip/TLS及内置Git/curl版本和可用状态，list列包和版本，freeze输出依赖清单，check检查依赖，install/uninstall安装卸载。安装优先使用已收录且满足版本条件的固定Alpine官方预编译包（Pillow、NumPy、Matplotlib及依赖可离线），其他包或版本从PyPI安装兼容wheel；不构建源码包，不保证任意原生扩展可用。status提供真实平台标签、可用内置版本与已安装库来源。操作在持续终端执行，返回terminal_id/command_id；已直接返回output/complete/has_more/next_offset；完成且无剩余时无需再read，仅未完成或有剩余时从next_offset用terminal.read续读，terminal.cancel停止，不要重复提交安装。只影响当前聊天venv，pip由引导维护，URL/本地包请用终端。")
+        .put("description", "管理当前聊天Python虚拟环境，终端python3与python_run共用此环境。status诊断解释器/venv/pip/TLS及内置Git/curl/SSH/Node/npm/GCC/G++/make等版本和可用状态，list列包和版本，freeze输出依赖清单，check检查依赖，install/uninstall安装卸载。安装优先使用已收录且满足版本条件的固定Alpine官方预编译包（Pillow、NumPy、Matplotlib及依赖可离线），其他包或版本从PyPI安装兼容wheel；不构建源码包，不保证任意原生扩展可用。status提供真实平台标签、可用内置版本与已安装库来源。操作在持续终端执行，返回terminal_id/command_id；已直接返回output/complete/has_more/next_offset；完成且无剩余时无需再read，仅未完成或有剩余时从next_offset用terminal.read续读，terminal.cancel停止，不要重复提交安装。只影响当前聊天venv，pip由引导维护，URL/本地包请用终端。")
         .put("parameters", JSONObject().put("type", "object").put("additionalProperties", false)
             .put("required", JSONArray(listOf("action"))).put("properties", JSONObject()
                 .put("action", JSONObject().put("type", "string").put("enum", JSONArray(actions)))

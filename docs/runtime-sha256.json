@@ -2,9 +2,8 @@
   "app/src/main/jniLibs/arm64-v8a/libproot.so": "cb40a1ced11cee76569b4008a9e478c87883ce831152be4eb9570763b82e580d",
   "app/src/main/jniLibs/arm64-v8a/libproot-loader.so": "f149774236db1e69b36cc1e4ed3866c7094db2eee52da0d4956aa63a9bb26929",
   "app/src/main/assets/runtime/rootfs.bundle": "d75e4639162f26a43dd5ee5702192dcf30fb8cea2a8adf453743ad27b02e76f0",
-  "app/src/main/assets/runtime/session_bootstrap.py": "10f814481f0b661ca974881021cdefdc6c99f88f0765293f960b04f2b4a32d27",
-  "app/src/main/assets/runtime/devtools.bundle": "fd15399f87a080a75fffdfa9662856d30038290e3bd9b8ad834d8ac6d75a6f74",
-  "app/src/main/assets/runtime/environment_probe.py": "ad37982013a3d3b5185f9d062ba80c21685f05cd2c1f9039b5dff50abb28bce6",
+  "app/src/main/assets/runtime/session_bootstrap.py": "f89062969e60cf1e28a9dedd4cdb943da287025fde264eaae43affd9b4e45084",
+  "app/src/main/assets/runtime/environment_probe.py": "2327e538322435a653ba11012a0f74dced698b047c18b568cc55b157bdeaab6c",
   "app/src/main/assets/runtime/git_credential.py": "352c4c6f6271b3c5eda843805d6175f6d8e592e3b0e5368e6778ccc8e16356f8",
   "app/src/main/assets/runtime/ssh_config": "021d570ed3940235a336864fea7294a3da5ad5d799b395d6d412ac5e8921ccc9",
   "app/src/main/assets/runtime/bin/ssh": "fcabdf01f4bac5f2161fcd7ecd560b35b47768149f36b766b026cf99363769fa",
@@ -12,5 +11,10 @@
   "app/src/main/assets/runtime/bin/scp": "d36e2938df35a49abe4029b1704e083adab39466aa01693ef3e6986d4717b7f8",
   "app/src/main/assets/runtime/ssh_identity.py": "809b54bb5f9455346ba2486ab3b89914fef4c2284b733d4a93f6600f51b32b87",
   "app/src/main/assets/runtime/python-packages.bundle": "bd1ff07240c6c9c8d02c164936da9b2185456a4ecde292c0f642608cdb536749",
-  "app/src/main/assets/runtime/python_packages.py": "023e4c612c6646183cc1a9a6e8ce6c7181e4331ea471298091042b441c25f0a7"
+  "app/src/main/assets/runtime/python_packages.py": "023e4c612c6646183cc1a9a6e8ce6c7181e4331ea471298091042b441c25f0a7",
+  "app/src/main/assets/runtime/devtools.parts.json": "a7eda33f351a015722fc6f0c4353b76475ce1b8661280155290fac8c7d670867",
+  "app/src/main/assets/runtime/devtools-001.bundle": "a0d2362695e04b397196fb952573bbb1e1548ec7425f772aaf7f439d346f5617",
+  "app/src/main/assets/runtime/devtools-002.bundle": "21f3acc0d98d53abb59fcfe0424939028bb727c4fc76b6cd235c41aa46f7f6c6",
+  "app/src/main/assets/runtime/devtools-003.bundle": "0ef7ea08845ae80cd9af06a289154e9bab6cb6220c1a8bd9de573c6697851519",
+  "app/src/main/assets/runtime/devtools-004.bundle": "4c9b8658f301b85c3d477692935a12917ed245b172a441bd0954896310f86ba0"
 }

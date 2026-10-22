@@ -58,14 +58,25 @@ def main():
     python = ensure_environment('/root')
     environment = dict(os.environ)
     environment.update(VIRTUAL_ENV='/root/.venv', PYTHONNOUSERSITE='1',
-                       PATH='/root/.venv/bin:/opt/capri/bootstrap/bin:/opt/capri/tools/usr/bin:/usr/local/bin:/usr/bin:/bin',
+                       PATH='/root/.venv/bin:/opt/capri/bootstrap/bin:/root/.local/npm/bin:/opt/capri/tools/capri-bin:/opt/capri/tools/usr/bin:/usr/local/bin:/usr/bin:/bin',
                        LD_LIBRARY_PATH='/opt/capri/python-packages/usr/lib:/opt/capri/python-packages/lib:/opt/capri/tools/usr/lib:/opt/capri/tools/lib',
+                       npm_config_prefix='/root/.local/npm', npm_config_cache='/root/.cache/npm',
+                       npm_config_cafile='/opt/capri/tools/etc/ssl/cert.pem',
+                       npm_config_update_notifier='false', npm_config_audit='false', npm_config_fund='false',
+                       NODE_EXTRA_CA_CERTS='/opt/capri/tools/etc/ssl/cert.pem', PYTHON='/root/.venv/bin/python3',
+                       CPATH='/opt/capri/tools/usr/include/python3.12',
+                       PKG_CONFIG_LIBDIR='/opt/capri/tools/usr/lib/pkgconfig:/opt/capri/tools/usr/share/pkgconfig',
+                       PKG_CONFIG_SYSROOT_DIR='/opt/capri/tools',
                        MPLBACKEND='Agg', MPLCONFIGDIR='/root/.cache/matplotlib', OPENBLAS_NUM_THREADS='1',
                        GIT_EXEC_PATH='/opt/capri/tools/usr/libexec/git-core',
                        GIT_TEMPLATE_DIR='/opt/capri/tools/usr/share/git-core/templates',
                        GIT_TERMINAL_PROMPT='0', GIT_PAGER='cat',
                        GIT_SSL_CAINFO='/opt/capri/tools/etc/ssl/cert.pem',
                        CURL_CA_BUNDLE='/opt/capri/tools/etc/ssl/cert.pem')
+    # Alpine's external ICU data must follow the relocated tool layer, not /usr/share.
+    icu = list(Path('/opt/capri/tools/usr/share/icu').glob('*/icudt*l.dat'))
+    if len(icu) == 1:
+        environment['NODE_ICU_DATA'] = environment['ICU_DATA'] = str(icu[0].parent)
     # Runtime configuration, not credential material. Empty helper resets file-based helpers.
     git_config = [('credential.helper', ''),
                   ('credential.helper', '!/root/.venv/bin/python3 -I /opt/capri/bootstrap/git_credential.py'),
