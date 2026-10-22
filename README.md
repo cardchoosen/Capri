@@ -76,7 +76,7 @@ python_run 与持续终端统一使用当前会话 `/root/.venv`；首次使用�
 
 ## 全局 Git Token 账号
 
-入口：运行 → Git 账号 · 全局。每个 HTTPS 主机（含可选端口）保存一个用户名/Token，供所有会话的 Git 认证共用；支持多主机、更新、删除及指定仓库读取测试。界面不回显已保存 Token，编辑留空保留原值。认证与提交署名分开，署名仍按仓库/会话设置；支持采用 HTTPS 用户名/Token 认证的 GitHub/GitLab/自建服务，不含浏览器 OAuth、SSH 或同主机多账号切换。
+入口：运行 → Git 账号 · 全局。GitHub（github.com）只填 Token，保存新 Token 时经固定 https://api.github.com/user 自动识别用户名，无需手填；其他 HTTPS 主机（含可选端口）仍填写用户名/Token，供所有会话的 Git 认证共用；支持多主机、更新、删除及指定仓库读取测试。界面不回显已保存 Token，编辑留空保留原值且不联网识别。GitHub识别保持TLS校验、不跟随重定向，20秒总超时/可取消/16KiB响应上限；仅取login，不展示完整账号资料，失败不替换原凭据。旧账号直接兼容，无需重新填写。认证与提交署名分开，署名仍按仓库/会话设置；支持采用 HTTPS 用户名/Token 认证的 GitHub/GitLab/自建服务，不含浏览器 OAuth、SSH 或同主机多账号切换。
 
 Token 用独立 Android Keystore AES-GCM 密钥加密，AAD绑定主机和用户名，存入应用私有偏好设置；默认不写入仓库URL、会话文件、命令/日志、进程参数或环境变量，也不作为模型工具结果返回。Git运行时重置文件凭据助手链，调用Python helper，经有长度/超时限制的抽象Unix socket向Android broker取值；broker验证对端真实UID、HTTPS、精确主机/端口及显式用户名。凭据仅通过内存/管道传给Git，不为curl注入认证。Git store/erase不改写用户维护的全局账号；更新/删除影响既有终端的后续认证，已发出的请求不撤销，本地删除不等于撤销平台Token。
 

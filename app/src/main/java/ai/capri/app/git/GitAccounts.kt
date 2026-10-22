@@ -6,6 +6,8 @@ import android.security.keystore.KeyProperties
 import android.util.Base64
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import org.json.JSONObject
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -50,8 +52,8 @@ internal class GitSecret(val username: String, val token: String) {
 }
 
 /** Application-wide accounts. Token plaintext is never stored in a session or returned by list(). */
-internal class GitAccounts(context: Context) {
-    private val prefs = context.applicationContext.getSharedPreferences("git-accounts", Context.MODE_PRIVATE)
+internal class GitAccounts(context: Context, preferencesName: String = "git-accounts") {
+    private val prefs = context.applicationContext.getSharedPreferences(preferencesName, Context.MODE_PRIVATE)
     companion object { private val lock = Any() }
     private fun key(): SecretKey {
         val keys = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
@@ -65,6 +67,18 @@ internal class GitAccounts(context: Context) {
         prefs.all.mapNotNull { (host, raw) -> runCatching {
             GitAccountSummary(host, JSONObject(raw as String).getString("username"))
         }.getOrNull() }.sortedBy { it.host }
+    }
+    suspend fun saveFromSettings(rawHost: String, rawUsername: String, rawToken: String,
+                                 resolveGitHub: suspend (String) -> String = { GitHubAccountResolver.username(it) }): GitAccountSummary {
+        val host = GitCredentialPolicy.host(rawHost)
+        val username = if (host == "github.com") {
+            if (rawToken.isBlank()) list().firstOrNull { it.host == host }?.username
+                ?: throw IllegalArgumentException("请填写 Token")
+            else resolveGitHub(GitCredentialPolicy.token(rawToken))
+        } else GitCredentialPolicy.username(rawUsername)
+        currentCoroutineContext().ensureActive()
+        save(host, username, rawToken)
+        return GitAccountSummary(host, username)
     }
     fun save(rawHost: String, rawUsername: String, rawToken: String) = synchronized(lock) {
         val host = GitCredentialPolicy.host(rawHost)

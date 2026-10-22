@@ -26,6 +26,7 @@ import kotlinx.coroutines.withContext
     var repository by remember { mutableStateOf("") }
     var message by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
+    val automaticUsername = runCatching { GitCredentialPolicy.host(host) == "github.com" }.getOrDefault(false)
     val scope = rememberCoroutineScope()
     fun reset() { editing = null; host = "github.com"; username = ""; token = ""; repository = ""; message = "" }
     AlertDialog(onDismissRequest = onDismiss, title = { Text("Git 账号 · 全局") }, text = {
@@ -55,7 +56,8 @@ import kotlinx.coroutines.withContext
             }
             if (editing != null) TextButton(enabled = !busy, onClick = { reset() }) { Text("添加其他主机") }
             OutlinedTextField(host, { host = it; message = "" }, label = { Text("HTTPS 主机") }, placeholder = { Text("github.com") }, enabled = !busy && editing == null, singleLine = true)
-            OutlinedTextField(username, { username = it; message = "" }, label = { Text("Git 用户名") }, enabled = !busy, singleLine = true)
+            if (automaticUsername) Text("GitHub 只需填写 Token，保存时自动识别账号。", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            else OutlinedTextField(username, { username = it; message = "" }, label = { Text("Git 用户名") }, enabled = !busy, singleLine = true)
             OutlinedTextField(token, { token = it; message = "" }, label = { Text(if (editing != null) "新 Token（留空保留）" else "Token") },
                 enabled = !busy, singleLine = true, visualTransformation = PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false))
@@ -64,7 +66,9 @@ import kotlinx.coroutines.withContext
                     busy = true
                     try {
                         val canonical = GitCredentialPolicy.host(host)
-                        withContext(Dispatchers.IO) { accounts.save(host, username, token) }
+                        message = if (automaticUsername && token.isNotBlank()) "正在识别 GitHub 账号…" else "正在保存…"
+                        val saved = withContext(Dispatchers.IO) { accounts.saveFromSettings(host, username, token) }
+                        username = saved.username
                         editing = canonical; host = canonical; token = ""; entries = accounts.list()
                         message = "已保存，所有会话的后续 Git 认证可使用"
                     } catch (cancel: CancellationException) { throw cancel }
