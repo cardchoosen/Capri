@@ -54,7 +54,8 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
         val session = current()
         if (IdentityReply.matches(text)) {
             session.messages.add(Entry("user", text.trim()))
-            session.messages.add(Entry("assistant", IdentityReply.TEXT))
+            session.messages.forEach { it.reveal?.finish() }
+            session.messages.add(Entry("assistant", IdentityReply.TEXT, FinalReplyReveal()))
             if (session.title == "新会话") session.title = text.trim().take(20)
             notices.remove(session.id)
             persist()
@@ -62,6 +63,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
         }
         val config = store.config()
         if (config.model.isBlank() || config.key.isBlank()) { notices[session.id] = "请先在设置中配置模型与 API Key"; refresh(); return false }
+        session.messages.forEach { it.reveal?.finish() }
         session.messages.add(Entry("user", text.trim()))
         if (session.title == "新会话") session.title = text.take(20)
         persist()
@@ -150,7 +152,8 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                 calls.getJSONObject(it).getJSONObject("function").getString("name")
             }
             if (content.isNotBlank() && ToolPresentation.showPreamble(names)) {
-                session.messages.add(Entry("assistant", content)); persist()
+                val finalReply = calls == null || calls.length() == 0
+                session.messages.add(Entry("assistant", content, if (finalReply) FinalReplyReveal() else null)); persist()
             }
             if (calls == null || calls.length() == 0) {
                 withContext(Dispatchers.IO) { recovery.clear(session.id) }

@@ -2,6 +2,7 @@ package ai.capri.app
 
 import android.graphics.Typeface
 import android.text.Spanned
+import android.text.SpannedString
 import android.text.method.LinkMovementMethod
 import android.widget.TextView
 import androidx.compose.foundation.*
@@ -27,6 +28,7 @@ import io.noties.markwon.Markwon
 import io.noties.markwon.core.MarkwonTheme
 import io.noties.markwon.ext.tables.TablePlugin
 import io.noties.markwon.ext.strikethrough.StrikethroughPlugin
+import kotlinx.coroutines.delay
 import org.commonmark.node.*
 import org.commonmark.ext.gfm.tables.TableBlock
 import org.commonmark.ext.gfm.tables.TableCell
@@ -85,7 +87,40 @@ internal fun replyBlocks(markdown: String, engine: Markwon): List<ReplyBlock> {
     return result
 }
 
-@Composable internal fun MarkdownReply(markdown: String) {
+/** Full Markdown is parsed once; only rendered text is sliced, so unfinished fences never flash. */
+private class RevealBlock(val block: ReplyBlock) {
+    private val parts: List<CharSequence> = when (block) {
+        is ReplyBlock.Prose -> listOf(block.text)
+        is ReplyBlock.Code -> listOf(block.text.trimEnd('\n'))
+        is ReplyBlock.Table -> block.rows.flatten()
+    }
+    private val boundaries = parts.map(RevealText::boundaries)
+    val units = boundaries.sumOf { it.size }
+    fun part(index: Int, budget: Int): CharSequence {
+        val original = parts[index]
+        return if (budget >= boundaries[index].size) original
+        else original.subSequence(0, RevealText.end(boundaries[index], budget))
+    }
+    fun table(budget: Int): List<List<Spanned>> {
+        val table = block as ReplyBlock.Table
+        val rows = mutableListOf<List<Spanned>>()
+        var remaining = budget
+        var part = 0
+        table.rows.forEach { row ->
+            val started = remaining > 0 || budget >= units
+            val cells = row.map {
+                val shown = part(part, remaining)
+                remaining = (remaining - boundaries[part].size).coerceAtLeast(0)
+                part++
+                shown as? Spanned ?: SpannedString(shown)
+            }
+            if (started) rows += cells
+        }
+        return rows
+    }
+}
+
+@Composable internal fun MarkdownReply(markdown: String, reveal: FinalReplyReveal? = null) {
     val context = LocalContext.current
     val density = androidx.compose.ui.platform.LocalDensity.current
     val engine = remember(context, density.density, density.fontScale) {
@@ -104,16 +139,35 @@ internal fun replyBlocks(markdown: String, engine: Markwon): List<ReplyBlock> {
             }).build()
     }
     val blocks = remember(markdown, engine) { replyBlocks(markdown, engine) }
+    val plans = remember(blocks) { blocks.map(::RevealBlock) }
+    val total = remember(plans) { plans.sumOf { it.units } }
+    var visible by remember(markdown, reveal) { mutableIntStateOf(reveal?.visibleUnits(total) ?: total) }
+    LaunchedEffect(reveal, total) {
+        if (reveal != null) while (visible < total) {
+            visible = reveal.visibleUnits(total)
+            if (visible < total) delay(32)
+        }
+    }
     val clipboard = LocalClipboardManager.current
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        blocks.forEach { block ->
-            when (block) {
-                is ReplyBlock.Prose -> RichText(block.text)
-                is ReplyBlock.Code -> CodeCard(block)
-                is ReplyBlock.Table -> MarkdownTable(block.rows)
+        var remaining = visible
+        plans.forEach { plan ->
+            if (remaining > 0 || visible >= total && plan.units == 0) {
+                when (val block = plan.block) {
+                    is ReplyBlock.Prose -> {
+                        val shown = plan.part(0, remaining)
+                        RichText(shown as? Spanned ?: SpannedString(shown))
+                    }
+                    is ReplyBlock.Code -> CodeCard(block, plan.part(0, remaining).toString())
+                    is ReplyBlock.Table -> MarkdownTable(plan.table(remaining))
+                }
             }
+            remaining = (remaining - plan.units).coerceAtLeast(0)
         }
-        TextButton(onClick = { clipboard.setText(AnnotatedString(markdown)) }, contentPadding = PaddingValues(horizontal = 0.dp, vertical = 4.dp)) {
+        TextButton(onClick = {
+            clipboard.setText(AnnotatedString(markdown))
+            reveal?.finish(); visible = total
+        }, contentPadding = PaddingValues(horizontal = 0.dp, vertical = 4.dp)) {
             Icon(Icons.Outlined.ContentCopy, null, Modifier.size(14.dp), tint = Color(0xFF939E94))
             Spacer(Modifier.width(6.dp)); Text("复制回复", color = Color(0xFF939E94), fontSize = 11.sp)
         }
@@ -138,7 +192,7 @@ internal fun replyBlocks(markdown: String, engine: Markwon): List<ReplyBlock> {
     })
 }
 
-@Composable private fun CodeCard(code: ReplyBlock.Code) {
+@Composable private fun CodeCard(code: ReplyBlock.Code, displayedText: String = code.text.trimEnd('\n')) {
     val clipboard = LocalClipboardManager.current
     var copied by remember(code.text) { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().border(1.dp, MarkdownLine, RoundedCornerShape(2.dp)).background(MarkdownPanel, RoundedCornerShape(2.dp))) {
@@ -151,7 +205,7 @@ internal fun replyBlocks(markdown: String, engine: Markwon): List<ReplyBlock> {
         HorizontalDivider(color = MarkdownLine)
         SelectionContainer {
             Box(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(10.dp)) {
-                Text(code.text.trimEnd('\n'), color = MarkdownWhite, fontFamily = FontFamily.Monospace, fontSize = 13.sp, lineHeight = 21.sp, softWrap = false)
+                Text(displayedText, color = MarkdownWhite, fontFamily = FontFamily.Monospace, fontSize = 13.sp, lineHeight = 21.sp, softWrap = false)
             }
         }
     }

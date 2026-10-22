@@ -15,7 +15,7 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-data class Entry(val role: String, val text: String)
+data class Entry(val role: String, val text: String, internal val reveal: FinalReplyReveal? = null)
 data class Session(val id: String = UUID.randomUUID().toString(), var title: String = "新会话", val messages: MutableList<Entry> = mutableListOf())
 data class ModelConfig(val endpoint: String = "https://api.openai.com/v1", val model: String = "", val key: String = "")
 
