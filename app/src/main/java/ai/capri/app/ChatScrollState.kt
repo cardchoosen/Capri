@@ -1,10 +1,15 @@
 package ai.capri.app
 
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 
-/** Kept outside the tab content, in memory only: a fresh app opens at the latest message. */
-internal class ChatScrollState(var messageCount: Int) {
-    // The timeline is reversed, so index zero is already the bottom, even for a tall reply.
-    val list = LazyListState()
-    var followLatest = true
+/** Chronological rows end with a tiny sentinel: fresh layout clamps here and fills backwards. */
+internal class ChatScrollState(messageCount: Int) {
+    val list = LazyListState(firstVisibleItemIndex = messageCount)
+    var followLatest by mutableStateOf(true)
+    var userScrollPending by mutableStateOf(false)
+    val expandedGroups = mutableStateMapOf<Int, Boolean>()
 }

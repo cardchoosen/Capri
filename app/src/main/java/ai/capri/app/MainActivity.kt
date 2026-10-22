@@ -180,32 +180,7 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                         } else {
-                            val listState = chatPosition.list
-                            LaunchedEffect(chatPosition) {
-                                snapshotFlow {
-                                    if (listState.isScrollInProgress) listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0 else null
-                                }.collect { atBottom -> if (atBottom != null) chatPosition.followLatest = atBottom }
-                            }
-                            LaunchedEffect(chatPosition, entries.size) {
-                                if (chatPosition.messageCount != entries.size) {
-                                    chatPosition.messageCount = entries.size
-                                    if (chatPosition.followLatest) listState.scrollToItem(0)
-                                }
-                            }
-                            val timeline = remember(entries) { entries.asReversed() }
-                            LazyColumn(state = listState, reverseLayout = true, modifier = Modifier.weight(1f), contentPadding = PaddingValues(16.dp)) {
-                                itemsIndexed(timeline, key = { index, _ -> "${session.id}:${entries.lastIndex - index}" }) { reverseIndex, message ->
-                                    val index = entries.lastIndex - reverseIndex
-                                    if (index > 0) Spacer(Modifier.height(if (message.role == "tool" || entries[index - 1].role == "tool") 6.dp else 18.dp))
-                                    if (message.role == "tool") ToolOutputRow(message.text)
-                                    else Column(Modifier.fillMaxWidth().then(if (message.role == "user") Modifier.background(Panel, RoundedCornerShape(2.dp)).padding(12.dp) else Modifier)) {
-                                        Text(when(message.role) { "user" -> "YOU"; "assistant" -> "CAPRI"; "tool" -> "TOOL / 本机"; else -> "SYSTEM" }, color = if(message.role == "assistant") Green else if(message.role == "status") Red else Muted, fontFamily = FontFamily.Monospace, fontSize = 10.sp, letterSpacing = 2.sp)
-                                        Spacer(Modifier.height(8.dp))
-                                        if (message.role == "assistant") MarkdownReply(message.text, message.reveal)
-                                        else androidx.compose.foundation.text.selection.SelectionContainer { Text(message.text, fontSize = if(message.role == "tool") 12.sp else 15.sp, color = if(message.role == "tool") Muted else White, lineHeight = 24.sp, fontFamily = if(message.role == "tool") FontFamily.Monospace else FontFamily.Default) }
-                                    }
-                                }
-                            }
+                            ConversationTimeline(entries, busy, chatPosition, Modifier.weight(1f))
                         }
                         notice?.let { Text(it, color = Green, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp)) }
                         Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp).border(1.dp, if (busy) Red else Line, RoundedCornerShape(2.dp)).background(Panel, RoundedCornerShape(2.dp)).padding(2.dp), verticalAlignment = Alignment.Bottom) {

@@ -15,7 +15,7 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-data class Entry(val role: String, val text: String, internal val reveal: FinalReplyReveal? = null)
+data class Entry(val role: String, val text: String, internal val reveal: FinalReplyReveal? = null, internal val finalReply: Boolean = reveal != null)
 data class Session(val id: String = UUID.randomUUID().toString(), var title: String = "新会话", val messages: MutableList<Entry> = mutableListOf())
 data class ModelConfig(val endpoint: String = "https://api.openai.com/v1", val model: String = "", val key: String = "")
 
@@ -49,7 +49,7 @@ class Store(val context: Context) {
             val obj = data.getJSONObject(i)
             val messages = obj.getJSONArray("messages")
             Session(obj.getString("id"), obj.getString("title"), (0 until messages.length()).map { j ->
-                messages.getJSONObject(j).let { Entry(it.getString("role"), it.getString("text")) }
+                messages.getJSONObject(j).let { Entry(it.getString("role"), it.getString("text"), finalReply = it.optBoolean("final_reply", false)) }
             }.toMutableList())
         }.toMutableList()
     }.getOrElse { mutableListOf(Session()) }
@@ -57,7 +57,7 @@ class Store(val context: Context) {
         val data = JSONArray()
         sessions.forEach { s ->
             val messages = JSONArray()
-            s.messages.forEach { messages.put(JSONObject().put("role", it.role).put("text", it.text)) }
+            s.messages.forEach { messages.put(JSONObject().put("role", it.role).put("text", it.text).put("final_reply", it.finalReply)) }
             data.put(JSONObject().put("id", s.id).put("title", s.title).put("messages", messages))
         }
         val stream = index.startWrite()
