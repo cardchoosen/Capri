@@ -210,11 +210,7 @@ class MainActivity : ComponentActivity() {
                             OutlinedButton(onClick = { gitAccounts = true }) { Text("Git 账号 · 全局") }
                             Text("设备、网络、Wi-Fi、定位、应用与系统操作统一由 android 工具调用。", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(vertical = 12.dp))
                             Text("ON DEVICE / ARM64", color = Green, fontSize = 11.sp, fontFamily = FontFamily.Monospace, letterSpacing = 2.sp)
-                            Spacer(Modifier.height(16.dp)); Text(vm.runtime.status(), color = White, lineHeight = 24.sp)
-                            Spacer(Modifier.height(16.dp))
-                            Button(onClick = { vm.installRuntime() }, enabled = !vm.runtimeBusy) { Text(if(vm.runtimeBusy) "正在准备环境…" else if(vm.runtime.ready) "验证 Python" else "初始化 Python 环境") }
-                            OutlinedButton(onClick = { vm.inspectPythonEnvironment() }, enabled = !vm.runtimeBusy && vm.runtime.ready) { Text("诊断当前会话环境") }
-                            if(vm.runtimeResult.isNotEmpty()) Text(vm.runtimeResult, color = Green, fontFamily = FontFamily.Monospace, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
+                            EnvironmentPanel(vm)
                             Spacer(Modifier.height(24.dp)); Text("会话独立目录", color = Green); Text("workspace / 任务文件\nhome / 用户目录\ntmp / 临时文件\nruns / 脚本与执行日志", color = Muted, lineHeight = 28.sp, modifier = Modifier.padding(vertical = 12.dp), fontFamily = FontFamily.Monospace)
                             Text("运行模型：单 APK · Android 原生调度 · PRoot/Python。PRoot 与 Android 共用内核，各会话属于同一应用 UID；目录分离不构成恶意代码安全隔离。", color = Muted, lineHeight = 24.sp, fontSize = 13.sp)
 

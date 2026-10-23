@@ -34,7 +34,8 @@ files/
   agent-recovery/<chat-id>.json    # 未完成任务检查点，完成后删除
   runtime/rootfs/                 # 共享基础环境
   runtime/bootstrap-v1/           # 管理会话环境的启动脚本
-  runtime/tools/<bundle-sha256>/   # Git/curl、动态依赖、模板与证书；版本目录
+  runtime/tools/current/           # 当前一套开发工具、动态依赖、模板与证书
+  runtime/python-packages/current/ # 当前科学库候选wheel与共享动态库
   sessions/<session-id>/
     workspace/                    # 用户/Agent任务文件
     home/                         # 当前会话HOME，含.venv及pip
@@ -125,6 +126,14 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 SSH包装脚本使用APK维护的配置，先Include用户全局config，再应用默认值；SFTP/SCP通过同一SSH包装器启动，解决其编译期 `/usr/bin/ssh` 与独立工具层路径不同的问题。未知/变化指纹默认拒绝；ssh-keyscan仅用于获取候选公钥，须与用户/服务器可信来源核对后才写known_hosts，不能直接据扫描结果自动信任。用户明确提供的命令行选项可覆盖默认值，原始终端不构成强制策略沙箱。没有受管的密码登录、加密私钥解锁/ssh-agent或完整ANSI远程终端模拟器。
 
-OpenSSH需要Linux账号查询，因此PRoot增加 `-0` 兼容身份映射：客体getuid显示0，Android真实UID、内核权限和网络/文件访问约束保持不变。新增组件使用现有版本化工具层，不覆盖rootfs、venv、用户文件或旧工具版本；已运行终端需新开后才能使用新版启动配置。
+OpenSSH需要Linux账号查询，因此PRoot增加 `-0` 兼容身份映射：客体getuid显示0，Android真实UID、内核权限和网络/文件访问约束保持不变。新增组件使用单一当前工具层，不覆盖rootfs、venv或用户文件；有持续终端/脚本时拒绝更新，空闲部署成功后清理旧SHA目录。
 
 验收入口：`python3 tools/verify_ssh_device.py --adb <adb路径> --dependencies work/ssh-fixture-python`，开发机需Paramiko 4.0.0。测试生成专用密钥，仅连接开发机loopback SSH/SFTP服务；ADB reverse只作开发测试传输，结束后移除，实际连接用户服务器无需ADB或Root。已验证远端退出码、未知/变化指纹、错误密钥拒绝、SFTP/SCP往返、SSH Git及命令超时；测试不使用用户真实SSH私钥。
+
+## 当前环境检查与修复
+
+运行页显示基础Python、开发工具、科学库的状态/版本/逻辑占用，以及当前聊天的文件、依赖和缓存大小。检查环境对照APK可信清单核对文件SHA-256、链接和执行权限，再运行诊断；不检查额外手装文件或Python自动生成字节码。详细输出默认折叠。
+
+只保留当前应用内置的一套工具，摘要是内容标识；不在线自动追踪上游最新，也不提供多版本选择。工具/科学库成功部署后清理旧SHA目录；.staging/.previous仅用于事务提交/恢复，成功后删除。已有rootfs不隐式覆盖；运行页确认后可修复所选组件，保留聊天、工作区、会话依赖、SSH/Git配置；基础修复会覆盖rootfs手工修改并可能影响依赖兼容性。活跃终端/脚本期间拒绝替换，不自动结束任务。
+
+修改运行资源包后执行python3 tools/build_environment_inventory.py，重新生成.files.json/rootfs.sha256并更新docs/runtime-sha256.json。V2-02仍有缓存清理、会话依赖重置及兼容性评估待完成；完整版本档案见独立Capri-docs仓库。

@@ -16,5 +16,9 @@
   "app/src/main/assets/runtime/devtools-001.bundle": "a0d2362695e04b397196fb952573bbb1e1548ec7425f772aaf7f439d346f5617",
   "app/src/main/assets/runtime/devtools-002.bundle": "21f3acc0d98d53abb59fcfe0424939028bb727c4fc76b6cd235c41aa46f7f6c6",
   "app/src/main/assets/runtime/devtools-003.bundle": "0ef7ea08845ae80cd9af06a289154e9bab6cb6220c1a8bd9de573c6697851519",
-  "app/src/main/assets/runtime/devtools-004.bundle": "4c9b8658f301b85c3d477692935a12917ed245b172a441bd0954896310f86ba0"
+  "app/src/main/assets/runtime/devtools-004.bundle": "4c9b8658f301b85c3d477692935a12917ed245b172a441bd0954896310f86ba0",
+  "app/src/main/assets/runtime/rootfs.files.json": "33ad401352f14bc40020dd9ace3d6e996e7d832bb9aa05e6fa6a864ed2b4c842",
+  "app/src/main/assets/runtime/rootfs.sha256": "b63e6eae744e7c1547f0596d59ecf3d4569e794bd63d268910399495269d3f56",
+  "app/src/main/assets/runtime/devtools.files.json": "542847ab84dad89f144f0f0c574b1d5dafd31559ba902cfcc65a3133059ec3b5",
+  "app/src/main/assets/runtime/python-packages.files.json": "9549e3036fc29715d93b595825a129921f31e1825d58053e74fece2510cb8756"
 }

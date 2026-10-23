@@ -36,16 +36,7 @@ class PythonRuntime(private val context: Context, private val workspace: Workspa
     suspend fun install(): String = withContext(Dispatchers.IO) {
         if (ready) return@withContext probe()
         check(proot.exists() && loader.exists()) { "APK缺少ARM64原生执行组件" }
-        val archive = File(context.cacheDir, "rootfs.tar.gz")
-        context.assets.open("runtime/rootfs.bundle").use { input -> archive.outputStream().use { input.copyTo(it) } }
-        rootfs.mkdirs()
-        val log = File(context.cacheDir, "runtime-install.log")
-        val process = ProcessBuilder("/system/bin/tar", "-xzf", archive.path, "-C", rootfs.path).redirectErrorStream(true).redirectOutput(log).start()
-        try {
-            withTimeout(120_000) { while (!process.waitFor(100, TimeUnit.MILLISECONDS)) kotlin.coroutines.coroutineContext.ensureActive() }
-            check(process.exitValue() == 0) { "环境解包失败：" + log.readText().take(2000) }
-            check(ready) { "环境文件不完整" }
-        } finally { process.destroyForcibly(); archive.delete() }
+        RuntimeGate.mutate(context) { ManagedBundle.prepare(context, ManagedBundle.base) }
         probe()
     }
     suspend fun probe(): String = execute("runtime-check", "import sys, pathlib, platform\nprint('Capri runtime ready')\nprint(sys.version)\nprint(platform.machine())\nprint('workspace:', pathlib.Path.cwd())")
@@ -56,8 +47,7 @@ class PythonRuntime(private val context: Context, private val workspace: Workspa
         val run = workspace.folder(id, "runs").resolve(java.util.UUID.randomUUID().toString()).apply { mkdirs() }
         val script = File(run, "main.py").apply { writeText(code) }
         val output = File(run, "output.txt")
-        val builder = processBuilder(id, run, listOf("/usr/bin/python3", "/run/capri/main.py"))
-        val process = builder.redirectErrorStream(true).redirectOutput(output).start()
+        val process = startProcess(id, run, listOf("/usr/bin/python3", "/run/capri/main.py"), output)
         try {
             val completed = withTimeoutOrNull(60_000) {
                 while (!process.waitFor(100, TimeUnit.MILLISECONDS)) {
@@ -76,7 +66,13 @@ class PythonRuntime(private val context: Context, private val workspace: Workspa
         } finally { process.destroyForcibly(); script.setReadOnly() }
     }
     /** Shared launch configuration; both short Python and persistent terminals use the same mappings. */
-    internal fun processBuilder(id: String, run: File, command: List<String>): ProcessBuilder {
+    internal fun startProcess(id: String, run: File, command: List<String>, output: File? = null, kind: String = "脚本"): Process =
+        RuntimeGate.start(context, id, kind) {
+            val builder = processBuilder(id, run, command)
+            if (output != null) builder.redirectErrorStream(true).redirectOutput(output)
+            builder.start()
+        }
+    private fun processBuilder(id: String, run: File, command: List<String>): ProcessBuilder {
         check(ready) { status() }
         val bootstrap = prepareBootstrap()
         val tools = DevelopmentTools.prepare(context)

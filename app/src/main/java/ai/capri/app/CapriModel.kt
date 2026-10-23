@@ -38,6 +38,41 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
         .writeTimeout(30, TimeUnit.SECONDS).callTimeout(120, TimeUnit.SECONDS).build()
     var runtimeBusy = false
     var runtimeResult = ""
+    private val environment = EnvironmentManager(app, runtime)
+    internal var environmentReport: EnvironmentReport? = null
+    internal var environmentReportChat: String? = null
+    internal var environmentMessage = ""
+    internal fun inspectEnvironment(deep: Boolean = false) {
+        if (runtimeBusy) return
+        val chat = selected
+        if (environmentReportChat != chat) environmentReport = null
+        environmentReportChat = chat
+        runtimeBusy = true; environmentMessage = if (deep) "正在校验组件并运行诊断…" else "正在读取环境状态…"; refresh()
+        viewModelScope.launch {
+            try {
+                environmentReport = environment.inspect(chat, deep)
+                environmentMessage = if (deep) "检查完成；文件差异可能来自损坏或手动修改。" else "仅保留当前应用提供的一套工具。"
+            } catch (cancel: CancellationException) { throw cancel }
+            catch (error: Exception) { environmentMessage = "检查失败：${error.message?.take(500)}" }
+            finally { runtimeBusy = false; refresh() }
+        }
+    }
+    internal fun repairEnvironment(component: String) {
+        if (runtimeBusy) return
+        if (jobs.isNotEmpty()) { environmentMessage = "请先停止各会话中的Agent任务，再修复环境。"; refresh(); return }
+        val chat = selected
+        runtimeBusy = true; environmentMessage = "正在重新部署组件，保留会话依赖、文件和凭据…"; refresh()
+        viewModelScope.launch {
+            try {
+                environment.repair(component)
+                environmentReport = environment.inspect(chat, false)
+                environmentReportChat = chat
+                environmentMessage = "组件已重新部署，旧工具目录已清理；可再次检查环境。"
+            } catch (cancel: CancellationException) { throw cancel }
+            catch (error: Exception) { environmentMessage = "未完成修复：${error.message?.take(500)}" }
+            finally { runtimeBusy = false; refresh() }
+        }
+    }
     fun installRuntime() {
         if(runtimeBusy) return
         runtimeBusy = true; refresh()

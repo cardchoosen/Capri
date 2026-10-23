@@ -92,7 +92,7 @@ class GitAccountsDeviceTest {
                         val advertise = request[0] == "GET"
                         val args = listOf("/opt/capri/tools/usr/bin/git", service.removePrefix("git-"), "--stateless-rpc") +
                             (if (advertise) listOf("--advertise-refs") else emptyList()) + "/workspace/repos/private.git"
-                        val process = runtime.processBuilder(first, store.workspace.folder(first,"fixture-run"), args).start()
+                        val process = runtime.startProcess(first, store.workspace.folder(first,"fixture-run"), args)
                         process.outputStream.use { it.write(body) }
                         val data = process.inputStream.readBytes()
                         check(process.waitFor(20, java.util.concurrent.TimeUnit.SECONDS) && process.exitValue() == 0)

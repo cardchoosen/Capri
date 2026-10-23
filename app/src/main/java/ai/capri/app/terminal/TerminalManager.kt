@@ -308,8 +308,8 @@ internal class TerminalManager private constructor(private val context: Context)
         context.assets.open("runtime/terminal_supervisor.py").use { input -> File(root, "supervisor.py").outputStream().use { input.copyTo(it) } }
         records[id] = record
         try {
-            val process = runtime.processBuilder(chat, root, listOf("/usr/bin/python3", "/run/capri/supervisor.py"))
-                .redirectErrorStream(true).redirectOutput(File(root, "supervisor.log")).start()
+            val process = runtime.startProcess(chat, root, listOf("/usr/bin/python3", "/run/capri/supervisor.py"),
+                File(root, "supervisor.log"), "持续终端")
             processes[id] = process
             persist()
             val ready = withTimeoutOrNull(30_000) {

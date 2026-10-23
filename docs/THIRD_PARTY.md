@@ -52,7 +52,7 @@ APK资源使用 `rootfs.bundle` 文件名保存gzip压缩tar，避免AAPT自动�
 `devtools.bundle` 包含 Alpine v3.22/main/aarch64 的 Git 2.49.1-r0、curl 8.14.1-r4、Git 模板、证书及其动态依赖。musl ELF 解释器沿用基础 rootfs，不在工具层替换。包版本、下载地址、源码 aports commit、上游地址、许可证和 APK SHA-256 全部记录在 `devtools-packages.json`；该版本沿用发行版维护分支，并非上游最新版本。
 
 - 构建：`python3 tools/build_devtools.py`，按锁定清单校验 APK SHA-256 后生成确定性资源包；首次解析索引的命令见脚本。索引和初次 APK 均经官方 HTTPS 获取，未执行 Alpine APK 签名验证。后续重建校验已记录摘要，摘要不等同签名认证。
-- 运行期：校验 APK 内资源包 SHA-256，解压到版本目录并原子切换可见性，不覆盖基础 rootfs、会话 HOME/venv 或工作区。总计18项元数据，实际附带17个包（musl只记录依赖来源）。首次部署无需联网，后续 Git/HTTP 访问按任务联网。
+- 运行期：校验 APK 内资源包 SHA-256，解压到单一当前目录并原子切换可见性，不覆盖基础 rootfs、会话 HOME/venv 或工作区。总计18项元数据，实际附带17个包（musl只记录依赖来源）。首次部署无需联网，后续 Git/HTTP 访问按任务联网。
 - Git GPL-2.0 文本：`GIT-COPYING.txt`，来源 https://github.com/git/git/blob/v2.49.1/COPYING；curl 许可证：`CURL-COPYING.txt`，来源 https://github.com/curl/curl/blob/curl-8_14_1/COPYING。其他依赖许可证分别见清单，公开发行前仍需完成对应源码/许可材料收集。
 - Git 路径配置：https://git-scm.com/docs/git；curl 证书策略：https://curl.se/docs/sslcerts.html。工具层提供 CA bundle，默认保持证书校验；不配置全局 Git 作者或收集凭据。
 
@@ -68,10 +68,10 @@ APK资源使用 `rootfs.bundle` 文件名保存gzip压缩tar，避免AAPT自动�
 
 `python-packages.bundle` 固定取自 Alpine v3.22 main/community aarch64：Matplotlib 3.9.3-r0、NumPy 2.2.4-r1、Pillow 11.2.1-r0及其依赖，52项来源记录、34个实际附带APK。完整版本、上游/aports、许可证、URL、APK SHA-256见 `python-native-packages.json`。它与系统 Python 3.12 ABI匹配，不代表最新上游版本。
 
-- `tools/build_python_packages.py`校验锁定APK摘要，把11个Python发行包转换为仅供Capri本地使用的wheel，native tag为`cp312-cp312-linux_aarch64`，不伪称manylinux/musllinux通用轮子；保留发行包元数据/许可文件并增加capri-origin.json。共享动态依赖独立放入版本层，正常pip仍负责会话venv安装、依赖解析和卸载。
+- `tools/build_python_packages.py`校验锁定APK摘要，把11个Python发行包转换为仅供Capri本地使用的wheel，native tag为`cp312-cp312-linux_aarch64`，不伪称manylinux/musllinux通用轮子；保留发行包元数据/许可文件并增加capri-origin.json。共享动态依赖独立放入当前组件层，正常pip仍负责会话venv安装、依赖解析和卸载。
 - Alpine Matplotlib的数据和字体通过wheel `.data/data/share/matplotlib/mpl-data`方案进入venv，沿用发行版sys.prefix相对查找，不修改Matplotlib源码。默认Agg无图形后端；OpenBLAS默认单线程，适合手机执行。现有DejaVu字体不含完整中文字形，未增加中文字体包。
 - 初次解析官方HTTPS索引/APK，未执行APK签名验证；之后重建校验固定SHA-256。APK维护脚本不执行；不改基础rootfs或其不完整的apk数据库，不提供通用apk包管理。
-- 资源包约22.8MB，版本目录部署一次；Python依赖按会话安装。匹配内置无extras及版本条件时可离线安装；其余请求使用PyPI兼容wheel加本地候选，不自动放宽版本或切换源码编译。系统Python/musl不替换；旧版本不自动回收。
+- 资源包约22.8MB，当前目录部署一次；Python依赖按会话安装。匹配内置无extras及版本条件时可离线安装；其余请求使用PyPI兼容wheel加本地候选，不自动放宽版本或切换源码编译。系统Python/musl不替换；旧SHA目录在空闲且当前组件部署成功后清理。
 - 各组件许可证随来源清单分别记录（包括Matplotlib、NumPy、Pillow、OpenBLAS、字体及图像库），公开发行前仍需补齐对应源码、许可和再分发材料；本地重打包不等同已完成发行审计。
 
 ## Node.js/npm 与 C/C++ 工具链（V2-02）
@@ -79,9 +79,9 @@ APK资源使用 `rootfs.bundle` 文件名保存gzip压缩tar，避免AAPT自动�
 开发工具层扩展为 Alpine v3.22 main/community ARM64 的固定66项记录/65个附带包：Node.js 22.23.2-r0、npm 11.6.4-r0、GCC/G++ 14.2.0-r6、make 4.4.1-r3、binutils 2.44-r3、pkgconf 2.4.3-r0、Python 3.12.15开发头文件、Linux 6.14.2头文件及依赖。原Git/curl/OpenSSH版本不变。完整来源、aports commit、许可证和APK SHA-256继续记录在devtools-packages.json；不是上游最新版本承诺。
 
 - tools/build_devtools.py分别解析官方main/community索引，初次HTTPS解析未执行APK签名校验；之后严格校验锁定APK摘要，不执行APK维护脚本。基础Python包只记录依赖而不附带，rootfs/venv不替换。
-- 工具层约133.2MB压缩/约389MiB展开；资源按32MiB分成4个devtools-NNN.bundle，devtools.parts.json定义次序，运行时串接校验整个gzip流SHA-256再解包。首次解包上限120秒，已有完整SHA版本复用，旧层不自动回收。版本目录与原子提交沿用既有机制。
+- 工具层约133.2MB压缩/约389MiB展开；资源按32MiB分成4个devtools-NNN.bundle，devtools.parts.json定义次序，运行时串接校验整个gzip流SHA-256再解包。首次解包上限120秒，已有匹配摘要的当前目录复用；空闲且部署成功后回收旧SHA目录。仅保留当前一套组件，原子提交使用临时暂存与恢复目录。
 - GCC/cc/g++/c++/cpp包装器通过--sysroot及-B指向/opt/capri/tools内的头文件、启动对象和工具；musl副本用于完整编译sysroot，实际ELF解释器仍使用原rootfs的/lib，不取得Android Root。不依赖基础rootfs完整apk数据库，不提供通用apk安装/系统升级。
-- Android拒绝硬链接，构建时把tar硬链接别名转换成相对符号链接，保留普通符号链接。Node外部ICU数据跟随版本层设置NODE_ICU_DATA/ICU_DATA，解决搬迁后npm实际安装时的ICU错误；版本命令本身不足以验证完整可用性。
+- Android拒绝硬链接，构建时把tar硬链接别名转换成相对符号链接，保留普通符号链接。Node外部ICU数据跟随当前组件层设置NODE_ICU_DATA/ICU_DATA，解决搬迁后npm实际安装时的ICU错误；版本命令本身不足以验证完整可用性。
 - Node项目node_modules在当前工作区；npm缓存/root/.cache/npm和全局前缀/root/.local/npm按会话隔离，CLI目录加入PATH。CA保持校验，Node配置额外CA；未设置全局账号或复制Git Token到npm。npm项目脚本仍可执行同UID代码，目录分开不构成强安全沙箱。
 - Python开发头文件和编译器允许手工构建原生扩展；python_env仍只安装wheel，不自动转源码构建。没有加入CMake、Rust、Go或Node开发头文件，不保证任意Python/npm原生依赖都能构建；Node原生扩展可能仍需下载对应头文件。
 - Node/各依赖许可与npm Artistic-2.0、GCC/binutils/GNU make及Linux头文件的GPL等要求分别遵循清单；公开发行前仍需补齐对应源码/许可证/构建材料，不将本地预览视为已完成再分发审计。
@@ -89,3 +89,13 @@ APK资源使用 `rootfs.bundle` 文件名保存gzip压缩tar，避免AAPT自动�
 官方参考：[Node.js包](https://pkgs.alpinelinux.org/package/v3.22/main/aarch64/nodejs)、[npm包](https://pkgs.alpinelinux.org/package/v3.22/community/aarch64/npm)、[build-base](https://pkgs.alpinelinux.org/package/v3.22/main/aarch64/build-base)、[GCC目录与sysroot选项](https://gcc.gnu.org/onlinedocs/gcc/Directory-Options.html)。
 
 2026-10-23 搬迁补充：启动器用MAGIC指向工具层usr/share/misc/magic.mgc，file不依赖基础rootfs的默认数据路径；CPATH同时包含工具层Python.h和原基础Python包提供的/usr/include/python3.12/pyconfig.h，避免跳过重复Python运行时包后缺少ABI配置。两者仍对应锁定的Python3.12.15，并未生成替代配置或覆盖系统文件；诊断公开实际magic路径及ABI头文件存在状态。
+
+## 当前环境检查与修复（2026-10-23）
+
+基础系统继续使用runtime/rootfs；工具及科学库改用runtime/tools/current与runtime/python-packages/current，仅保留当前应用内置的一套资源。资源摘要用于识别内容，不是安装版本目录；不在线追踪任意最新版本，也不提供多版本选择或回退。升级应用后，工具/科学库在下一次使用且空闲时更新；已有基础系统不隐式覆盖，需显式重新部署。
+
+- tools/build_environment_inventory.py从准确的APK资源包生成rootfs/devtools/python-packages.files.json及rootfs.sha256；修改任一资源包后必须重新生成清单，并更新runtime-sha256.json。清单不从手机现有文件生成。
+- 完整检查对照资源清单逐文件核对SHA-256、符号链接目标及所需执行权限；排除运行时生成的__pycache__/pyc/pyo，不扫描额外手装文件。实际命令诊断独立执行，校验有差异时先停止诊断；文件差异也可能是用户手工修改。
+- 资源整体摘要、解包后清单均校验通过才原子替换；.staging/.previous仅用于短暂提交/中断恢复，成功后删除。旧SHA目录安全清理不跟随符号链接。替换过程仍需足够的额外磁盘空间。
+- RuntimeGate统一登记短脚本与持续终端的PRoot进程，任何一个仍存活都拒绝替换；启动/检查/维护共享进程内锁。它不抵御同UID恶意代码、外部文件修改或完整进程树逃逸。
+- 修复仅重新部署所选组件，保留sessions/、会话venv/npm依赖、全局SSH与Git账号；基础系统修复会覆盖rootfs中的手工修改，不保证原依赖跨ABI兼容。空间显示是逻辑文件字节数，不等于文件系统实际分配空间。缓存清理和会话依赖重置尚未提供。
