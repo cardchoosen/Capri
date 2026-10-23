@@ -32,6 +32,7 @@ import org.json.JSONObject
             val interactive = id == displayedPage
             AndroidView(factory = { context -> BrowserViewHost(context) }, update = { host ->
                 host.interactive = interactive
+                host.onUserInteraction = { browser.userTakeover(id) }
                 host.importantForAccessibility = if (interactive) View.IMPORTANT_FOR_ACCESSIBILITY_AUTO else View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
                 web.importantForAccessibility = if (interactive) View.IMPORTANT_FOR_ACCESSIBILITY_AUTO else View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
                 web.isFocusable = interactive; web.isFocusableInTouchMode = interactive
@@ -46,8 +47,17 @@ import org.json.JSONObject
 }
 private class BrowserViewHost(context: Context) : FrameLayout(context) {
     var interactive = false
-    override fun dispatchTouchEvent(event: MotionEvent): Boolean = interactive && super.dispatchTouchEvent(event)
-    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean = interactive && super.dispatchKeyEvent(event)
+    var onUserInteraction: () -> Unit = {}
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if(!interactive)return false
+        if(event.actionMasked == MotionEvent.ACTION_DOWN) onUserInteraction()
+        return super.dispatchTouchEvent(event)
+    }
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        if(!interactive)return false
+        if(event.action == android.view.KeyEvent.ACTION_DOWN) onUserInteraction()
+        return super.dispatchKeyEvent(event)
+    }
 }
 
 @Composable internal fun BrowserControls(browser: BrowserController, chat: String, page: String?, onOpened: (String) -> Unit) {
@@ -80,6 +90,10 @@ private class BrowserViewHost(context: Context) : FrameLayout(context) {
                     } finally { working = false }
                 }
             }) { Text("读取", fontSize = 12.sp) }
+        }
+        if (page != null && browser.isPaused(page)) Row(Modifier.padding(horizontal = 8.dp)) {
+            Text("手动接管中", fontSize = 11.sp, modifier = Modifier.weight(1f))
+            TextButton(onClick = { browser.userResume(page) }) { Text("恢复自动操作", fontSize = 11.sp) }
         }
         if (!supported) Text("系统WebView不支持独立登录环境，请更新WebView", color = MaterialTheme.colorScheme.error, fontSize = 11.sp)
         val notice = if (state.chat == chat && state.page == page) state.notice.ifBlank { message } else message

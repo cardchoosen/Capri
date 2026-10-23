@@ -43,18 +43,23 @@ class BrowserDeviceTest {
         val workspace = Workspace(directory)
         val server = ServerSocket(0, 16, java.net.InetAddress.getByName("127.0.0.1"))
         val clients = Executors.newCachedThreadPool()
+        val submissions = java.util.concurrent.atomic.AtomicInteger()
         val listener = Thread {
             while (!server.isClosed) try {
                 val socket = server.accept()
                 clients.submit { socket.use { peer ->
                     val input = peer.getInputStream().bufferedReader()
-                    val path = input.readLine()?.split(' ')?.getOrNull(1).orEmpty()
+                    val requestLine = input.readLine()?.split(' ').orEmpty()
+                    val path = requestLine.getOrNull(1).orEmpty()
+                    if(path.startsWith("/submitted") && requestLine.firstOrNull()=="POST") submissions.incrementAndGet()
                     while (!input.readLine().isNullOrEmpty()) { }
                     if (path.startsWith("/slow")) Thread.sleep(1500)
                     val set = when { path.startsWith("/set-a") -> "document.cookie='capri=a; path=/';localStorage.setItem('capri','a');"; path.startsWith("/set-b") -> "document.cookie='capri=b; path=/';localStorage.setItem('capri','b');"; else -> "" }
                     val body = """<!doctype html><html><head><title>Browser fixture</title></head><body><h1>Profile proof</h1><p id="proof"></p><label>Search<input name="q"></label><button>Submit</button><input type="password" value="fixture-password-never-return"><div hidden>fixture-hidden-never-return</div><script>$set document.getElementById('proof').textContent='cookie:'+document.cookie+' storage:'+localStorage.getItem('capri');</script></body></html>""".toByteArray()
+                    val form = """<!doctype html><html><head><title>Form fixture</title></head><body><form action="/submitted" method="post"><label>Name<input name="name" id="name"></label><p id="typed"></p><label>Color<select name="color"><option value="red">Red</option><option value="green">Green</option></select></label><button id="send">Send form</button><button type="button" disabled>Disabled</button><input aria-label="Readonly" readonly><input aria-label="Password" type="password" value="fixture-password-never-return"></form><p id="later"></p><div style="height:1800px"></div><p>Bottom marker</p><script>nameInput=document.getElementById('name');nameInput.addEventListener('input',()=>document.getElementById('typed').textContent='Typed:'+nameInput.value);</script></body></html>""".toByteArray()
+                    val content = when { path.startsWith("/form") -> form; path.startsWith("/submitted") -> "<html><head><title>Submitted</title></head><body><h1>Submitted ${submissions.get()}</h1></body></html>".toByteArray(); else -> body }
                     val status = if (path.startsWith("/missing")) "404 Not Found" else "200 OK"
-                    peer.getOutputStream().apply { write("HTTP/1.1 $status\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: ${body.size}\r\nConnection: close\r\n\r\n".toByteArray()); write(body); flush() }
+                    peer.getOutputStream().apply { write("HTTP/1.1 $status\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: ${content.size}\r\nConnection: close\r\n\r\n".toByteArray()); write(content); flush() }
                 } }
             } catch (_: Exception) { }
         }.apply { isDaemon = true; start() }
@@ -164,6 +169,82 @@ class BrowserDeviceTest {
             assertEquals(2, call("tabs").getJSONArray("tabs").length())
             val restored = call("show", readId); assertEquals(restored.toString(), "ok", restored.getString("status"))
             assertTrue(restored.getBoolean("recreated")); assertTrue(text(restored).contains("capri=a"))
+            // 03-B runs while the conversation/file preview remains selected, with no native input focus.
+            var form = call("open", "$base/form")
+            val formId=form.getString("page_id")
+            fun ref(ob: JSONObject, name: String): String {
+                val a=ob.getJSONObject("observation").getJSONArray("elements")
+                return (0 until a.length()).map { a.getJSONObject(it) }.first { it.getString("name")==name }.getString("ref")
+            }
+            fun actionArgs(action: String, ob: JSONObject, name: String?=null): JSONObject {
+                val a=JSONObject().put("action",action).put("page_id",formId).put("request_id",java.util.UUID.randomUUID().toString())
+                if(name!=null)a.put("snapshot_id",ob.getJSONObject("observation").getString("snapshot_id"))
+                    .put("document_epoch",ob.getLong("document_epoch")).put("ref",ref(ob,name))
+                return a
+            }
+            suspend fun act(a: JSONObject): JSONObject {
+                val before=withContext(Dispatchers.Main) { previews.selected(selected) }
+                val result=JSONObject(browser.execute(selected,a))
+                withContext(Dispatchers.Main) {
+                    assertEquals(before,previews.selected(selected)); assertEquals(anchor,position.list.firstVisibleItemIndex to position.list.firstVisibleItemScrollOffset)
+                    assertEquals("draft-sentinel",draft.value); assertFalse(browser.view(formId)?.hasFocus()==true)
+                }
+                return result
+            }
+            suspend fun js(code: String) = withContext(Dispatchers.Main) { suspendCancellableCoroutine<Unit> { c ->
+                browser.view(formId)!!.evaluateJavascript(code) { c.resumeWith(Result.success(Unit)) }
+            } }
+            val old=form
+            form=act(actionArgs("fill",form,"Name").put("text","Ada").put("expect",JSONObject().put("text","Typed:Ada")))
+            assertEquals(form.toString(),"ok",form.getString("status"))
+            assertEquals("stale_reference",act(actionArgs("click",old,"Send form")).getString("status"))
+            form=call("observe",formId)
+            form=act(actionArgs("select",form,"Color").put("value","green"))
+            assertEquals(form.toString(),"ok",form.getString("status"))
+            var denied=act(actionArgs("click",form,"Disabled")); assertEquals(denied.toString(),"target_disabled",denied.getString("status"))
+            form=call("observe",formId)
+            denied=act(actionArgs("fill",form,"Password").put("text","must-not-fill")); assertEquals("unsupported",denied.getString("status"))
+            assertFalse(denied.toString().contains("fixture-password-never-return"))
+            form=call("observe",formId)
+            js("document.getElementById('send').textContent='Changed target'")
+            assertEquals("target_changed",act(actionArgs("click",form,"Send form")).getString("status"))
+            js("document.getElementById('send').textContent='Send form'")
+            form=call("observe",formId)
+            js("let overlay=document.createElement('div');overlay.id='cover';overlay.style='position:fixed;inset:0;z-index:99999;background:white';document.body.appendChild(overlay)")
+            assertEquals("target_obscured",act(actionArgs("click",form,"Send form")).getString("status"))
+            js("document.getElementById('cover').remove()")
+            form=call("observe",formId)
+            withContext(Dispatchers.Main) { browser.userTakeover(formId) }
+            assertEquals("needs_user",act(actionArgs("fill",form,"Name").put("text","blocked")).getString("status"))
+            withContext(Dispatchers.Main) { browser.userResume(formId) }
+            assertEquals("stale_reference",act(actionArgs("fill",form,"Name").put("text","blocked")).getString("status"))
+            form=call("observe",formId)
+            val clickArgs=actionArgs("click",form,"Send form").put("expect",JSONObject().put("text","Submitted 1"))
+            val sent=act(clickArgs); assertEquals(sent.toString(),"ok",sent.getString("status"))
+            assertEquals("matched",sent.getJSONObject("verification").getString("state")); assertEquals(1,submissions.get())
+            assertEquals("duplicate_not_replayed",act(clickArgs).getString("status")); assertEquals(1,submissions.get())
+            // Receipt survives a controller/process-style reconstruction and never resubmits the form.
+            withContext(Dispatchers.Main) { browser.dispose(); browser=controller() }; mount(); call("show",formId)
+            assertEquals("duplicate_not_replayed",act(clickArgs).getString("status")); assertEquals(1,submissions.get())
+            val back=act(actionArgs("navigate",sent).put("url","$base/form").put("expect",JSONObject().put("url_contains","/form")))
+            assertEquals(back.toString(),"ok",back.getString("status"))
+            val next=act(actionArgs("navigate",back).put("url","$base/read"))
+            assertEquals(next.toString(),"ok",next.getString("status"))
+            val history=act(actionArgs("back",next).put("expect",JSONObject().put("url_contains","/form")))
+            assertEquals(history.toString(),"ok",history.getString("status"))
+            val scrolled=act(actionArgs("scroll",back).put("direction","down")); assertEquals(scrolled.toString(),"ok",scrolled.getString("status"))
+            js("setTimeout(()=>document.getElementById('later').textContent='Delayed ready',200)")
+            val waited=act(JSONObject().put("action","wait").put("page_id",formId).put("expect",JSONObject().put("text","Delayed ready")))
+            assertEquals(waited.toString(),"ok",waited.getString("status"))
+            val timeout=act(JSONObject().put("action","wait").put("page_id",formId).put("timeout_ms",100).put("expect",JSONObject().put("text","Never present")))
+            assertEquals("verification_timeout",timeout.getString("status")); assertNotNull(timeout.optJSONObject("observation"))
+            form=call("observe",formId)
+            val paused=async { act(actionArgs("fill",form,"Name").put("text","Pause test").put("expect",JSONObject().put("text","Never present"))) }
+            delay(250); withContext(Dispatchers.Main) { browser.userTakeover(formId) }
+            val stopped=paused.await(); assertEquals(stopped.toString(),"needs_user",stopped.getString("status"))
+            assertTrue(stopped.getString("action_state") in setOf("applied","unknown"))
+            assertFalse(File(workspace.root(selected),"browser/operations.json").readText().contains("Pause test"))
+            call("close",formId)
             val missing = call("open", "$base/missing"); assertEquals(missing.toString(), "load_failed", missing.getString("status"))
             val closed = call("close", readId); assertTrue(closed.toString(), closed.getBoolean("closed"))
             assertEquals("invalid_argument", call("observe", readId).getString("status"))

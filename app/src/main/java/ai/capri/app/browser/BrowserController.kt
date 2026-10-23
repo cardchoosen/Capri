@@ -23,8 +23,11 @@ internal class BrowserFault(val status: String, message: String) : Exception(mes
 /** Native browser engine; no shell, CDP socket, JavascriptInterface or arbitrary JS model tool. */
 internal class BrowserController(private val context: Context, workspace: Workspace, private val selectedChat: () -> String) {
     private class Page(val chat: String, val record: BrowserRecord, var web: WebView? = null, var epoch: Long = 0,
-                       var loading: Boolean = false, var failure: String? = null)
+                       var loading: Boolean = false, var failure: String? = null, var snapshot: String? = null,
+                       var paused: Boolean = false, var control: Long = 0)
     private val store = BrowserStore(workspace)
+    private val receipts = BrowserOperations(workspace)
+    private val actionScript by lazy { context.assets.open("browser/actions.js").bufferedReader().use { it.readText() } }
     private val pages = linkedMapOf<String, MutableList<Page>>() // Main thread only.
     private val operation = Mutex()
     private val loadLocks = mutableMapOf<String, Mutex>()
@@ -45,11 +48,20 @@ internal class BrowserController(private val context: Context, workspace: Worksp
             .put("multi_profile", supported).put("provider", provider?.packageName ?: "unavailable")
             .put("version", provider?.versionName ?: "unknown").put("engine", "Android WebView")
             .put("message", if (supported) "支持会话独立登录环境" else "系统WebView不支持多Profile，请更新WebView；不会共享登录态降级")
-            .put("actions", JSONArray(listOf("status", "tabs", "open", "observe", "show", "close")))
+            .put("actions", JSONArray(listOf("status", "tabs", "open", "observe", "show", "close", "navigate", "back", "click", "fill", "select", "scroll", "wait", "takeover", "resume")))
     }
     private fun changed(notice: String = mutableUi.value.notice) {
         mutableUi.value = mutableUi.value.copy(revision = mutableUi.value.revision + 1, notice = notice)
         pages.forEach { (chat, _) -> pagesChanged(chat, tabList(chat)) }
+    }
+    fun isPaused(id: String) = pages.values.flatten().firstOrNull { it.record.id == id }?.paused == true
+    fun userTakeover(id: String) {
+        pages.values.flatten().firstOrNull { it.record.id == id }?.let { it.paused = true; it.control++; it.snapshot = null }
+        changed("用户已接管，自动写操作暂停")
+    }
+    fun userResume(id: String) {
+        pages.values.flatten().firstOrNull { it.record.id == id }?.let { it.paused = false; it.control++; it.snapshot = null }
+        changed("自动操作已恢复，请重新读取页面")
     }
     fun hostResumed(value: Boolean) { resumed = value }
     fun selectionChanged(chat: String) { changed() }
@@ -96,6 +108,7 @@ internal class BrowserController(private val context: Context, workspace: Worksp
         var active: Page? = null
         var initiatedLoad = false
         var createdView = false
+        val isWrite = args.getString("action") in BrowserContract.writes
         try {
             val action = args.getString("action")
             val result = withTimeout(20_000) {
@@ -114,12 +127,19 @@ internal class BrowserController(private val context: Context, workspace: Worksp
                     Page(chat, BrowserRecord(UUID.randomUUID().toString(), url)).also { pages[chat]!!.add(it) }
                 } else page(chat, args.getString("page_id"))
                 active = p
+                if (action in setOf("takeover", "resume")) {
+                    if (action == "takeover") userTakeover(p.record.id) else userResume(p.record.id)
+                    return@withTimeout JSONObject().put("status", "ok").put("page_id",p.record.id).put("paused",p.paused).put("requires_fresh_observation",true)
+                }
+                if ((action in BrowserContract.writes || action == "wait") && p.web == null)
+                    throw BrowserFault("needs_observation", "页面已重建或未就绪，请先show/observe；不会恢复并重放写操作")
                 val restored = p.web == null
                 createdView = restored
                 ensureView(p)
                 mutableUi.value = BrowserUi(chat, p.record.id, mutableUi.value.revision + 1, if (restored) "正在打开页面" else "", busy = true)
                 changed()
                 awaitHost(p)
+                if (action in BrowserContract.writes || action == "wait") return@withTimeout interact(p, args)
                 if (restored) {
                     initiatedLoad = true; p.loading = true; p.failure = null
                     p.web!!.loadUrl(BrowserContract.url(p.record.url, debug))
@@ -135,6 +155,7 @@ internal class BrowserController(private val context: Context, workspace: Worksp
         } catch (timeout: TimeoutCancellationException) {
             if (initiatedLoad) { active?.failure = "页面加载超时，尚未确认可用"; active?.web?.stopLoading() }
             JSONObject().put("status", "timeout").put("page_id", active?.record?.id ?: JSONObject.NULL)
+                .put("action_state", if(isWrite) "unknown" else "not_applied")
                 .put("message", "页面等待超时，未确认加载成功；标签保留，不自动重放").withNetworkDiagnostic(active?.record?.url).toString()
         } catch (cancel: CancellationException) {
             if (initiatedLoad) active?.web?.stopLoading()
@@ -172,7 +193,7 @@ internal class BrowserController(private val context: Context, workspace: Worksp
         ensureHost(p)
     }
     private fun destroy(p: Page) {
-        p.epoch++; p.loading = false
+        p.epoch++; p.snapshot = null; p.loading = false
         p.web?.let { (it.parent as? android.view.ViewGroup)?.removeView(it); it.stopLoading(); it.destroy() }
         p.web = null
     }
@@ -199,7 +220,7 @@ internal class BrowserController(private val context: Context, workspace: Worksp
                     }
                 override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
                     if (p.web !== view) return
-                    p.epoch++; p.loading = true
+                    p.epoch++; p.snapshot = null; p.loading = true
                     if (runCatching { BrowserContract.url(url.orEmpty(), debug) }.isFailure) {
                         p.failure = "页面导航协议不受支持"; view.stopLoading(); p.loading = false
                     }
@@ -254,6 +275,115 @@ internal class BrowserController(private val context: Context, workspace: Worksp
         if (raw.toByteArray().size > 64000) throw BrowserFault("output_limit", "页面摘要超出限制")
         return JSONObject(raw).also {
             if (it.optString("snapshot_id") != token) throw BrowserFault("invalid_snapshot", "页面摘要无效")
+            p.snapshot = token
+        }
+    }
+    private suspend fun evaluate(p: Page, script: String): JSONObject {
+        ensureHost(p)
+        val raw = suspendCancellableCoroutine<String> { c ->
+            p.web!!.evaluateJavascript(script) { if (c.isActive) c.resumeWith(Result.success(it ?: "null")) }
+        }
+        ensureHost(p)
+        if (raw.toByteArray().size > 64000) throw BrowserFault("output_limit", "操作结果超出限制")
+        return runCatching { JSONObject(raw) }.getOrElse { throw BrowserFault("unknown_result", "页面跳转或脚本未返回，不自动重放") }
+    }
+    private suspend fun interact(p: Page, args: JSONObject): JSONObject {
+        val action=args.getString("action")
+        val write=action in BrowserContract.writes
+        val generation=p.control
+        fun guard() {
+            ensureHost(p)
+            if (p.control != generation || (write && p.paused)) throw BrowserFault("needs_user", "用户已接管；等待用户明确恢复，不自动重放")
+        }
+        var state="not_applied"
+        var begun=false
+        var receiptFinished=false
+        var snapshot: JSONObject?=null
+        val id=args.optString("request_id")
+        fun output(status: String, message: String="") = JSONObject().put("status",status).put("page_id",p.record.id)
+            .put("action_state",state).put("document_epoch",p.epoch).put("message",message)
+        try {
+            guard()
+            if(action=="navigate") BrowserContract.url(args.getString("url"),debug)
+            if (write) {
+                val prior=withContext(Dispatchers.IO) { receipts.begin(p.chat,args) }
+                if (prior != null && (prior.optString("page_id") != p.record.id || prior.optString("action") != action))
+                    throw BrowserFault("request_conflict","此request_id属于另一个页面或动作")
+                if (prior != null) return output("duplicate_not_replayed", "已有此请求记录；先观察，不重复执行")
+                    .put("action_state",prior.getString("action_state")).put("receipt",prior)
+                begun=true
+            }
+            guard()
+            val elementAction=action in setOf("click","fill","select")
+            var preparedBounds: JSONArray? = null
+            if (elementAction) {
+                if (p.snapshot != args.getString("snapshot_id") || p.epoch != args.getLong("document_epoch"))
+                    throw BrowserFault("stale_reference", "快照或document_epoch已失效，请重新观察")
+                val prepare=JSONObject(args.toString()).put("phase","prepare")
+                val ready=evaluate(p,actionScript.replace("__CAPRI_ACTION__",prepare.toString()))
+                if (ready.optString("status") != "ok") throw BrowserFault(ready.optString("status"),ready.optString("message"))
+                preparedBounds=ready.getJSONArray("bounds")
+                delay(80); guard()
+                if (p.snapshot != args.getString("snapshot_id") || p.epoch != args.getLong("document_epoch"))
+                    throw BrowserFault("stale_reference", "操作前页面已变化")
+            }
+            if (write) {
+                guard(); state="unknown" // From here cancellation/crash must not imply safe replay.
+                when(action) {
+                    "navigate" -> { val url=BrowserContract.url(args.getString("url"),debug); p.failure=null; p.loading=true; p.snapshot=null; p.web!!.loadUrl(url); state="dispatched" }
+                    "back" -> {
+                        if (!p.web!!.canGoBack()) { state="not_applied"; throw BrowserFault("no_history","没有后退历史") }
+                        p.failure=null; p.loading=true; p.snapshot=null; p.web!!.goBack(); state="dispatched"
+                    }
+                    "scroll" -> {
+                        val direction=args.getString("direction")
+                        val delta=when(direction) { "up" -> "0,-innerHeight*.8"; "down" -> "0,innerHeight*.8"; "left" -> "-innerWidth*.8,0"; else -> "innerWidth*.8,0" }
+                        evaluate(p,"(function(){window.scrollBy({left:(${delta.substringBefore(',')}),top:(${delta.substringAfter(',')}),behavior:'instant'});return {status:'ok'};})()")
+                        state="dispatched"; p.snapshot=null
+                    }
+                    else -> {
+                        val command=JSONObject(args.toString()).put("bounds",preparedBounds)
+                        val result=evaluate(p,actionScript.replace("__CAPRI_ACTION__",command.toString()))
+                        state=result.optString("action_state","unknown"); p.snapshot=null
+                        if(result.optString("status") != "ok") throw BrowserFault(result.optString("status"),result.optString("message"))
+                        if(result.has("value_matches") && !result.getBoolean("value_matches")) throw BrowserFault("verification_failed","控件未接受所填内容")
+                    }
+                }
+                withContext(Dispatchers.IO) { receipts.finish(p.chat,id,state) }; receiptFinished=true
+                delay(100); guard()
+            }
+            val deadline=System.nanoTime()+args.optLong("timeout_ms",5000)*1_000_000
+            val expect=args.optJSONObject("expect")
+            var matched=false
+            while(true) {
+                guard()
+                p.failure?.let { throw BrowserFault("load_failed",it) }
+                if(!p.loading) {
+                    snapshot=observe(p)
+                    matched=expect?.let { condition ->
+                        when {
+                            condition.has("text") -> snapshot!!.optString("text").contains(condition.getString("text"))
+                            condition.has("text_absent") -> !snapshot!!.optString("text").contains(condition.getString("text_absent")) && !snapshot!!.optBoolean("truncated")
+                            else -> snapshot!!.optString("url").contains(condition.getString("url_contains"))
+                        }
+                    } ?: true
+                    if(matched)break
+                }
+                if(System.nanoTime()>=deadline)break
+                delay(150)
+            }
+            guard(); persist(p.chat); changed("")
+            return output(if(matched) "ok" else "verification_timeout")
+                .put("observation",snapshot ?: JSONObject.NULL)
+                .put("verification",JSONObject().put("state",if(expect==null) "not_requested" else if(matched) "matched" else "timeout"))
+        } catch(e:CancellationException) {
+            throw e
+        } catch(e:Exception) {
+            return output((e as? BrowserFault)?.status ?: "error", if(e is BrowserFault || e is IllegalArgumentException) e.message.orEmpty() else "操作结果不确定，请观察；不要重放")
+                .put("observation",snapshot ?: JSONObject.NULL).put("verification",JSONObject().put("state","unknown"))
+                .let { if(e is BrowserFault && e.status in setOf("load_failed","not_loaded")) it.withNetworkDiagnostic(p.record.url) else it }
+        } finally {
+            if(begun && !receiptFinished) withContext(NonCancellable+Dispatchers.IO) { runCatching { receipts.finish(p.chat,id,state) } }
         }
     }
     fun dispose() { disposed = true; scope.cancel(); pages.values.flatten().forEach(::destroy) }
