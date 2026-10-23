@@ -8,7 +8,7 @@ import argparse, base64, csv, gzip, hashlib, io, json, os, posixpath, re, shutil
 from email.parser import BytesParser
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 BASE = ROOT / 'work/python-native-build'
 LOCK = ROOT / 'docs/python-native-packages.json'
 ASSETS = ROOT / 'app/src/main/assets/runtime'

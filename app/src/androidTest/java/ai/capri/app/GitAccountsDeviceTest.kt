@@ -90,7 +90,7 @@ class GitAccountsDeviceTest {
                         while (count < length) { val n = input.read(body, count, length-count); check(n > 0); count += n }
                         val service = if (request[1].contains("git-receive-pack")) "git-receive-pack" else "git-upload-pack"
                         val advertise = request[0] == "GET"
-                        val args = listOf("/opt/capri/tools/usr/bin/git", service.removePrefix("git-"), "--stateless-rpc") +
+                        val args = listOf("/usr/bin/git", service.removePrefix("git-"), "--stateless-rpc") +
                             (if (advertise) listOf("--advertise-refs") else emptyList()) + "/workspace/repos/private.git"
                         val process = runtime.startProcess(first, store.workspace.folder(first,"fixture-run"), args)
                         process.outputStream.use { it.write(body) }

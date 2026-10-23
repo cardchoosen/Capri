@@ -1,2 +1,2 @@
 #!/bin/sh
-exec /opt/capri/tools/usr/bin/scp -S /opt/capri/bootstrap/bin/ssh "$@"
+exec /usr/bin/scp -S /opt/capri/bootstrap/bin/ssh "$@"

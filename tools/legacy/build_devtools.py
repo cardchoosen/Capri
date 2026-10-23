@@ -16,7 +16,7 @@ import shutil
 import subprocess
 import tarfile
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 BASE = ROOT / 'work/devtools-build'
 LOCK = ROOT / 'docs/devtools-packages.json'
 URL = 'https://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/'

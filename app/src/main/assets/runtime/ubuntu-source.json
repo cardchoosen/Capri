@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "distribution": "Ubuntu 24.04.5 LTS arm64",
+  "filename": "ubuntu-base-24.04.5-base-arm64.tar.gz",
+  "url": "https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/ubuntu-base-24.04.5-base-arm64.tar.gz",
+  "sha256": "a91d5a93010193712d346d761372b7c9db6dfcf093893161c64ca107f05914f2",
+  "size": 29936675,
+  "checksum_source": "https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/SHA256SUMS",
+  "baseline": ["python3", "python3-venv", "ca-certificates", "git", "curl", "openssh-client"]
+}

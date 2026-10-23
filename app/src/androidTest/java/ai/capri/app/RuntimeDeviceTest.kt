@@ -18,7 +18,7 @@ class RuntimeDeviceTest {
         val second = "device-test-second"
         try {
             val setup = runtime.install()
-            assertTrue(setup, setup.contains("Capri runtime ready"))
+            assertTrue(setup, setup.contains("Capri Ubuntu ready"))
             val write = runtime.execute(first, "from pathlib import Path\nPath('proof.txt').write_text('Capri ARM64')\nprint(Path.cwd())\nprint(Path('proof.txt').read_text())")
             assertTrue(write, write.contains("exit=0"))
             assertEquals("Capri ARM64", store.workspace.file(first, "proof.txt").readText())

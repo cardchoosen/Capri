@@ -30,7 +30,7 @@ class SshClientDeviceTest {
             root=pathlib.Path('/workspace/import-fixture')
             shutil.rmtree(root,ignore_errors=True);root.mkdir()
             manage=runpy.run_path('/opt/capri/bootstrap/ssh_identity.py')['manage']
-            keygen='/opt/capri/tools/usr/bin/ssh-keygen'
+            keygen='/usr/bin/ssh-keygen'
             try:
                 subprocess.run([keygen,'-q','-t','ed25519','-N','','-f',str(root/'source')],check=True)
                 shutil.copyfile(root/'source',root/'import-123')

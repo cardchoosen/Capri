@@ -1,4 +1,4 @@
-"""Host regression tests for the actual supervisor, adapting only paths and BusyBox applet names.
+"""Host regression tests for the actual supervisor, adapting only workspace/control paths.
 
 Run: python3 -m unittest discover -s tools -p 'test_terminal_supervisor.py' -v
 Android/PRoot, foreground-service and process-death checks live in TerminalDeviceTest.
@@ -26,7 +26,6 @@ class SupervisorTest(unittest.TestCase):
         source = source.replace("BASE = Path('/run/capri')", 'BASE = Path(' + repr(str(self.base)) + ')')
         source = source.replace("os.chdir('/workspace')", 'os.chdir(' + repr(str(self.workspace)) + ')')
         source = source.replace('/run/capri/', str(self.base) + '/')
-        source = source.replace('/bin/busybox printf', '/usr/bin/printf').replace('/bin/busybox mv', '/bin/mv')
         executable = self.base / 'supervisor.py'
         executable.write_text(source)
         self.log = (self.base / 'supervisor.log').open('w')

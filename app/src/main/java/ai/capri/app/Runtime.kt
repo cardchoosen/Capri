@@ -1,11 +1,11 @@
 package ai.capri.app
 
 import android.content.Context
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
-import kotlinx.coroutines.withTimeout
 import java.io.File
 import java.util.concurrent.TimeUnit
 
@@ -14,7 +14,7 @@ class PythonRuntime(private val context: Context, private val workspace: Workspa
     companion object { private val bootstrapLock = Any() }
     private fun prepareBootstrap(): File = synchronized(bootstrapLock) {
         val directory = File(context.filesDir, "runtime/bootstrap-v1").apply { mkdirs() }
-        for (name in listOf("session_bootstrap.py", "environment_probe.py", "capability_probe.py", "git_credential.py", "ssh_config", "ssh_identity.py", "python_packages.py", "bin/ssh", "bin/sftp", "bin/scp")) {
+        for (name in listOf("session_bootstrap.py", "environment_probe.py", "task_environment.py", "git_credential.py", "ssh_config", "ssh_identity.py", "bin/ssh", "bin/sftp", "bin/scp")) {
             val script = File(directory, name)
             script.parentFile!!.mkdirs()
             val bytes = context.assets.open("runtime/$name").use { it.readBytes() }
@@ -29,20 +29,42 @@ class PythonRuntime(private val context: Context, private val workspace: Workspa
         File(rootfs, "opt/capri/bootstrap").mkdirs()
         directory
     }
-    private val rootfs get() = File(context.filesDir, "runtime/rootfs")
+    internal val environment = LinuxEnvironment(context)
+    private val rootfs get() = environment.root
     private val proot get() = File(context.applicationInfo.nativeLibraryDir, "libproot.so")
     private val loader get() = File(context.applicationInfo.nativeLibraryDir, "libproot-loader.so")
-    val ready get() = proot.exists() && loader.exists() && File(rootfs, "usr/bin/python3").exists()
-    suspend fun install(): String = withContext(Dispatchers.IO) {
-        if (ready) return@withContext probe()
-        check(proot.exists() && loader.exists()) { "APK缺少ARM64原生执行组件" }
-        RuntimeGate.mutate(context) { ManagedBundle.prepare(context, ManagedBundle.base) }
-        probe()
+    val ready get() = proot.exists() && loader.exists() && environment.ready
+    suspend fun install(): String { environment.ensureBase(); return probe() }
+    suspend fun probe(): String = execute("runtime-check", "import sys,platform;print('Capri Ubuntu ready');print(sys.version);print(platform.machine())")
+    fun status() = if (ready) "执行环境已就绪" else environment.state.value.let { if (it.error.isBlank()) it.message else it.message + "：" + it.error }
+    suspend fun ensureSession(id: String) = withContext(Dispatchers.IO) {
+        try {
+            environment.ensureBase()
+            environment.sessionLock(id) {
+                val home = workspace.folder(id, "home")
+                val marker = File(home, ".capri-session-ready")
+                if (!marker.isFile || !java.nio.file.Files.exists(File(home, ".venv/bin/python3").toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                    environment.chatState(id, LinuxState("preparing", "正在准备会话环境"))
+                    val run = workspace.folder(id, "runs").resolve("setup").apply { mkdirs() }
+                    val output = File(run, "output.txt")
+                    val process = startProcess(id, run, listOf("/bin/true"), output, "会话准备")
+                    try {
+                        val completed = withTimeoutOrNull(60_000) {
+                            while (!process.waitFor(100, TimeUnit.MILLISECONDS)) currentCoroutineContext().ensureActive()
+                            true
+                        }
+                        check(completed == true) { "会话准备超时（60秒），可重试" }
+                        check(process.exitValue() == 0) { "会话环境准备失败：" + output.readText().takeLast(1500) }
+                        marker.writeText("ubuntu-noble-v1")
+                    } finally { process.destroyForcibly() }
+                }
+            }
+            environment.chatState(id, LinuxState("ready", "执行环境已就绪"))
+        } catch (cancel: kotlinx.coroutines.CancellationException) { environment.chatState(id, LinuxState("error", "会话准备已中断")); throw cancel }
+        catch (error: Exception) { environment.chatState(id, LinuxState("error", "会话环境准备未完成", error.message?.take(1500).orEmpty())); throw error }
     }
-    suspend fun probe(): String = execute("runtime-check", "import sys, pathlib, platform\nprint('Capri runtime ready')\nprint(sys.version)\nprint(platform.machine())\nprint('workspace:', pathlib.Path.cwd())")
-    fun status() = if (ready) "PRoot / Python 已安装" else "PRoot / Python 尚未安装。会话与文件功能可用；执行工具将返回真实的未就绪状态。"
     suspend fun execute(id: String, code: String): String = withContext(Dispatchers.IO) {
-        check(ready) { status() }
+        ensureSession(id)
         require(code.length <= 128_000) { "脚本过大" }
         val run = workspace.folder(id, "runs").resolve(java.util.UUID.randomUUID().toString()).apply { mkdirs() }
         val script = File(run, "main.py").apply { writeText(code) }
@@ -65,6 +87,24 @@ class PythonRuntime(private val context: Context, private val workspace: Workspa
             }
         } finally { process.destroyForcibly(); script.setReadOnly() }
     }
+    internal suspend fun runCommand(id: String, command: List<String>, timeout: Long = 60, exclusive: Boolean = false, resultLimit: Int = 30_000): String = withContext(Dispatchers.IO) {
+        ensureSession(id)
+        val run = workspace.folder(id, "runs").resolve(java.util.UUID.randomUUID().toString()).apply { mkdirs() }
+        val output = File(run, "output.txt")
+        val launch = { processBuilder(id, run, command).redirectErrorStream(true).redirectOutput(output).start() }
+        val process = if (exclusive) RuntimeGate.startExclusive(context, id, launch) else RuntimeGate.start(context, id, "环境检查", launch)
+        try {
+            val completed = withTimeoutOrNull(timeout * 1000) {
+                while (!process.waitFor(100, TimeUnit.MILLISECONDS)) {
+                    currentCoroutineContext().ensureActive()
+                    check(output.length() < 2_000_000) { "环境操作输出超过2MB" }
+                }
+                true
+            }
+            check(completed == true) { "环境操作超时（${timeout}秒），进程已停止；部分安装可能保留，请检查后重试" }
+            "exit=${process.exitValue()}\n" + output.readText().takeLast(resultLimit)
+        } finally { process.destroyForcibly() }
+    }
     /** Shared launch configuration; both short Python and persistent terminals use the same mappings. */
     internal fun startProcess(id: String, run: File, command: List<String>, output: File? = null, kind: String = "脚本"): Process =
         RuntimeGate.start(context, id, kind) {
@@ -75,20 +115,18 @@ class PythonRuntime(private val context: Context, private val workspace: Workspa
     private fun processBuilder(id: String, run: File, command: List<String>): ProcessBuilder {
         check(ready) { status() }
         val bootstrap = prepareBootstrap()
-        val tools = DevelopmentTools.prepare(context)
-        val pythonPackages = NativePythonPackages.prepare(context)
-        File(rootfs, "opt/capri/python-packages").mkdirs()
         val gitSocket = ai.capri.app.git.GitCredentialBroker.start(context)
         val ssh = SshEnvironment.prepare(context)
         File(rootfs, "opt/capri/ssh").mkdirs()
-        File(rootfs, "opt/capri/tools").mkdirs()
+        val cache = File(context.filesDir, "runtime/package-cache").apply { mkdirs() }
+        File(rootfs, "opt/capri/cache").mkdirs()
         val home = workspace.folder(id, "home")
         val tmp = workspace.folder(id, "tmp")
         val cwd = workspace.folder(id, "workspace")
-        val args = listOf(proot.path, "--kill-on-exit", "-0", "-r", rootfs.path,
+        val args = listOf(proot.path, "--kill-on-exit", "--link2symlink", "-0", "-r", rootfs.path,
             "-b", "/dev", "-b", "/proc", "-b", "${cwd.path}:/workspace", "-b", "${home.path}:/root",
             "-b", "${tmp.path}:/tmp", "-b", "${run.path}:/run/capri", "-b", "${bootstrap.path}:/opt/capri/bootstrap",
-            "-b", "${tools.path}:/opt/capri/tools", "-b", "${pythonPackages.path}:/opt/capri/python-packages", "-b", "${ssh.path}:/opt/capri/ssh", "-w", "/workspace",
+            "-b", "${cache.path}:/opt/capri/cache", "-b", "${ssh.path}:/opt/capri/ssh", "-w", "/workspace",
             "/usr/bin/env", "-i", "HOME=/root", "TMPDIR=/tmp", "PATH=/usr/local/bin:/usr/bin:/bin",
             "LANG=C.UTF-8", "PYTHONUNBUFFERED=1", "PYTHONNOUSERSITE=1", "VIRTUAL_ENV=/root/.venv", "CAPRI_GIT_SOCKET=$gitSocket",
             "/usr/bin/python3", "/opt/capri/bootstrap/session_bootstrap.py") + command

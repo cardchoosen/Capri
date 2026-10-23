@@ -88,7 +88,7 @@ class ToolRoundTripDeviceTest {
             assertTrue(listed.getString("output").contains("pip")); assertFalse(listed.has("read_with"))
             val status = JSONObject(env.execute(chat, JSONObject().put("action", "status").put("wait_ms", 10000))).getJSONObject("data")
             assertTrue(status.getBoolean("complete")); assertFalse(status.getBoolean("has_more"))
-            assertTrue(status.getString("output").contains("bundled_alpine_packages"))
+            assertTrue(status.getString("output").contains("shared Ubuntu"))
         } finally {
             manager.list(chat).forEach { record ->
                 val params = terminal(record.getString("terminal_id"))

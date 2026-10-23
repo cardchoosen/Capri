@@ -1,7 +1,7 @@
 """Build trusted file inventories from the exact APK runtime gzip streams."""
 from pathlib import Path
 import hashlib, io, json, posixpath, tarfile
-ROOT=Path(__file__).resolve().parents[1]; ASSETS=ROOT/'app/src/main/assets/runtime'
+ROOT=Path(__file__).resolve().parents[2]; ASSETS=ROOT/'app/src/main/assets/runtime'
 for key,parts in [('rootfs',['rootfs.bundle']),('devtools',json.loads((ASSETS/'devtools.parts.json').read_text())),('python-packages',['python-packages.bundle'])]:
     data=b''.join((ASSETS/name).read_bytes() for name in parts)
     sha=hashlib.sha256(data).hexdigest(); entries=[]

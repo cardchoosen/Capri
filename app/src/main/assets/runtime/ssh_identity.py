@@ -20,7 +20,7 @@ def manage(root, action, name='', pending=''):
                 if target.exists() or target.is_symlink() or pub.exists() or pub.is_symlink():
                     raise ValueError('同名密钥已存在，请使用其他名称')
                 os.chmod(source, 0o600)
-                check = subprocess.run(['/opt/capri/tools/usr/bin/ssh-keygen', '-y', '-P', '', '-f', str(source)],
+                check = subprocess.run(['/usr/bin/ssh-keygen', '-y', '-P', '', '-f', str(source)],
                     capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=10)
                 if check.returncode: raise ValueError('私钥无效或受口令保护；当前仅支持无口令私钥')
                 # Publish only after validation, never overwrite any existing identity.
@@ -45,7 +45,7 @@ def manage(root, action, name='', pending=''):
         for pub in sorted(keys.glob('*.pub')):
             private = pub.with_suffix('')
             if pub.is_symlink() or private.is_symlink() or not private.is_file(): continue
-            result = subprocess.run(['/opt/capri/tools/usr/bin/ssh-keygen', '-lf', str(pub)], capture_output=True, text=True, timeout=5)
+            result = subprocess.run(['/usr/bin/ssh-keygen', '-lf', str(pub)], capture_output=True, text=True, timeout=5)
             if result.returncode == 0:
                 inventory.append({'name': private.name, 'identity_file': '/opt/capri/ssh/identities/' + private.name,
                                   'fingerprint': result.stdout.strip()})

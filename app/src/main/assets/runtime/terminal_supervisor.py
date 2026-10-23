@@ -21,9 +21,9 @@ def atomic(path, value):
     temporary.replace(path)
 
 
-# Interactive ash aborts the rest of a command line on Ctrl+C, so an inline trailing
+# An interactive shell can abort the rest of a command line on Ctrl+C, so an inline trailing
 # completion command is not reliable. Publish the exit status when the next prompt is ready.
-prompt = "$(/bin/busybox printf '%s' \"$?\" > /run/capri/prompt.tmp; /bin/busybox mv /run/capri/prompt.tmp /run/capri/prompt)"
+prompt = "$(/usr/bin/printf '%s' \"$?\" > /run/capri/prompt.tmp; /bin/mv /run/capri/prompt.tmp /run/capri/prompt)"
 (BASE / 'shell_init.sh').write_text(
     "unset PS1 PS2\nPS1=''\nPS2=''\n"
     "if [ \"$$\" = \"$CAPRI_SHELL_PID\" ]; then\nPS1=" + shlex.quote(prompt) +

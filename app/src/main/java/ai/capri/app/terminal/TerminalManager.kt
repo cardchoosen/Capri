@@ -93,6 +93,11 @@ internal class TerminalManager private constructor(private val context: Context)
         }
     }
 
+    suspend fun resetForNewEnvironment() = mutex.withLock {
+        processes.keys.toList().forEach { id -> records[id]?.let { close(it) } }
+        records.clear(); persist(); stopServiceIfIdle()
+    }
+
     fun attach(value: TerminalService) { service = value; serviceFailure = null }
     fun detach(value: TerminalService) {
         if (service === value) service = null
@@ -296,7 +301,7 @@ internal class TerminalManager private constructor(private val context: Context)
     }
 
     private suspend fun open(chat: String, title: String): JSONObject {
-        if (!runtime.ready) throw TerminalProblem("unavailable", runtime.status())
+        runtime.ensureSession(chat)
         if (processes.size >= 8) throw TerminalProblem("busy", "最多同时开启8个终端，请关闭空闲终端")
         if (records.values.count { it.getString("chat_id") == chat } >= 32) throw TerminalProblem("busy", "会话终端历史已达32个，请先关闭并delete旧终端")
         ensureService()

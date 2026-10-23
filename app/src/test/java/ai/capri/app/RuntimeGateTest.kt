@@ -54,8 +54,8 @@ class RuntimeGateTest {
             val component = File(root, "component").apply { mkdirs() }
             File(component, "data").writeText("abc")
             Files.createSymbolicLink(File(component, "link").toPath(), outside.toPath())
-            assertEquals(3L, ManagedBundle.size(component))
-            ManagedBundle.deleteTree(component)
+            assertEquals(3L, RuntimeFiles.size(component))
+            RuntimeFiles.delete(component)
             assertEquals("retain", File(outside, "keep").readText())
         } finally { root.deleteRecursively() }
     }

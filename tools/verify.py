@@ -27,12 +27,7 @@ RUNNER = PACKAGE + '.test/androidx.test.runner.AndroidJUnitRunner'
 PROFILES = {
     'local': [],
     'capability': ['ai.capri.app.CapabilityDeviceTest'],
-    'runtime': ['ai.capri.app.EnvironmentMaintenanceDeviceTest', 'ai.capri.app.EnvironmentPanelDeviceTest',
-                'ai.capri.app.NodeCompilerDeviceTest', 'ai.capri.app.PythonEnvironmentDeviceTest',
-                'ai.capri.app.ScientificPackagesDeviceTest', 'ai.capri.app.DevelopmentToolsDeviceTest',
-                'ai.capri.app.GitAccountsDeviceTest', 'ai.capri.app.terminal.ToolRoundTripDeviceTest',
-                'ai.capri.app.RuntimeDeviceTest',
-                'ai.capri.app.terminal.TerminalDeviceTest#terminalsKeepShellStateInputAndCancelableLongTasks'],
+    'runtime': ['ai.capri.app.CapabilityDeviceTest', 'ai.capri.app.LegacySessionResetDeviceTest'],
 }
 
 

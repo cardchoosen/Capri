@@ -43,8 +43,9 @@ internal object DebugBridge {
                         val old = requests.entries.firstOrNull { !vm.jobs.containsKey(it.value.chat) }
                         check(old != null) { "debug request limit" }; requests.remove(old.key)
                     }
+                    check(!vm.migrating) { "environment preparation in progress; no message submitted" }
                     val chat = args.getString("chat_id")?.takeIf { it.isNotBlank() }
-                    val session = if (chat == null) Session(title = "调试 · " + text.take(16)).also { vm.sessions.add(0, it) }
+                    val session = if (chat == null) Session(title = "调试 · " + text.take(16)).also { vm.sessions.add(0, it); vm.prepareSession(it.id) }
                         else vm.sessions.firstOrNull { it.id == chat } ?: error("unknown chat_id")
                     check(!vm.jobs.containsKey(session.id)) { "chat busy" }
                     val request = Request(session.id, session.messages.size, text)

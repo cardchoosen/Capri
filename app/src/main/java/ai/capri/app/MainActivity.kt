@@ -134,7 +134,7 @@ class MainActivity : ComponentActivity() {
         ModalDrawerSheet(drawerContainerColor = Ink, drawerShape = RoundedCornerShape(0.dp)) {
             Spacer(Modifier.height(12.dp))
             Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) { Mark(Modifier.size(40.dp)); Text("CAPRI", letterSpacing = 5.sp, fontWeight = FontWeight.Bold) }
-            Button(onClick = { vm.create(); scope.launch { drawer.close() } }, modifier = Modifier.padding(horizontal = 20.dp).fillMaxWidth()) { Icon(Icons.Outlined.Add, null); Text("新会话", Modifier.padding(8.dp)) }
+            Button(enabled = !vm.migrating, onClick = { vm.create(); scope.launch { drawer.close() } }, modifier = Modifier.padding(horizontal = 20.dp).fillMaxWidth()) { Icon(Icons.Outlined.Add, null); Text("新会话", Modifier.padding(8.dp)) }
             Text("你的任务空间", color = Muted, modifier = Modifier.padding(16.dp), fontSize = 12.sp)
             LazyColumn { items(vm.sessions.toList(), key = { it.id }) { item ->
                 NavigationDrawerItem(shape = RoundedCornerShape(2.dp), label = { Text(item.title, maxLines = 1) }, selected = item.id == session.id, onClick = { vm.select(item.id); scope.launch { drawer.close() } }, modifier = Modifier.padding(horizontal = 12.dp))
@@ -182,15 +182,19 @@ class MainActivity : ComponentActivity() {
                         } else {
                             ConversationTimeline(entries, busy, chatPosition, Modifier.weight(1f), vm.activeTools[session.id], vm.store.workspace, session.id)
                         }
+                        vm.environmentState().takeIf { it.phase != "ready" }?.let { state ->
+                            Text(state.message, color = if (state.phase == "error") Red else Muted, fontSize = 11.sp,
+                                modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp))
+                        }
                         notice?.takeUnless { vm.activeTools.containsKey(session.id) }?.let { Text(it, color = Green, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp)) }
                         Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp).border(1.dp, if (busy) Red else Line, RoundedCornerShape(2.dp)).background(Panel, RoundedCornerShape(2.dp)).padding(2.dp), verticalAlignment = Alignment.Bottom) {
-                            IconButton(onClick = { importer.launch(arrayOf("*/*")) }) { Icon(Icons.Outlined.Add, "导入文件", tint = Muted) }
+                            IconButton(enabled = !vm.migrating, onClick = { importer.launch(arrayOf("*/*")) }) { Icon(Icons.Outlined.Add, "导入文件", tint = Muted) }
                             TextField(value = input, onValueChange = { input = it }, modifier = Modifier.weight(1f), placeholder = { Text("下达你的指令…", fontSize = 14.sp) }, maxLines = 5, colors = TextFieldDefaults.colors(focusedContainerColor = Panel, unfocusedContainerColor = Panel, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent))
                             FilledIconButton(shape = RoundedCornerShape(2.dp), onClick = { if (busy) vm.stop() else if(input.isNotBlank()) { if(vm.send(input)) { chatPosition.followLatest = true; input = ""; focusManager.clearFocus(force = true); keyboard?.hide() } } }, colors = IconButtonDefaults.filledIconButtonColors(containerColor = if(busy) Red else Green, contentColor = Ink), modifier = Modifier.padding(bottom = 4.dp)) { Icon(if(busy) Icons.Outlined.Stop else Icons.Outlined.ArrowUpward, if(busy) "停止" else "发送") }
                         }
                     }
                     1 -> {
-                        Row(Modifier.fillMaxWidth().padding(20.dp), verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text("工作区", fontSize = 24.sp); Text(session.title, color = Muted, fontSize = 12.sp) }; OutlinedButton(onClick = { importer.launch(arrayOf("*/*")) }) { Text("导入") } }
+                        Row(Modifier.fillMaxWidth().padding(20.dp), verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text("工作区", fontSize = 24.sp); Text(session.title, color = Muted, fontSize = 12.sp) }; OutlinedButton(enabled = !vm.migrating, onClick = { importer.launch(arrayOf("*/*")) }) { Text("导入") } }
                         Text("文件仅属于当前会话 · 点击导出", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 20.dp))
                         val files = vm.store.workspace.list(session.id)
                         if(files.isEmpty()) Empty("这里还没有文件", "导入资料，或让 Capri 为你创建。")
@@ -212,7 +216,7 @@ class MainActivity : ComponentActivity() {
                             Text("ON DEVICE / ARM64", color = Green, fontSize = 11.sp, fontFamily = FontFamily.Monospace, letterSpacing = 2.sp)
                             EnvironmentPanel(vm)
                             Spacer(Modifier.height(24.dp)); Text("会话独立目录", color = Green); Text("workspace / 任务文件\nhome / 用户目录\ntmp / 临时文件\nruns / 脚本与执行日志", color = Muted, lineHeight = 28.sp, modifier = Modifier.padding(vertical = 12.dp), fontFamily = FontFamily.Monospace)
-                            Text("运行模型：单 APK · Android 原生调度 · PRoot/Python。PRoot 与 Android 共用内核，各会话属于同一应用 UID；目录分离不构成恶意代码安全隔离。", color = Muted, lineHeight = 24.sp, fontSize = 13.sp)
+                            Text("运行模型：单 APK · Android 原生调度 · PRoot/Ubuntu。PRoot 与 Android 共用内核，各会话属于同一应用 UID；目录分离不构成恶意代码安全隔离。", color = Muted, lineHeight = 24.sp, fontSize = 13.sp)
 
                         }
                     }

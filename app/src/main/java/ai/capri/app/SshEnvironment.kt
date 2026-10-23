@@ -33,18 +33,18 @@ internal object SshEnvironment {
             if private.is_symlink() or public.is_symlink(): raise RuntimeError('SSH密钥路径异常，请先检查，不自动覆盖')
             if ${if (generate) "True" else "False"} and not private.exists():
                 if public.exists(): raise RuntimeError('公钥已存在但私钥缺失；不自动覆盖，请先检查')
-                result=subprocess.run(['/opt/capri/tools/usr/bin/ssh-keygen','-q','-t','ed25519','-N','','-C','capri-device','-f',str(private)],capture_output=True,text=True,timeout=20)
+                result=subprocess.run(['/usr/bin/ssh-keygen','-q','-t','ed25519','-N','','-C','capri-device','-f',str(private)],capture_output=True,text=True,timeout=20)
                 if result.returncode: raise RuntimeError('SSH密钥生成失败：'+result.stderr[-1000:])
                 os.chmod(private,0o600);os.chmod(public,0o644)
             if private.exists() and not public.exists(): raise RuntimeError('私钥存在但公钥缺失；请先检查，不重新生成')
             if private.exists():
-                derived=subprocess.run(['/opt/capri/tools/usr/bin/ssh-keygen','-y','-P','','-f',str(private)],capture_output=True,text=True,stdin=subprocess.DEVNULL,timeout=5)
+                derived=subprocess.run(['/usr/bin/ssh-keygen','-y','-P','','-f',str(private)],capture_output=True,text=True,stdin=subprocess.DEVNULL,timeout=5)
                 if derived.returncode or derived.stdout.split()[:2] != public.read_text().split()[:2]:
                     raise RuntimeError('设备SSH公私钥无法核验，请先检查，不自动覆盖')
             result={'scope':'application; shared by all chats','key_exists':private.exists(),'public_key':public.read_text().strip() if public.exists() else '',
                     'config':'/opt/capri/ssh/config','known_hosts':'/opt/capri/ssh/known_hosts'}
             if public.exists():
-                fingerprint=subprocess.run(['/opt/capri/tools/usr/bin/ssh-keygen','-lf',str(public)],capture_output=True,text=True,timeout=5)
+                fingerprint=subprocess.run(['/usr/bin/ssh-keygen','-lf',str(public)],capture_output=True,text=True,timeout=5)
                 if fingerprint.returncode: raise RuntimeError('SSH公钥检查失败')
                 result['fingerprint']=fingerprint.stdout.strip()
             print(json.dumps(result,ensure_ascii=False,indent=2))

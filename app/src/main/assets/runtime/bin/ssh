@@ -1,2 +1,2 @@
 #!/bin/sh
-exec /opt/capri/tools/usr/bin/ssh -F /opt/capri/bootstrap/ssh_config "$@"
+exec /usr/bin/ssh -F /opt/capri/bootstrap/ssh_config "$@"
