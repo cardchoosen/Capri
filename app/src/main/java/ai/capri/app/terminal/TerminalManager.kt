@@ -193,6 +193,8 @@ internal class TerminalManager private constructor(private val context: Context)
         return true
     }
     private fun snapshot(record: JSONObject, historyLimit: Int = 20): JSONObject = JSONObject(record.toString()).apply {
+        put("shell", "/bin/sh (POSIX dash)")
+        put("python", "/root/.venv/bin/python3 (already active; no source/activation needed)")
         val all = getJSONArray("commands")
         put("commands", JSONArray((maxOf(0, all.length() - historyLimit) until all.length()).map { all.getJSONObject(it) }))
         put("command_count", all.length())
@@ -259,7 +261,7 @@ internal class TerminalManager private constructor(private val context: Context)
             }
             // Short optional wait does not hold the manager lock or own command lifetime.
             if (validated == "run") {
-                val until = System.nanoTime() + TerminalContract.integer(params, "wait_ms", 1000, 0, 10_000) * 1_000_000L
+                val until = System.nanoTime() + TerminalContract.integer(params, "wait_ms", TerminalContract.DEFAULT_RUN_WAIT_MS, 0, 10_000) * 1_000_000L
                 while (System.nanoTime() < until) {
                     delay(50)
                     val current = mutex.withLock {

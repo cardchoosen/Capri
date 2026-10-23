@@ -41,13 +41,27 @@ class TerminalContractTest {
         val branches = TerminalContract.specification().getJSONObject("function").getJSONObject("parameters").getJSONArray("oneOf")
         fun schema(action: String): JSONObject = (0 until branches.length()).map { branches.getJSONObject(it) }
             .first { it.getJSONObject("properties").getJSONObject("action").getJSONArray("enum").getString(0) == action }
-            .getJSONObject("properties").getJSONObject("params")
+
         assertEquals(10000, schema("run").getJSONObject("properties").getJSONObject("wait_ms").getInt("maximum"))
         assertEquals(20000, schema("read").getJSONObject("properties").getJSONObject("wait_ms").getInt("maximum"))
         assertTrue(schema("run").getJSONArray("required").toString().contains("command"))
         assertFalse(schema("read").getJSONObject("properties").has("command"))
         assertTrue(schema("run").getJSONObject("properties").getJSONObject("terminal_id").has("pattern"))
 
+    }
+
+    @Test fun flatArgumentsAndLegacyNestedRequestsHaveTheSameClosedValidation() {
+        val flat = JSONObject().put("action", "read").put("terminal_id", id).put("command_id", id).put("offset", 120).put("wait_ms", 10000)
+        val normalized = TerminalContract.validate(flat).second
+        assertEquals(120, normalized.getInt("offset"))
+        assertEquals(120, TerminalContract.validate(request("read", normalized)).second.getInt("offset"))
+        rejects { TerminalContract.validate(JSONObject(flat.toString()).put("params", JSONObject())) }
+        rejects { TerminalContract.validate(JSONObject(flat.toString()).put("pid", 123)) }
+        rejects { TerminalContract.validate(JSONObject().put("action", "read").put("terminal_id", "../../other")) }
+        val root = TerminalContract.specification().getJSONObject("function").getJSONObject("parameters").getJSONObject("properties")
+        assertTrue(root.has("terminal_id")); assertFalse(root.has("params"))
+        val publishedActions = root.getJSONObject("action").getJSONArray("enum")
+        assertEquals(TerminalContract.actions.toSet(), (0 until publishedActions.length()).map { publishedActions.getString(it) }.toSet())
     }
 
 }

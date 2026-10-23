@@ -164,7 +164,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
             .put(tool("read_file", "读取当前工作区文本文件", props("path"), listOf("path")))
             .put(tool("write_file", "写入当前工作区文本文件", props("path", "content"), listOf("path", "content")))
             .put(tool("send_file", "把当前会话工作区已有文件发送到聊天。PNG/JPEG/GIF/WebP内联显示（GIF可播放）；其他文件可分享导出。最大20MB，不发送私钥或凭据。path为相对路径或/workspace/路径，caption可选。", props("path", "caption"), listOf("path")))
-            .put(tool("python_run", "运行短Python脚本的首选入口，执行并直接返回输出/退出码，最长60秒。绘图、文件处理、生成产物和基本验证尽量在此一次完成；无需先open终端。代码可读取已保存脚本或将源码保存/workspace；缺少依赖用environment准备。", props("code"), listOf("code")))
+            .put(tool("python_run", "执行短任务的脚本入口，可用subprocess编排C/C++等语言编译和命令（不改变用户指定的核心实现语言），执行并直接返回输出/退出码，最长60秒。绘图、文件处理、生成产物和基本验证尽量在此一次完成；无需先open终端。代码可读取已保存脚本或将源码保存/workspace；缺少依赖用environment准备。", props("code"), listOf("code")))
             .put(CapabilityContract.specification())
             .put(androidTools.specification())
             .put(ai.capri.app.terminal.TerminalContract.specification())

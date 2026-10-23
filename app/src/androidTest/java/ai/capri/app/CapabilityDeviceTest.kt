@@ -52,7 +52,8 @@ class CapabilityDeviceTest {
             assertTrue(isolated, isolated.startsWith("exit=0"))
             val terminals = ai.capri.app.terminal.TerminalManager.get(context)
             suspend fun terminal(action: String, params: JSONObject = JSONObject()): JSONObject {
-                val response = JSONObject(terminals.execute(chat, JSONObject().put("action", action).put("params", params)))
+                val flat = JSONObject(params.toString()).put("action", action)
+                val response = JSONObject(terminals.execute(chat, flat))
                 assertEquals(response.toString(), "ok", response.optString("status"))
                 return response.getJSONObject("data")
             }
@@ -64,8 +65,8 @@ class CapabilityDeviceTest {
                 data
             }
             try {
-                val one = terminal("run",params().put("command","export PROOF=shared-shell; cd /tmp").put("wait_ms",0)).getString("command_id")
-                finished(one)
+                val initial = terminal("run",params().put("command","sleep 1.2; export PROOF=shared-shell; cd /tmp"))
+                assertTrue(initial.toString(), initial.getBoolean("complete"))
                 val two = terminal("run",params().put("command","echo $" + "PROOF; pwd").put("wait_ms",0)).getString("command_id")
                 val output = finished(two).getString("output")
                 assertTrue(output, output.contains("shared-shell") && output.contains("/tmp"))

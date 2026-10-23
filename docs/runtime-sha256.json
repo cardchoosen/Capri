@@ -3,7 +3,7 @@
   "app/src/main/assets/runtime/bin/sftp": "6f7314588f8304c9f408d17208913012a40b63b80c7765c72deaba9706aae56a",
   "app/src/main/assets/runtime/bin/ssh": "5b54685280f6ea0877c86a932b53cac565439ccc6641cfe842c312e069c405bd",
   "app/src/main/assets/runtime/environment_probe.py": "ab53b94cbf35a990cb114c9ea39557c40c268841387f995bb21904bfc992ba69",
-  "app/src/main/assets/runtime/execution_rules.txt": "f6c7774880575f19850a83d50b519793cdf6b6cb6dce6500e752b5314e753947",
+  "app/src/main/assets/runtime/execution_rules.txt": "5770d02800527ffb8aaf6512e38e877a135da5705006e7b299c82d52e1606914",
   "app/src/main/assets/runtime/git_credential.py": "352c4c6f6271b3c5eda843805d6175f6d8e592e3b0e5368e6778ccc8e16356f8",
   "app/src/main/assets/runtime/session_bootstrap.py": "a6246ce6f09236ddb6dfe65420a7e8c6f2e4b6378151094143323ec4a0d4d948",
   "app/src/main/assets/runtime/ssh_config": "021d570ed3940235a336864fea7294a3da5ad5d799b395d6d412ac5e8921ccc9",

@@ -40,7 +40,7 @@ cache/ubuntu-setup.log                # 最近一次环境准备日志
 
 `environment`按任务声明命令、Python包/版本/导入、系统包、头文件/链接库和编译器：inspect核对事实及项目清单；prepare正常apt/pip安装，from_project读取Python/npm/pnpm项目；verify执行明确argv的小样本，最多40秒。无固定绘图/语言场景枚举，不保证自动推断所有依赖。系统包全局安装一次，venv/node_modules/npm前缀按会话；缓存复用不等于依赖已安装。Node/npm/g++等按需安装，允许具备依赖后的源码构建。
 
-短脚本默认python_run（60秒、输出软上限2MB），与终端共用当前venv。持续终端保留cwd/变量/函数，支持stdin、增量输出、cancel/close和日志清理；前台服务承载，进程死亡标记中断。系统安装要求环境空闲，存活终端即使空闲也返回busy，不自动停止任务。
+短脚本默认python_run（60秒、输出软上限2MB），与终端共用当前venv。持续终端为POSIX /bin/sh（dash），已进入会话venv，无需source激活。模型调用使用扁平参数（旧params仍兼容），run默认短等5秒且提前结束立即返回。终端保留cwd/变量/函数，支持stdin、增量输出、cancel/close和日志清理；前台服务承载，进程死亡标记中断。系统安装要求环境空闲，存活终端即使空闲也返回busy，不自动停止任务。
 
 本次用户明确授权：新Ubuntu验证后一次性清空旧聊天、工作文件/附件、会话依赖/日志、终端记录/recovery及旧组件；保留全局SSH、Git Token、模型配置、设置与核心档案。以后普通升级不重复清理。不要pm clear或卸载主应用来部署。
 
