@@ -6,17 +6,23 @@ import android.content.Context
 internal object RuntimeGate {
     data class Use(val chat: String, val kind: String)
     private data class Running(val root: String, val process: Process, val use: Use)
+    private val fileUses = mutableMapOf<String, Pair<String,Use>>()
+    @Synchronized fun beginFiles(context: Context, chat: String, kind: String): String {
+        check(!maintenance.containsKey(root(context))) { "环境维护中，请稍后操作文件" }
+        val id=java.util.UUID.randomUUID().toString(); fileUses[id]=root(context) to Use(chat,kind); return id
+    }
+    @Synchronized fun endFiles(id: String) { fileUses.remove(id) }
     private val maintenance = mutableMapOf<String, String>()
     private val running = mutableListOf<Running>()
     private fun root(context: Context) = context.filesDir.canonicalPath
     private fun prune() { running.removeAll { !it.process.isAlive } }
     @Synchronized fun active(context: Context): List<Use> {
-        prune(); return running.filter { it.root == root(context) }.map { it.use }
+        prune(); return running.filter { it.root == root(context) }.map { it.use } + fileUses.values.filter { it.first == root(context) }.map { it.second }
     }
     @Synchronized fun <T> observe(block: () -> T): T = block()
     @Synchronized fun beginMaintenance(context: Context, chat: String, allowPreparation: Boolean = false) {
         check(!maintenance.containsKey(root(context))) { "已有环境维护正在进行" }
-        check(active(context).isEmpty()) { "请先等待脚本结束并关闭全部持续终端，再维护环境" }
+        check(active(context).isEmpty()) { "请先等待脚本和浏览器文件操作结束，并关闭全部持续终端，再维护环境" }
         maintenance[root(context)] = if (allowPreparation) chat else ""
     }
     @Synchronized fun endMaintenance(context: Context) { maintenance.remove(root(context)) }

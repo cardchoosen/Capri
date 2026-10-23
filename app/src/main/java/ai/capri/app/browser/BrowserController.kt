@@ -4,6 +4,9 @@ import ai.capri.app.Workspace
 import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.graphics.Bitmap
+import android.view.MotionEvent
+import android.os.SystemClock
+import androidx.core.content.FileProvider
 import android.net.http.SslError
 import android.webkit.*
 import androidx.webkit.WebViewCompat
@@ -24,7 +27,10 @@ internal class BrowserFault(val status: String, message: String) : Exception(mes
 internal class BrowserController(private val context: Context, workspace: Workspace, private val selectedChat: () -> String) {
     private class Page(val chat: String, val record: BrowserRecord, var web: WebView? = null, var epoch: Long = 0,
                        var loading: Boolean = false, var failure: String? = null, var snapshot: String? = null,
-                       var paused: Boolean = false, var control: Long = 0)
+                       var paused: Boolean = false, var control: Long = 0,
+                       var upload: Upload? = null, var downloadNotice: String = "", var downloadOffer: String? = null, val staged: MutableList<java.io.File> = mutableListOf(),
+                       val methods: java.util.concurrent.ConcurrentHashMap<String,String> = java.util.concurrent.ConcurrentHashMap())
+    private class Upload(val files: List<java.io.File>, val epoch: Long, val done: CompletableDeferred<Unit> = CompletableDeferred())
     private val store = BrowserStore(workspace)
     private val receipts = BrowserOperations(workspace)
     private val actionScript by lazy { context.assets.open("browser/actions.js").bufferedReader().use { it.readText() } }
@@ -33,6 +39,7 @@ internal class BrowserController(private val context: Context, workspace: Worksp
     private val loadLocks = mutableMapOf<String, Mutex>()
     private val saveLocks = mutableMapOf<String, Mutex>()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val files = BrowserFiles(context,workspace,scope,context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0) { changed() }
     var pagesChanged: (String, List<BrowserRecord>) -> Unit = { _, _ -> }
     var displayedPage: () -> String? = { null }
     private val mutableUi = MutableStateFlow(BrowserUi())
@@ -48,7 +55,7 @@ internal class BrowserController(private val context: Context, workspace: Worksp
             .put("multi_profile", supported).put("provider", provider?.packageName ?: "unavailable")
             .put("version", provider?.versionName ?: "unknown").put("engine", "Android WebView")
             .put("message", if (supported) "支持会话独立登录环境" else "系统WebView不支持多Profile，请更新WebView；不会共享登录态降级")
-            .put("actions", JSONArray(listOf("status", "tabs", "open", "observe", "show", "close", "navigate", "back", "click", "fill", "select", "scroll", "wait", "takeover", "resume")))
+            .put("actions", JSONArray(listOf("status", "tabs", "open", "observe", "show", "close", "navigate", "back", "click", "fill", "select", "scroll", "wait", "takeover", "resume", "screenshot", "upload", "download", "downloads", "cancel_download")))
     }
     private fun changed(notice: String = mutableUi.value.notice) {
         mutableUi.value = mutableUi.value.copy(revision = mutableUi.value.revision + 1, notice = notice)
@@ -104,6 +111,12 @@ internal class BrowserController(private val context: Context, workspace: Worksp
                 JSONObject().put("page_id", it.id).put("url", it.url).put("title", it.title)
             })).toString()
         }
+        if (args.getString("action") in setOf("downloads","cancel_download")) {
+            return@withContext try {
+                if(args.getString("action")=="downloads") files.list(chat).toString()
+                else files.cancel(chat,args.getString("download_id")).toString()
+            }catch(e:Exception){if(e is CancellationException)throw e;JSONObject().put("status",(e as? BrowserFault)?.status ?: "error").put("message",e.message.orEmpty()).toString()}
+        }
         if (!operation.tryLock()) return@withContext JSONObject().put("status", "browser_busy").put("message", "另一个浏览器操作正在执行").toString()
         var active: Page? = null
         var initiatedLoad = false
@@ -131,7 +144,7 @@ internal class BrowserController(private val context: Context, workspace: Worksp
                     if (action == "takeover") userTakeover(p.record.id) else userResume(p.record.id)
                     return@withTimeout JSONObject().put("status", "ok").put("page_id",p.record.id).put("paused",p.paused).put("requires_fresh_observation",true)
                 }
-                if ((action in BrowserContract.writes || action == "wait") && p.web == null)
+                if ((action in BrowserContract.writes || action in setOf("wait","download","screenshot")) && p.web == null)
                     throw BrowserFault("needs_observation", "页面已重建或未就绪，请先show/observe；不会恢复并重放写操作")
                 val restored = p.web == null
                 createdView = restored
@@ -139,6 +152,17 @@ internal class BrowserController(private val context: Context, workspace: Worksp
                 mutableUi.value = BrowserUi(chat, p.record.id, mutableUi.value.revision + 1, if (restored) "正在打开页面" else "", busy = true)
                 changed()
                 awaitHost(p)
+                if (action == "download") {
+                    ensureHost(p)
+                    if(p.paused)throw BrowserFault("needs_user","用户已接管，自动下载暂停")
+                    return@withTimeout files.start(chat,p.record.id,args.getString("url"),args.getString("request_id"),WebViewCompat.getProfile(p.web!!).cookieManager,p.web!!.settings.userAgentString)
+                }
+                if (action == "screenshot") {
+                    if(p.loading || p.failure!=null || p.web?.url.isNullOrBlank() || p.web?.url=="about:blank" || p.web?.url?.startsWith("chrome-error:")==true)
+                        throw BrowserFault("not_loaded","页面尚未就绪，不能截图为空白成功")
+                    // Capture the engine view, not the app overlay; do not invalidate an existing DOM snapshot.
+                    return@withTimeout files.screenshot(chat,p.web!!).put("page_id",p.record.id).put("document_epoch",p.epoch)
+                }
                 if (action in BrowserContract.writes || action == "wait") return@withTimeout interact(p, args)
                 if (restored) {
                     initiatedLoad = true; p.loading = true; p.failure = null
@@ -193,6 +217,9 @@ internal class BrowserController(private val context: Context, workspace: Worksp
         ensureHost(p)
     }
     private fun destroy(p: Page) {
+        files.closePage(p.record.id)
+        p.upload?.done?.completeExceptionally(BrowserFault("interrupted","页面已关闭或重建")); p.upload=null
+        p.staged.mapNotNull { it.parentFile?.parentFile }.distinct().forEach { it.deleteRecursively() }; p.staged.clear()
         p.epoch++; p.snapshot = null; p.loading = false
         p.web?.let { (it.parent as? android.view.ViewGroup)?.removeView(it); it.stopLoading(); it.destroy() }
         p.web = null
@@ -214,6 +241,10 @@ internal class BrowserController(private val context: Context, workspace: Worksp
             }
             WebView.setWebContentsDebuggingEnabled(debug)
             web.webViewClient = object : WebViewClient() {
+                override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
+                    if(p.methods.size>64)p.methods.clear();p.methods[request.url.toString()]=request.method
+                    return null
+                }
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
                     runCatching { BrowserContract.url(request.url.toString(), debug) }.isFailure.also {
                         if (it) changed("此链接需要其他应用或不支持的协议，未打开")
@@ -229,7 +260,9 @@ internal class BrowserController(private val context: Context, workspace: Worksp
                     if (p.web !== view) return
                     p.loading = false
                     if (url != null && runCatching { BrowserContract.url(url, debug) }.isSuccess) p.record.url = url
-                    p.record.title = view.title.orEmpty().take(160); changed(p.failure.orEmpty())
+                    p.record.title = view.title.orEmpty().take(160)
+                    p.staged.mapNotNull { it.parentFile?.parentFile }.distinct().forEach { it.deleteRecursively() }; p.staged.clear()
+                    changed(p.failure.orEmpty())
                 }
                 override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
                     if (p.web === view && request.isForMainFrame) { p.failure = "网页加载失败（${error.errorCode}）"; p.loading = false; changed(p.failure!!) }
@@ -251,9 +284,33 @@ internal class BrowserController(private val context: Context, workspace: Worksp
                 override fun onJsAlert(view: WebView, url: String, message: String, result: JsResult): Boolean { result.cancel(); changed("网页弹窗尚未接入"); return true }
                 override fun onJsConfirm(view: WebView, url: String, message: String, result: JsResult): Boolean { result.cancel(); changed("网页确认弹窗尚未接入"); return true }
                 override fun onJsPrompt(view: WebView, url: String, message: String, defaultValue: String, result: JsPromptResult): Boolean { result.cancel(); return true }
-                override fun onShowFileChooser(view: WebView, callback: ValueCallback<Array<android.net.Uri>>, params: FileChooserParams): Boolean { callback.onReceiveValue(null); changed("文件上传将在03-C接入"); return true }
+                override fun onShowFileChooser(view: WebView, callback: ValueCallback<Array<android.net.Uri>>, params: FileChooserParams): Boolean {
+                    val upload=p.upload
+                    if(upload==null || upload.epoch!=p.epoch || p.paused || !resumed || selectedChat()!=p.chat) {
+                        callback.onReceiveValue(null);changed("请通过当前会话upload工具明确选择文件");return true
+                    }
+                    try {
+                        check(params.mode in setOf(FileChooserParams.MODE_OPEN,FileChooserParams.MODE_OPEN_MULTIPLE) && !params.isCaptureEnabled) { "不支持目录/保存/相机上传" }
+                        check(params.mode==FileChooserParams.MODE_OPEN_MULTIPLE || upload.files.size==1) { "此控件只接受一个文件" }
+                        val accepts=params.acceptTypes.flatMap{it.split(',')}
+                        for(file in upload.files) {
+                            val mime=android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(file.extension.lowercase()) ?: "application/octet-stream"
+                            check(BrowserFilePolicy.accepts(mime,file.name,accepts)) { "文件MIME类型不匹配" }
+                        }
+                        val uris=upload.files.map{FileProvider.getUriForFile(context,"${context.packageName}.files",it)}.toTypedArray()
+                        callback.onReceiveValue(uris);upload.done.complete(Unit)
+                    } catch(e:Exception){callback.onReceiveValue(null);upload.done.completeExceptionally(BrowserFault("upload_rejected",e.message.orEmpty()))}
+                    p.upload=null;return true
+                }
             }
-            web.setDownloadListener { _, _, _, _, _ -> changed("文件下载将在03-C接入") }
+            web.setDownloadListener { url, userAgent, _, _, _ ->
+                p.loading=false
+                p.downloadOffer=runCatching{BrowserContract.url(url,debug)}.getOrNull()
+                if(p.web===web && p.methods[url]=="GET" && !p.paused && resumed && selectedChat()==p.chat) {
+                    scope.launch { runCatching { files.start(p.chat,p.record.id,url,java.util.UUID.randomUUID().toString(),WebViewCompat.getProfile(web).cookieManager,userAgent ?: web.settings.userAgentString) }
+                        .onFailure{changed("下载未启动：检查配额或网络")};p.downloadNotice="下载已登记，请用downloads查看结果";changed(p.downloadNotice) }
+                } else {p.downloadNotice="此下载的GET来源未确认或为POST/Blob，未重放；明确GET文件可用download";changed(p.downloadNotice)}
+            }
             p.web = web
         } catch (e: Exception) { web.destroy(); throw e }
     }
@@ -314,7 +371,7 @@ internal class BrowserController(private val context: Context, workspace: Worksp
                 begun=true
             }
             guard()
-            val elementAction=action in setOf("click","fill","select")
+            val elementAction=action in setOf("click","fill","select","upload")
             var preparedBounds: JSONArray? = null
             if (elementAction) {
                 if (p.snapshot != args.getString("snapshot_id") || p.epoch != args.getLong("document_epoch"))
@@ -334,6 +391,34 @@ internal class BrowserController(private val context: Context, workspace: Worksp
                     "back" -> {
                         if (!p.web!!.canGoBack()) { state="not_applied"; throw BrowserFault("no_history","没有后退历史") }
                         p.failure=null; p.loading=true; p.snapshot=null; p.web!!.goBack(); state="dispatched"
+                    }
+                    "upload" -> {
+                        files.prepare(p.chat)
+                        val lease=ai.capri.app.RuntimeGate.beginFiles(context,p.chat,"浏览器上传")
+                        var staged: List<java.io.File> = emptyList()
+                        try {
+                            staged=files.stage(p.chat,args.getJSONArray("paths"))
+                            check(p.staged.sumOf{it.length()}+staged.sumOf{it.length()}<=BrowserFilePolicy.MAX_FILE){"当前页上传快照超过20MB，请关闭页面后重试"}
+                            guard()
+                            if(p.epoch!=args.getLong("document_epoch") || p.snapshot!=args.getString("snapshot_id"))throw BrowserFault("stale_reference","准备文件时页面已变化")
+                            val command=JSONObject(args.toString()).put("bounds",preparedBounds)
+                            val point=evaluate(p,actionScript.replace("__CAPRI_ACTION__",command.toString()))
+                            if(point.optString("status")!="ok"){state="not_applied";throw BrowserFault(point.optString("status"),point.optString("message"))}
+                            val upload=Upload(staged,p.epoch);p.upload=upload
+                            val web=p.web!!;val scale=web.width/point.getDouble("viewport_width")
+                            val x=(point.getDouble("x")*scale).toFloat();val y=(point.getDouble("y")*scale).toFloat()
+                            val time=SystemClock.uptimeMillis()
+                            for(kind in listOf(MotionEvent.ACTION_DOWN,MotionEvent.ACTION_UP)) {
+                                val event=MotionEvent.obtain(time,SystemClock.uptimeMillis(),kind,x,y,0)
+                                try{web.dispatchTouchEvent(event)}finally{event.recycle()}
+                            }
+                            withTimeout(3000){upload.done.await()};guard()
+                            p.staged.addAll(staged);staged=emptyList();p.snapshot=null;state="applied"
+                        } finally {
+                            p.upload?.done?.cancel();p.upload=null
+                            withContext(NonCancellable+Dispatchers.IO){staged.mapNotNull{it.parentFile?.parentFile}.distinct().forEach{it.deleteRecursively()}}
+                            ai.capri.app.RuntimeGate.endFiles(lease)
+                        }
                     }
                     "scroll" -> {
                         val direction=args.getString("direction")
@@ -361,11 +446,11 @@ internal class BrowserController(private val context: Context, workspace: Worksp
                 if(!p.loading) {
                     snapshot=observe(p)
                     matched=expect?.let { condition ->
-                        when {
-                            condition.has("text") -> snapshot!!.optString("text").contains(condition.getString("text"))
-                            condition.has("text_absent") -> !snapshot!!.optString("text").contains(condition.getString("text_absent")) && !snapshot!!.optBoolean("truncated")
-                            else -> snapshot!!.optString("url").contains(condition.getString("url_contains"))
-                        }
+                        condition.keys().asSequence().all { key -> when(key) {
+                            "text" -> snapshot!!.optString("text").contains(condition.getString(key))
+                            "text_absent" -> !snapshot!!.optString("text").contains(condition.getString(key)) && !snapshot!!.optBoolean("truncated")
+                            else -> snapshot!!.optString("url").contains(condition.getString(key))
+                        } }
                     } ?: true
                     if(matched)break
                 }
@@ -375,6 +460,7 @@ internal class BrowserController(private val context: Context, workspace: Worksp
             guard(); persist(p.chat); changed("")
             return output(if(matched) "ok" else "verification_timeout")
                 .put("observation",snapshot ?: JSONObject.NULL)
+                .put("download_offer",p.downloadOffer ?: JSONObject.NULL).put("download_notice",p.downloadNotice).put("downloads",files.list(p.chat).getJSONArray("downloads"))
                 .put("verification",JSONObject().put("state",if(expect==null) "not_requested" else if(matched) "matched" else "timeout"))
         } catch(e:CancellationException) {
             throw e
@@ -386,5 +472,5 @@ internal class BrowserController(private val context: Context, workspace: Worksp
             if(begun && !receiptFinished) withContext(NonCancellable+Dispatchers.IO) { runCatching { receipts.finish(p.chat,id,state) } }
         }
     }
-    fun dispose() { disposed = true; scope.cancel(); pages.values.flatten().forEach(::destroy) }
+    fun dispose() { disposed = true; files.dispose(); scope.cancel(); pages.values.flatten().forEach(::destroy) }
 }

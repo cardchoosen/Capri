@@ -20,6 +20,11 @@
   const hit=document.elementFromPoint(x,y);
   if(r.bottom<=0||r.top>=innerHeight||r.right<=0||r.left>=innerWidth||!hit||!(hit===e||e.contains(hit)))return fail('target_obscured','目标被遮挡或不在视口');
   const tag=e.tagName,type=(e.type||'').toLowerCase();
+  if(a.action==='upload'){
+    if(tag!=='INPUT'||type!=='file')return fail('unsupported','目标不是文件输入框');
+    if(window.visualViewport&&Math.abs(visualViewport.width-innerWidth)>2)return fail('needs_user','缩放页面的文件选择需用户操作');
+    return {status:'ok',x,y,viewport_width:innerWidth};
+  }
   if(a.action==='click'){
     if(tag==='INPUT'&&['file','password'].includes(type))return fail('needs_user','此控件需用户操作');
     if(typeof e.click!=='function')return fail('unsupported','目标不支持DOM点击');

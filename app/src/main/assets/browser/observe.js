@@ -19,6 +19,8 @@
     const label=clean(e.getAttribute('aria-label')||labelText(e)||e.getAttribute('placeholder')||e.innerText||e.getAttribute('name')||'').slice(0,180);
     const ref='e'+(elements.length+1); refs.set(ref,{node:e,identity:identity(e)});
     const item={ref,role,name:label,type,enabled:!e.disabled&&e.getAttribute('aria-disabled')!=='true',readonly:!!e.readOnly};
+    if(tag==='a'&&/^https?:$/.test(e.protocol)){item.href=e.href.slice(0,4096);item.download=e.hasAttribute('download');}
+    if(tag==='input'&&type==='file')item.files=Array.from(e.files||[]).slice(0,4).map(f=>({name:f.name,size:f.size,type:f.type}));
     if(tag==='select')item.options=Array.from(e.options).slice(0,30).map(o=>({value:o.value,label:clean(o.text).slice(0,100),selected:o.selected,enabled:!o.disabled}));
     if (type==='password') item.redacted=true;
     else if (type==='checkbox'||type==='radio') item.checked=!!e.checked;

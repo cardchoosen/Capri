@@ -39,7 +39,7 @@ class BrowserDeviceTest {
             }
             found
         }
-        val directory = File(context.cacheDir, "browser-acceptance").apply { mkdirs() }
+        val directory = File(context.filesDir, "sessions/browser-test-${java.util.UUID.randomUUID()}").apply { mkdirs() }
         val workspace = Workspace(directory)
         val server = ServerSocket(0, 16, java.net.InetAddress.getByName("127.0.0.1"))
         val clients = Executors.newCachedThreadPool()
@@ -52,14 +52,21 @@ class BrowserDeviceTest {
                     val requestLine = input.readLine()?.split(' ').orEmpty()
                     val path = requestLine.getOrNull(1).orEmpty()
                     if(path.startsWith("/submitted") && requestLine.firstOrNull()=="POST") submissions.incrementAndGet()
-                    while (!input.readLine().isNullOrEmpty()) { }
+                    val headers=mutableListOf<String>()
+                    while(true){val header=input.readLine();if(header.isNullOrEmpty())break;headers.add(header)}
                     if (path.startsWith("/slow")) Thread.sleep(1500)
                     val set = when { path.startsWith("/set-a") -> "document.cookie='capri=a; path=/';localStorage.setItem('capri','a');"; path.startsWith("/set-b") -> "document.cookie='capri=b; path=/';localStorage.setItem('capri','b');"; else -> "" }
                     val body = """<!doctype html><html><head><title>Browser fixture</title></head><body><h1>Profile proof</h1><p id="proof"></p><label>Search<input name="q"></label><button>Submit</button><input type="password" value="fixture-password-never-return"><div hidden>fixture-hidden-never-return</div><script>$set document.getElementById('proof').textContent='cookie:'+document.cookie+' storage:'+localStorage.getItem('capri');</script></body></html>""".toByteArray()
-                    val form = """<!doctype html><html><head><title>Form fixture</title></head><body><form action="/submitted" method="post"><label>Name<input name="name" id="name"></label><p id="typed"></p><label>Color<select name="color"><option value="red">Red</option><option value="green">Green</option></select></label><button id="send">Send form</button><button type="button" disabled>Disabled</button><input aria-label="Readonly" readonly><input aria-label="Password" type="password" value="fixture-password-never-return"></form><p id="later"></p><div style="height:1800px"></div><p>Bottom marker</p><script>nameInput=document.getElementById('name');nameInput.addEventListener('input',()=>document.getElementById('typed').textContent='Typed:'+nameInput.value);</script></body></html>""".toByteArray()
+                    val form = """<!doctype html><html><head><title>Form fixture</title></head><body><form action="/submitted" method="post"><label>Name<input name="name" id="name"></label><p id="typed"></p><label>Color<select name="color"><option value="red">Red</option><option value="green">Green</option></select></label><button id="send">Send form</button><button type="button" disabled>Disabled</button><input aria-label="Readonly" readonly><input aria-label="Password" type="password" value="fixture-password-never-return"></form><label>Upload<input type="file" name="attachment" accept=".txt"></label><a href="/download" download>Download file</a><p id="later"></p><div style="height:1800px"></div><p>Bottom marker</p><script>nameInput=document.getElementById('name');nameInput.addEventListener('input',()=>document.getElementById('typed').textContent='Typed:'+nameInput.value);</script></body></html>""".toByteArray()
                     val content = when { path.startsWith("/form") -> form; path.startsWith("/submitted") -> "<html><head><title>Submitted</title></head><body><h1>Submitted ${submissions.get()}</h1></body></html>".toByteArray(); else -> body }
-                    val status = if (path.startsWith("/missing")) "404 Not Found" else "200 OK"
-                    peer.getOutputStream().apply { write("HTTP/1.1 $status\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: ${content.size}\r\nConnection: close\r\n\r\n".toByteArray()); write(content); flush() }
+                    val fileRoute=path.startsWith("/download") || path.startsWith("/redirect-file") || path.startsWith("/slow-file")
+                    val hasCookie=headers.any{it.startsWith("Cookie:",true)&&it.contains("capri=a")}
+                    val status = when { path.startsWith("/missing")->"404 Not Found";path.startsWith("/redirect-file")->"302 Found"; fileRoute&&!hasCookie->"403 Forbidden";else->"200 OK" }
+                    val payload=if(fileRoute)"download-cookie-proof".toByteArray() else content
+                    if(path.startsWith("/slow-file")) Thread.sleep(2000)
+                    val extra=if(path.startsWith("/redirect-file"))"Location: /download\r\n" else if(fileRoute)"Content-Disposition: attachment; filename=\"../../proof.txt\"\r\n" else ""
+
+                    peer.getOutputStream().apply { write("HTTP/1.1 $status\r\nContent-Type: ${if(fileRoute) "application/octet-stream" else "text/html; charset=utf-8"}\r\n${extra}Content-Length: ${payload.size}\r\nConnection: close\r\n\r\n".toByteArray()); write(payload); flush() }
                 } }
             } catch (_: Exception) { }
         }.apply { isDaemon = true; start() }
@@ -219,7 +226,7 @@ class BrowserDeviceTest {
             withContext(Dispatchers.Main) { browser.userResume(formId) }
             assertEquals("stale_reference",act(actionArgs("fill",form,"Name").put("text","blocked")).getString("status"))
             form=call("observe",formId)
-            val clickArgs=actionArgs("click",form,"Send form").put("expect",JSONObject().put("text","Submitted 1"))
+            val clickArgs=actionArgs("click",form,"Send form").put("expect",JSONObject().put("text","Submitted 1").put("url_contains","/submitted"))
             val sent=act(clickArgs); assertEquals(sent.toString(),"ok",sent.getString("status"))
             assertEquals("matched",sent.getJSONObject("verification").getString("state")); assertEquals(1,submissions.get())
             assertEquals("duplicate_not_replayed",act(clickArgs).getString("status")); assertEquals(1,submissions.get())
@@ -244,6 +251,51 @@ class BrowserDeviceTest {
             val stopped=paused.await(); assertEquals(stopped.toString(),"needs_user",stopped.getString("status"))
             assertTrue(stopped.getString("action_state") in setOf("applied","unknown"))
             assertFalse(File(workspace.root(selected),"browser/operations.json").readText().contains("Pause test"))
+            withContext(Dispatchers.Main) { browser.userResume(formId) }
+            form=call("observe",formId)
+            val shot=act(JSONObject().put("action","screenshot").put("page_id",formId))
+            assertEquals(shot.toString(),"ok",shot.getString("status"))
+            val image=workspace.file(selected,shot.getString("path"))
+            val bitmap=android.graphics.BitmapFactory.decodeFile(image.path);assertNotNull(bitmap);assertTrue(bitmap.width>0);bitmap.recycle()
+            assertEquals("image/png",Attachments.inspect(workspace,selected,shot.getString("path"),"").getString("mime"))
+            workspace.file(selected,"upload.txt").writeText("upload-fixture")
+            val uploaded=act(actionArgs("upload",form,"Upload").put("paths",org.json.JSONArray(listOf("upload.txt"))))
+            assertEquals(uploaded.toString(),"ok",uploaded.getString("status"))
+            // Read the actual browser File object; no base64 data or host path was injected into Javascript.
+            val selectedName=withContext(Dispatchers.Main){suspendCancellableCoroutine<String>{c->browser.view(formId)!!.evaluateJavascript("document.querySelector('input[type=file]').files[0]?.name"){c.resumeWith(Result.success(it))}}}
+            assertEquals("\"upload.txt\"",selectedName)
+            val dl=act(JSONObject().put("action","download").put("page_id",formId).put("url","$base/redirect-file").put("request_id",java.util.UUID.randomUUID().toString()))
+            assertEquals(dl.toString(),"accepted",dl.getString("status"))
+            val downloadId=dl.getString("download_id")
+            val complete=withTimeout(5000){var found:JSONObject?=null;while(found==null){
+                val all=JSONObject(browser.execute(selected,JSONObject().put("action","downloads"))).getJSONArray("downloads")
+                found=(0 until all.length()).map{all.getJSONObject(it)}.firstOrNull{it.getString("download_id")==downloadId&&it.getString("state")!in setOf("queued","running")}
+                if(found==null)delay(100)
+            };found}
+            assertEquals(complete.toString(),"completed",complete.getString("state"))
+            assertEquals("download-cookie-proof",workspace.file(selected,complete.getString("path")).readText())
+            assertFalse(complete.getString("path").contains(".."))
+            val slow=act(JSONObject().put("action","download").put("page_id",formId).put("url","$base/slow-file").put("request_id",java.util.UUID.randomUUID().toString()))
+            assertThrows(IllegalStateException::class.java){RuntimeGate.beginMaintenance(context,selected)}
+            val cancelled=JSONObject(browser.execute(selected,JSONObject().put("action","cancel_download").put("download_id",slow.getString("download_id"))))
+            assertEquals("cancelled",cancelled.getString("state"))
+            println("browser-file-cancel-active="+RuntimeGate.active(context))
+            withTimeout(3000){while(RuntimeGate.active(context).any{it.kind.startsWith("浏览器")})delay(50)}
+            RuntimeGate.beginMaintenance(context,selected);RuntimeGate.endMaintenance(context)
+            val recoveryChat="browser-file-recovery"
+            val recoveryId=java.util.UUID.randomUUID().toString()
+            val meta=File(workspace.folder(recoveryChat,"browser"),"downloads.json")
+            meta.writeText(org.json.JSONArray().put(JSONObject().put("download_id",recoveryId).put("page_id",formId).put("state","running")).toString())
+            workspace.file(recoveryChat,"browser/orphan.part").also{it.parentFile!!.mkdirs();it.writeText("unfinished")}
+            File(workspace.folder(recoveryChat,"browser"),"uploads/stale/file").also{it.parentFile!!.mkdirs();it.writeText("old")}
+            val recoveryScope=CoroutineScope(SupervisorJob()+Dispatchers.Main.immediate)
+            try {
+                val recovery=BrowserFiles(context,workspace,recoveryScope,true){}
+                val recovered=withContext(Dispatchers.Main){recovery.list(recoveryChat)}.getJSONArray("downloads").getJSONObject(0)
+                assertEquals("interrupted",recovered.getString("state"))
+                assertFalse(workspace.file(recoveryChat,"browser/orphan.part").exists())
+                assertFalse(File(workspace.folder(recoveryChat,"browser"),"uploads/stale").exists())
+            }finally{recoveryScope.cancel()}
             call("close",formId)
             val missing = call("open", "$base/missing"); assertEquals(missing.toString(), "load_failed", missing.getString("status"))
             val closed = call("close", readId); assertTrue(closed.toString(), closed.getBoolean("closed"))

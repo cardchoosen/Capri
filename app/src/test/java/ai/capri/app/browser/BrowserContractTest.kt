@@ -28,6 +28,7 @@ class BrowserContractTest {
             JSONObject(click.toString()).put("timeout_ms",16000),
             JSONObject(click.toString()).put("expect",JSONObject().put("selector","#secret"))))
             assertThrows(Exception::class.java) { BrowserContract.validate(bad) }
+        BrowserContract.validate(JSONObject(click.toString()).put("expect",JSONObject().put("text","done").put("url_contains","/done")))
         assertEquals("",BrowserContract.validate(JSONObject(click.toString()).put("action","fill").put("text","")).getString("text"))
     }
     @Test fun navigationRejectsLocalFilesCredentialsAndProductionCleartext() {
