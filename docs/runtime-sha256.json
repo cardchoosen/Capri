@@ -20,5 +20,6 @@
   "app/src/main/assets/runtime/rootfs.files.json": "33ad401352f14bc40020dd9ace3d6e996e7d832bb9aa05e6fa6a864ed2b4c842",
   "app/src/main/assets/runtime/rootfs.sha256": "b63e6eae744e7c1547f0596d59ecf3d4569e794bd63d268910399495269d3f56",
   "app/src/main/assets/runtime/devtools.files.json": "542847ab84dad89f144f0f0c574b1d5dafd31559ba902cfcc65a3133059ec3b5",
-  "app/src/main/assets/runtime/python-packages.files.json": "9549e3036fc29715d93b595825a129921f31e1825d58053e74fece2510cb8756"
+  "app/src/main/assets/runtime/python-packages.files.json": "9549e3036fc29715d93b595825a129921f31e1825d58053e74fece2510cb8756",
+  "app/src/main/assets/runtime/capability_probe.py": "87b3201ef6dd23cf9c9dfde82c0dd69360b5ee510bf2c40d6da9ad7514f262e2"
 }

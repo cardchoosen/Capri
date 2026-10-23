@@ -22,6 +22,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
     val store = Store(app)
     val runtime = PythonRuntime(app, store.workspace)
     internal val terminals = ai.capri.app.terminal.TerminalManager.get(app)
+    internal val capabilityTool = CapabilityTool(runtime)
     internal val pythonEnvironment = ai.capri.app.pythonenv.PythonEnvironmentTool(terminals)
     val androidTools = ai.capri.app.nativebridge.AndroidTool(app)
     val sessions = store.load()
@@ -163,6 +164,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
             .put(tool("send_file", "把当前会话工作区已有文件发送到聊天。PNG/JPEG/GIF/WebP内联显示（GIF可播放）；其他文件可分享导出。最大20MB，不发送私钥或凭据。path为相对路径或/workspace/路径，caption可选。", props("path", "caption"), listOf("path")))
             .put(tool("python_run", "运行短Python脚本的首选入口，执行并直接返回输出/退出码，最长60秒。绘图、文件处理、生成产物和基本验证尽量在此一次完成；无需先open终端。代码可读取已保存脚本或将源码保存/workspace；缺少依赖用python_env安装。", props("code"), listOf("code")))
             .put(ai.capri.app.pythonenv.PythonEnvironmentContract.specification())
+            .put(CapabilityContract.specification())
             .put(androidTools.specification())
             .put(ai.capri.app.terminal.TerminalContract.specification())
         val requests = ModelRequests(MAX_MODEL_CALLS)
@@ -242,10 +244,11 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                                 JSONObject().put("status", "ok").put("attached", true).put("file", item).toString()
                             }
                             "python_env" -> pythonEnvironment.execute(session.id, args)
+                            "environment_check" -> capabilityTool.execute(session.id, args)
                             "terminal" -> terminals.execute(session.id, args)
                             "android" -> androidTools.execute(args)
                             "profile_search" -> store.profile(args.getString("query"))
-                            "list_files" -> store.workspace.list(session.id).joinToString("\n") { it.relativeTo(store.workspace.folder(session.id, "workspace")).path }
+                            "list_files" -> store.workspace.list(session.id).joinToString("\n") { it.relativeTo(store.workspace.folder(session.id, "workspace").canonicalFile).path }
                             "read_file" -> store.workspace.file(session.id, args.getString("path")).let { require(it.length() <= 128_000) { "文件超过128KB" }; it.readText() }
                             "write_file" -> { val text = args.getString("content"); require(text.toByteArray().size <= 1_000_000); store.workspace.file(session.id, args.getString("path")).apply { parentFile?.mkdirs(); writeText(text) }; "写入成功" }
                             "python_run" -> runtime.execute(session.id, args.getString("code"))

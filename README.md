@@ -137,3 +137,19 @@ OpenSSH需要Linux账号查询，因此PRoot增加 `-0` 兼容身份映射：客
 只保留当前应用内置的一套工具，摘要是内容标识；不在线自动追踪上游最新，也不提供多版本选择。工具/科学库成功部署后清理旧SHA目录；.staging/.previous仅用于事务提交/恢复，成功后删除。已有rootfs不隐式覆盖；运行页确认后可修复所选组件，保留聊天、工作区、会话依赖、SSH/Git配置；基础修复会覆盖rootfs手工修改并可能影响依赖兼容性。活跃终端/脚本期间拒绝替换，不自动结束任务。
 
 修改运行资源包后执行python3 tools/build_environment_inventory.py，重新生成.files.json/rootfs.sha256并更新docs/runtime-sha256.json。V2-02仍有缓存清理、会话依赖重置及兼容性评估待完成；完整版本档案见独立Capri-docs仓库。
+
+## 开发提效与验证入口
+
+`python3 tools/verify.py --profile local`一次运行构建/JVM、电脑端测试和资源摘要核对。`--profile capability --device --approve-capri-install`再覆盖安装并执行任务能力专项；`--profile runtime --device`用于改动PRoot、共享层、终端生命周期等高影响范围，包含63秒后台回归。只改文档无需跑设备；UI改动按实际页面选专项，不把一个小改动变成全量回归。
+
+脚本自动选JDK17+（可用--java-home覆盖）、固定USB设备、同APK SHA跳过安装、禁止同时启动两个验证流程；仅用户授权的--approve-capri-install可点击带Capri名称及已知文案的安装确认。未知系统弹窗/超时返回失败，不反复安装或清数据。原生测试必须实际OK且没有跳过/假设失败，不能只看ADB退出码。默认保留测试APK方便下次复用，--cleanup-test可清除；主应用与数据保留。
+
+日志与report.json在忽略的work/verify/<时间>/，latest.json为最近报告；包含构建、安装、各测试阶段及原生用例的观察耗时。用例计时取输出到达时刻，约0.2秒粒度；不作为精密性能基准。首次/冷构建不保证与本次增量构建同速。完整慢回归仍需在高影响改动或交付边界执行。
+
+`python3 tools/analyze_agent_run.py work/diagnostics/<调试日志>.log`统计工具/附件/错误和已知终端命令时长；读取sessions.json必须显式--session，--last-turn只汇总最后一轮。输出不含聊天原文或命令，原始调试记录仍留在本地忽略目录。历史消息无完整时间戳，不能据此推断模型等待或总任务时长。
+
+## 按任务检查代码环境
+
+模型工具environment_check接受language=python/cpp/node、outputs=[png/gif/chart]（可空）和明确的allow_helpers布尔值。离线小样本验证实际C++17编译/执行、Node执行、Pillow编码/解码与Matplotlib Agg绘图；返回ready/needs_install/broken/needs_native_backend/unknown以及证据、可离线安装项和建议路径，不自动安装。探针临时文件位于当前聊天tmp，完成清理；正常引导仍可能初始化venv/pip。
+
+仅覆盖上述目录，不判断任意程序、网络/Android权限、第三方包或完整磁盘健康。严格纯C++时检查已知原生后端，不用Pillow可用冒充纯C++可用；编译/链接测试也不冒充完整编码验收。允许辅助时，可由C++输出算法状态/帧，Pillow绘制或编码，并说明实际分工。指定语言不等于零依赖，缺库不意味着应手写压缩器。环境已知时不强制每轮检查。
