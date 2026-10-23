@@ -12,7 +12,7 @@ import sysconfig
 
 def inspect_environment():
     tools = {}
-    for name in ('git', 'curl', 'ssh', 'sftp', 'scp', 'ssh-keygen', 'ssh-keyscan', 'node', 'npm', 'npx', 'gcc', 'g++', 'make', 'pkg-config'):
+    for name in ('git', 'curl', 'ssh', 'sftp', 'scp', 'ssh-keygen', 'ssh-keyscan', 'node', 'npm', 'npx', 'gcc', 'g++', 'make', 'pkg-config', 'file', 'readelf'):
         executable = shutil.which(name)
         try:
             if not executable:
@@ -51,7 +51,9 @@ def inspect_environment():
                             'npm_cache': os.environ.get('npm_config_cache'),
                             'node_icu_data': os.environ.get('NODE_ICU_DATA'),
                             'compiler_sysroot': '/opt/capri/tools',
+                            'file_magic': os.environ.get('MAGIC'),
                             'python_headers': Path('/opt/capri/tools/usr/include/python3.12/Python.h').is_file(),
+                            'python_abi_config': Path('/usr/include/python3.12/pyconfig.h').is_file(),
                             'scope': 'shared binaries; per-chat HOME/cache/global npm and project node_modules',
                             'source_compilation': 'C/C++ toolchain available; python_env still wheel-only'},
             'platform_tags': list(platform_tags()), 'scientific_libraries': libraries,

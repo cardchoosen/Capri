@@ -87,3 +87,5 @@ APK资源使用 `rootfs.bundle` 文件名保存gzip压缩tar，避免AAPT自动�
 - Node/各依赖许可与npm Artistic-2.0、GCC/binutils/GNU make及Linux头文件的GPL等要求分别遵循清单；公开发行前仍需补齐对应源码/许可证/构建材料，不将本地预览视为已完成再分发审计。
 
 官方参考：[Node.js包](https://pkgs.alpinelinux.org/package/v3.22/main/aarch64/nodejs)、[npm包](https://pkgs.alpinelinux.org/package/v3.22/community/aarch64/npm)、[build-base](https://pkgs.alpinelinux.org/package/v3.22/main/aarch64/build-base)、[GCC目录与sysroot选项](https://gcc.gnu.org/onlinedocs/gcc/Directory-Options.html)。
+
+2026-10-23 搬迁补充：启动器用MAGIC指向工具层usr/share/misc/magic.mgc，file不依赖基础rootfs的默认数据路径；CPATH同时包含工具层Python.h和原基础Python包提供的/usr/include/python3.12/pyconfig.h，避免跳过重复Python运行时包后缺少ABI配置。两者仍对应锁定的Python3.12.15，并未生成替代配置或覆盖系统文件；诊断公开实际magic路径及ABI头文件存在状态。
