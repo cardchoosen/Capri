@@ -97,10 +97,21 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
             finally { runtimeBusy = false; refresh() }
         }
     }
+    internal fun maintainEnvironment(chat: String, action: EnvironmentMaintenance.Action) {
+        if (runtimeBusy || migrating) return
+        if (jobs.isNotEmpty()) { runtimeResult = "请等待所有会话任务结束后再维护环境"; refresh(); return }
+        runtimeBusy = true; runtimeResult = "正在${action.label}…"; refresh()
+        viewModelScope.launch {
+            try { runtimeResult = EnvironmentMaintenance(getApplication(), store.workspace, runtime).perform(chat, action) }
+            catch (cancel: CancellationException) { runtimeResult = "维护已中断；部分清理可能已完成"; throw cancel }
+            catch (error: Exception) { runtimeResult = "维护未完成：${error.message?.take(1000)}" }
+            finally { runtimeBusy = false; refresh() }
+        }
+    }
     fun refresh() { tick.value++ }
     fun current() = sessions.first { it.id == selected }
     fun create() {
-        if (migrating) return
+        if (migrating || runtimeBusy) return
         Session().also { sessions.add(0, it); selected = it.id }; persist(); prepareSession(selected)
     }
     fun select(id: String) { selected = id; if (!runtime.environment.chats.value.containsKey(id)) prepareSession(id); refresh() }
@@ -109,6 +120,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
     fun send(text: String): Boolean = sendTo(selected, text)
     internal fun sendTo(chat: String, text: String): Boolean {
         if (text.isBlank() || jobs.containsKey(chat)) return false
+        if (runtimeBusy) { notices[chat] = "环境维护或检查中，请稍后发送"; refresh(); return false }
         if (migrating) { notices[chat] = "正在准备新执行环境，完成后即可开始新会话"; refresh(); return false }
         val session = sessions.firstOrNull { it.id == chat } ?: return false
         if (IdentityReply.matches(text)) {

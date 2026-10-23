@@ -12,6 +12,8 @@ Android 原生个人 Agent，单 APK、Kotlin/Compose、手机本地 PRoot + Ubu
 
 Agent 循环和工具在手机运行；推理由用户配置的远端模型提供，无离线模型。不依赖 Root、Shizuku、外部终端或日常 ADB。首次准备及未缓存的依赖安装需要网络。
 
+运行 → 诊断与维护提供会话 tmp/runs 清理、全局 pip/npm/apt 下载缓存清理、当前会话 .venv/托管 npm 重置。执行前展示范围与文件字节估算；有运行中的终端/脚本时拒绝，不自动中断。重置离线重建 Python，保留工作区（包括项目 node_modules）、其他 HOME 文件、聊天和全局凭据；失败可重试准备。
+
 ## 环境、文件和执行
 
 ```text

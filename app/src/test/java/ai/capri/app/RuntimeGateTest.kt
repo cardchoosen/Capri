@@ -46,6 +46,19 @@ class RuntimeGateTest {
             assertSame(process, starting.get(2, TimeUnit.SECONDS))
         } finally { release.countDown(); process.alive = false; executor.shutdownNow(); RuntimeGate.active(context); folder.deleteRecursively() }
     }
+    @Test fun reservationAllowsOnlyOwnersSessionPreparationUntilReleased() {
+        val folder = Files.createTempDirectory("capri-maintenance-owner").toFile()
+        val context = object : ContextWrapper(null) { override fun getFilesDir() = folder }
+        val process = FakeProcess()
+        RuntimeGate.beginMaintenance(context, "owner", allowPreparation = true)
+        try {
+            for ((chat, kind) in listOf("other" to "会话准备", "owner" to "脚本")) {
+                try { RuntimeGate.start(context, chat, kind) { throw AssertionError("started during maintenance") }; fail("accepted") }
+                catch (_: IllegalStateException) { }
+            }
+            assertSame(process, RuntimeGate.start(context, "owner", "会话准备") { process })
+        } finally { process.alive = false; RuntimeGate.endMaintenance(context); RuntimeGate.active(context); folder.deleteRecursively() }
+    }
     @Test fun componentCleanupDoesNotFollowSymlinksIntoUserFiles() {
         val root = Files.createTempDirectory("capri-cleanup").toFile()
         try {
