@@ -226,7 +226,7 @@ class BrowserDeviceTest {
             withContext(Dispatchers.Main) { browser.userResume(formId) }
             assertEquals("stale_reference",act(actionArgs("fill",form,"Name").put("text","blocked")).getString("status"))
             form=call("observe",formId)
-            val clickArgs=actionArgs("click",form,"Send form").put("expect",JSONObject().put("text","Submitted 1").put("url_contains","/submitted"))
+            val clickArgs=actionArgs("click",form,"Send form").put("expect",JSONObject().put("text","Submitted 1").put("url_contains","/submitted").put("timeout_ms",2500))
             val sent=act(clickArgs); assertEquals(sent.toString(),"ok",sent.getString("status"))
             assertEquals("matched",sent.getJSONObject("verification").getString("state")); assertEquals(1,submissions.get())
             assertEquals("duplicate_not_replayed",act(clickArgs).getString("status")); assertEquals(1,submissions.get())
@@ -243,6 +243,8 @@ class BrowserDeviceTest {
             js("setTimeout(()=>document.getElementById('later').textContent='Delayed ready',200)")
             val waited=act(JSONObject().put("action","wait").put("page_id",formId).put("expect",JSONObject().put("text","Delayed ready")))
             assertEquals(waited.toString(),"ok",waited.getString("status"))
+            val mismatch=act(JSONObject().put("action","wait").put("page_id",formId).put("expect",JSONObject().put("text","Delayed ready").put("url_contains","/never-path").put("timeout_ms",100)))
+            assertEquals("verification_timeout",mismatch.getString("status"))
             val timeout=act(JSONObject().put("action","wait").put("page_id",formId).put("timeout_ms",100).put("expect",JSONObject().put("text","Never present")))
             assertEquals("verification_timeout",timeout.getString("status")); assertNotNull(timeout.optJSONObject("observation"))
             form=call("observe",formId)

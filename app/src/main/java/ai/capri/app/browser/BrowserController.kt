@@ -101,7 +101,7 @@ internal class BrowserController(private val context: Context, workspace: Worksp
     suspend fun execute(chat: String, raw: JSONObject): String = withContext(Dispatchers.Main) {
         val start = System.nanoTime()
         val args = try { BrowserContract.validate(raw) } catch (e: Exception) {
-            return@withContext JSONObject().put("status", "invalid_argument").put("message", e.message).toString()
+            return@withContext BrowserContract.validationError(raw,e).toString()
         }
         if (disposed) return@withContext JSONObject().put("status", "interrupted").toString()
         if (args.getString("action") == "status") return@withContext status().toString()
