@@ -26,6 +26,7 @@ PACKAGE = 'ai.capri.app'
 RUNNER = PACKAGE + '.test/androidx.test.runner.AndroidJUnitRunner'
 PROFILES = {
     'local': [],
+    'extensions': ['ai.capri.app.ExtensionsDeviceTest'],
     'browser': ['ai.capri.app.BrowserDeviceTest'],
     'network': ['ai.capri.app.nativebridge.NativeDeviceTest#networkCheckReportsEvidenceAndReusesShortCache', 'ai.capri.app.BrowserDeviceTest'],
     'maintenance': ['ai.capri.app.EnvironmentMaintenanceDeviceTest'],
@@ -201,7 +202,7 @@ class Verification:
                 self.install(PACKAGE, ROOT / 'app/build/outputs/apk/debug/app-debug.apk')
                 if PROFILES[self.args.profile]:
                     self.install(PACKAGE + '.test', ROOT / 'app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk')
-                    if self.args.profile in ('browser', 'network'):
+                    if self.args.profile in ('browser', 'network', 'extensions'):
                         self.command('foreground', [self.adb, '-d', 'shell', 'am', 'start', '-n', PACKAGE + '/.MainActivity'], timeout=20)
                     self.command('instrumentation', [self.adb, '-d', 'shell', 'am', 'instrument', '-w', '-r',
                         '-e', 'terminal_background', 'true', '-e', 'terminal_wait_seconds', '63',

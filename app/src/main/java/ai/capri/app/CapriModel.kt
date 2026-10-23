@@ -25,6 +25,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
     internal val capabilityTool = CapabilityTool(app, runtime)
     internal val shortTasks = ShortTaskTool(runtime, capabilityTool)
     internal val pythonEnvironment = ai.capri.app.pythonenv.PythonEnvironmentTool(terminals)
+    internal val extensions = ai.capri.app.extensions.ExtensionManager(app, runtime, store.workspace)
     val androidTools = ai.capri.app.nativebridge.AndroidTool(app)
     val sessions = store.load()
     init { store.save(sessions) }
@@ -113,7 +114,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
             finally { runtimeBusy = false; refresh() }
         }
     }
-    override fun onCleared() { browser.dispose(); super.onCleared() }
+    override fun onCleared() { browser.dispose(); extensions.dispose(); super.onCleared() }
     fun refresh() { tick.value++ }
     fun current() = sessions.first { it.id == selected }
     fun create() {
@@ -168,7 +169,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
         val messages = if (saved != null) RecoveryMessages.forResume(saved) else JSONArray()
         val rules = getApplication<Application>().assets.open("persona/core.txt").bufferedReader().use { it.readText() } + "\n" +
             getApplication<Application>().assets.open("runtime/execution_rules.txt").bufferedReader().use { it.readText() } +
-            "\n本轮最多 $MAX_MODEL_CALLS 次模型请求（包含网络重试），这是客户端预算；验证任务后及时回复。\n" + ExecutionGuidance.text
+            "\n" + extensions.guidance() + "\n本轮最多 $MAX_MODEL_CALLS 次模型请求（包含网络重试），这是客户端预算；验证任务后及时回复。\n" + ExecutionGuidance.text
         if (saved != null) {
             messages.getJSONObject(0).put("content", rules)
             val instruction = if (continuing) "接续检查点，已记录的工具不得因网络重试重复执行。"
@@ -181,7 +182,8 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
         suspend fun checkpoint() = withContext(Dispatchers.IO) { recovery.save(session.id, messages) }
         checkpoint()
 
-        val tools = JSONArray().put(tool("profile_search", "仅在用户询问你自身身份、角色、经历、外观时检索核心档案。", props("query"), listOf("query")))
+        withContext(Dispatchers.IO) { extensions.restore(session.id) }
+        val baseTools = JSONArray().put(tool("profile_search", "仅在用户询问你自身身份、角色、经历、外观时检索核心档案。", props("query"), listOf("query")))
             .put(tool("list_files", "列出当前会话工作区文件", props(), emptyList()))
             .put(tool("read_file", "读取当前工作区文本文件", props("path"), listOf("path")))
             .put(tool("write_file", "写入当前工作区文本文件", props("path", "content"), listOf("path", "content")))
@@ -191,9 +193,11 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
             .put(androidTools.specification())
             .put(ai.capri.app.terminal.TerminalContract.specification())
             .put(ai.capri.app.browser.BrowserContract.specification())
+            .put(extensions.specification())
         val requests = ModelRequests(MAX_MODEL_CALLS)
         while (requests.used < MAX_MODEL_CALLS) {
             currentCoroutineContext().ensureActive()
+            val tools = withContext(Dispatchers.IO) { JSONArray(baseTools.toString()).apply { extensions.specifications(session.id).forEach { put(it) } } }
             notices[session.id] = "思考中"; refresh()
             val response = requests.execute(onRetry = { attempt, category ->
                 notices[session.id] = "模型连接重试 $attempt/2"; refresh()
@@ -270,11 +274,12 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                 val function = call.getJSONObject("function")
                 val name = function.getString("name")
                 notices[session.id] = ToolPresentation.progress(name); refresh()
+                val displayName = if (name.startsWith("mcp_")) extensions.label(session.id, name) else name
                 val toolStarted = PerformanceTrace.now()
                 var toolStatus = PerformanceTrace.Status.RETURNED
                 val result = try {
                     val args = JSONObject(function.getString("arguments"))
-                    if (!ToolPresentation.isInternal(name)) activeTools[session.id] = ToolActivity(call.getString("id"), toolLabel(name, args))
+                    if (!ToolPresentation.isInternal(name)) activeTools[session.id] = ToolActivity(call.getString("id"), if (name.startsWith("mcp_")) displayName else toolLabel(name, args))
                     refresh()
                     withContext(Dispatchers.IO) {
                         when (name) {
@@ -290,6 +295,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                             }
                             "python_env" -> pythonEnvironment.execute(session.id, args)
                             "environment", "environment_check" -> capabilityTool.execute(session.id, args, trace)
+                            "extensions" -> extensions.execute(session.id, args)
                             "browser" -> browser.execute(session.id, args)
                             "terminal" -> terminals.execute(session.id, args)
                             "android" -> androidTools.execute(args)
@@ -298,7 +304,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                             "read_file" -> store.workspace.file(session.id, args.getString("path")).let { require(it.length() <= 128_000) { "文件超过128KB" }; it.readText() }
                             "write_file" -> { val text = args.getString("content"); require(text.toByteArray().size <= 1_000_000); store.workspace.file(session.id, args.getString("path")).apply { parentFile?.mkdirs(); writeText(text) }; "写入成功" }
                             "python_run" -> shortTasks.execute(session.id, args, trace)
-                            else -> "未知工具"
+                            else -> if (name.startsWith("mcp_")) extensions.call(session.id, name, args) else "未知工具"
                         }
                     }
                 } catch (e: CancellationException) { toolStatus = PerformanceTrace.Status.CANCELLED; throw e }
@@ -308,7 +314,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                     activeTools.remove(session.id); refresh()
                 }
                 if (!ToolPresentation.isInternal(name)) {
-                    session.messages.add(Entry("tool", "$name\n${result.take(40_000)}")); persist()
+                    session.messages.add(Entry("tool", "$displayName\n${result.take(40_000)}")); persist()
                 }
                 messages.put(JSONObject().put("role", "tool").put("tool_call_id", call.getString("id")).put("content", result.take(40_000)))
                 checkpoint()

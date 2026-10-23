@@ -106,6 +106,26 @@ class PythonRuntime(private val context: Context, private val workspace: Workspa
         } finally { stop(process) }
     }
     private fun stop(process: Process) = OwnedProcesses.stop(process)
+    /** MCP uses raw pipes, no PTY, bootstrap, Git broker, or global SSH mounts. */
+    internal fun startExtensionProcess(id: String, extension: File, run: File, command: List<String>, tokenEnvironment: Pair<String, String>? = null): Process =
+        RuntimeGate.start(context, id, "MCP") {
+            check(ready) { status() }
+            val home = File(workspace.folder(id, "extensions"), extension.parentFile!!.name + "/home").apply { mkdirs() }
+            val tmp = File(home.parentFile, "tmp").apply { mkdirs() }
+            val cache = File(context.filesDir, "runtime/package-cache").apply { mkdirs() }
+            val args = listOf(proot.path, "--kill-on-exit", "--link2symlink", "-0", "-r", rootfs.path,
+                "-b", "/dev", "-b", "/proc", "-b", "${workspace.folder(id, "workspace").path}:/workspace",
+                "-b", "${home.path}:/root", "-b", "${tmp.path}:/tmp", "-b", "${extension.path}:/extension",
+                "-b", "${cache.path}:/opt/capri/cache", "-w", "/workspace", "/usr/bin/env", "-i",
+                "HOME=/root", "TMPDIR=/tmp", "LANG=C.UTF-8", "PYTHONUNBUFFERED=1", "PYTHONNOUSERSITE=1",
+                "PATH=/extension/venv/bin:/extension/node_modules/.bin:/usr/local/bin:/usr/bin:/bin",
+                "PIP_CACHE_DIR=/opt/capri/cache/pip", "npm_config_cache=/opt/capri/cache/npm",
+                "npm_config_update_notifier=false", "npm_config_audit=false", "npm_config_fund=false") +
+                listOfNotNull(tokenEnvironment?.let { "${it.first}=${it.second}" }) +
+                command.map { it.replace("\${extension}", "/extension").replace("\${workspace}", "/workspace") }
+            val builder = ProcessBuilder(args).apply { environment().apply { clear(); put("PROOT_LOADER", loader.path); put("PROOT_TMP_DIR", tmp.path) } }
+            OwnedProcesses.start(builder, run)
+        }
     /** Shared launch configuration; both short Python and persistent terminals use the same mappings. */
     internal fun startProcess(id: String, run: File, command: List<String>, output: File? = null, kind: String = "脚本"): Process =
         RuntimeGate.start(context, id, kind) {

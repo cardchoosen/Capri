@@ -37,6 +37,9 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("androidx.core:core-ktx:1.17.0")
     implementation("androidx.webkit:webkit:1.14.0")
+    implementation("io.modelcontextprotocol:kotlin-sdk-client:0.7.7")
+    implementation("io.ktor:ktor-client-okhttp:3.2.3")
+    implementation("org.yaml:snakeyaml:2.3")
     implementation("io.noties.markwon:core:4.6.2")
     implementation("io.noties.markwon:ext-tables:4.6.2")
     implementation("io.noties.markwon:ext-strikethrough:4.6.2")
@@ -46,6 +49,8 @@ dependencies {
 }
 
 dependencies {
+    androidTestImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+    androidTestImplementation("com.squareup.okhttp3:okhttp-tls:4.12.0")
     androidTestImplementation("androidx.test:runner:1.7.0")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
 }
