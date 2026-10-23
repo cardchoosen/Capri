@@ -11,15 +11,33 @@ import subprocess
 import sys
 import tempfile
 import tomllib
+import time
 
 
 def run(args, cwd, timeout=30, limit=8000):
+    started = time.monotonic()
     try:
         result = subprocess.run(args, cwd=cwd, capture_output=True, text=True, timeout=timeout)
-        return {'passed': result.returncode == 0, 'exit_code': result.returncode,
+        data = {'passed': result.returncode == 0, 'exit_code': result.returncode,
                 'output': (result.stdout + result.stderr)[-limit:]}
     except (OSError, subprocess.TimeoutExpired) as error:
-        return {'passed': False, 'error': type(error).__name__ + ': ' + str(error)[:500]}
+        data = {'passed': False, 'error': type(error).__name__ + ': ' + str(error)[:500]}
+    return {**data, 'elapsed_ms': round((time.monotonic() - started) * 1000)}
+
+
+def pending_python_packages(packages):
+    # Extras need pip's resolver; a version-only cache cannot establish their dependencies.
+    from pip._vendor.packaging.requirements import Requirement
+    pending = []
+    for raw in packages:
+        requirement = Requirement(raw)
+        try:
+            version = importlib.metadata.version(requirement.name)
+            satisfied = not requirement.extras and requirement.specifier.contains(version, prereleases=True)
+        except importlib.metadata.PackageNotFoundError:
+            satisfied = False
+        if not satisfied: pending.append(raw)
+    return pending
 
 
 def project_info(root):
@@ -89,7 +107,7 @@ def inspect(request, root):
             'limits': 'Only declared requirements are checked. Presence/version is not full program validation; use verify for the actual API or behavior. No inference of every task dependency.'}
 
 
-def execute(request):
+def _execute(request):
     root = Path('/workspace').resolve()
     action = request.get('action', 'inspect')
     if action == 'verify':
@@ -102,7 +120,9 @@ def execute(request):
                '--cache-dir', '/opt/capri/cache/pip', 'install', '--prefer-binary']
         packages = required.get('python_packages', [])
         if packages:
-            result = run([*pip, *packages], root, 500); operations.append({'kind': 'python', **result})
+            pending = pending_python_packages(packages)
+            result = run([*pip, *pending], root, 500) if pending else {'passed': True, 'elapsed_ms': 0, 'reused': True, 'output': 'Declared package versions already satisfied; no pip process or index request.'}
+            operations.append({'kind': 'python', **result})
             if not result['passed']: return {'status': 'installation_failed', 'operations': operations, 'note': 'Partial changes may remain; inspect before retrying.'}
         if request.get('from_project', False):
             if (root / 'requirements.txt').is_file():
@@ -121,8 +141,20 @@ def execute(request):
                 else: args = ['npm', 'ci' if (root / 'package-lock.json').is_file() else 'install']
                 result = run(args, root, 500); operations.append({'kind': 'node_project', **result})
                 if not result['passed']: return {'status': 'installation_failed', 'operations': operations}
+    inspection_started = time.monotonic()
     result = inspect(request, root)
+    result['timings_ms'] = {'inspect': round((time.monotonic() - inspection_started) * 1000)}
     if operations: result['operations'] = operations
+    return result
+
+
+def execute(request):
+    started = time.monotonic()
+    result = _execute(request)
+    timings = result.setdefault('timings_ms', {})
+    timings['total'] = round((time.monotonic() - started) * 1000)
+    timings['package_operations'] = sum(op.get('elapsed_ms', 0) for op in result.get('operations', []))
+    # A pip/apt process combines resolution, transfer and installation; don't invent split timings.
     return result
 
 

@@ -35,6 +35,7 @@ def main():
     status = sub.add_parser('status'); status.add_argument('request_id'); status.add_argument('--offset', type=int, default=0)
     cancel = sub.add_parser('cancel'); cancel.add_argument('request_id')
     sub.add_parser('sessions')
+    metrics = sub.add_parser('metrics'); metrics.add_argument('--chat', required=True)
     args = parser.parse_args()
 
     def call(method, **values):
@@ -72,7 +73,7 @@ def main():
                 if result['entries'] or not result['running']:
                     print(json.dumps(result, ensure_ascii=False), flush=True)
     else:
-        values = {} if args.action == 'sessions' else {'request_id': args.request_id}
+        values = {} if args.action == 'sessions' else ({'chat_id': args.chat} if args.action == 'metrics' else {'request_id': args.request_id})
         if args.action == 'status': values['offset'] = args.offset
         print(json.dumps(call(args.action, **values), ensure_ascii=False), flush=True)
 

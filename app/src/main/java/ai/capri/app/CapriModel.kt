@@ -23,6 +23,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
     val runtime = PythonRuntime(app, store.workspace)
     internal val terminals = ai.capri.app.terminal.TerminalManager.get(app)
     internal val capabilityTool = CapabilityTool(app, runtime)
+    internal val shortTasks = ShortTaskTool(runtime, capabilityTool)
     internal val pythonEnvironment = ai.capri.app.pythonenv.PythonEnvironmentTool(terminals)
     val androidTools = ai.capri.app.nativebridge.AndroidTool(app)
     val sessions = store.load()
@@ -141,6 +142,9 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
     private fun tool(name: String, description: String, properties: JSONObject, required: List<String>) = JSONObject().put("type", "function").put("function", JSONObject().put("name", name).put("description", description).put("parameters", JSONObject().put("type", "object").put("properties", properties).put("required", JSONArray(required))))
     private fun props(vararg names: String) = JSONObject().apply { names.forEach { put(it, JSONObject().put("type", "string")) } }
     private suspend fun respond(session: Session, config: ModelConfig) {
+        val trace = PerformanceTrace(File(store.workspace.root(session.id), "metrics/${java.util.UUID.randomUUID()}.jsonl"))
+        var outcome = PerformanceTrace.Status.ERROR
+        try {
         val saved = withContext(Dispatchers.IO) { recovery.load(session.id) }
         val continuing = saved != null && RecoveryMessages.isContinuation(session.messages.last().text)
         val messages = if (saved != null) RecoveryMessages.forResume(saved) else JSONArray()
@@ -164,7 +168,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
             .put(tool("read_file", "读取当前工作区文本文件", props("path"), listOf("path")))
             .put(tool("write_file", "写入当前工作区文本文件", props("path", "content"), listOf("path", "content")))
             .put(tool("send_file", "把当前会话工作区已有文件发送到聊天。PNG/JPEG/GIF/WebP内联显示（GIF可播放）；其他文件可分享导出。最大20MB，不发送私钥或凭据。path为相对路径或/workspace/路径，caption可选。", props("path", "caption"), listOf("path")))
-            .put(tool("python_run", "执行短任务的脚本入口，可用subprocess编排C/C++等语言编译和命令（不改变用户指定的核心实现语言），执行并直接返回输出/退出码，最长60秒。绘图、文件处理、生成产物和基本验证尽量在此一次完成；无需先open终端。代码可读取已保存脚本或将源码保存/workspace；缺少依赖用environment准备。", props("code"), listOf("code")))
+            .put(ShortTaskContract.specification())
             .put(CapabilityContract.specification())
             .put(androidTools.specification())
             .put(ai.capri.app.terminal.TerminalContract.specification())
@@ -175,7 +179,11 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
             val response = requests.execute(onRetry = { attempt, category ->
                 notices[session.id] = "模型连接重试 $attempt/2"; refresh()
                 Log.w("CapriModelRequest", "retry=$attempt used=${requests.used} category=$category")
-            }) { withContext(Dispatchers.IO) {
+            }, onBackoff = { elapsed -> trace.event(PerformanceTrace.Stage.MODEL_BACKOFF, elapsed, PerformanceTrace.Status.RETURNED) }) {
+                val attemptStarted = PerformanceTrace.now()
+                val attempt = requests.used
+                var requestStatus = PerformanceTrace.Status.ERROR
+                try { withContext(Dispatchers.IO) {
                 val url = config.endpoint.trimEnd('/') + "/chat/completions"
                 require(url.startsWith("https://")) { "模型接口须使用 HTTPS" }
                 val body = JSONObject().put("model", config.model).put("messages", messages).put("tools", tools).put("stream", false)
@@ -193,19 +201,33 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                         override fun onResponse(call: Call, response: Response) {
                             response.use { r ->
                                 Log.i("CapriModelRequest", "phase=response attempt=${requests.used} http=${r.code} elapsed_ms=${android.os.SystemClock.elapsedRealtime() - startedAt}")
+                                trace.event(PerformanceTrace.Stage.MODEL_HEADERS, PerformanceTrace.elapsed(attemptStarted), PerformanceTrace.Status.RETURNED, attempt = attempt, http = r.code)
                                 val result = runCatching {
                                     if (!r.isSuccessful) throw ModelHttpError(r.code,
                                         r.header("Retry-After")?.toLongOrNull()?.coerceIn(0, 600)?.times(1000))
-                                    JSONObject(r.body?.string() ?: error("空响应")).also {
-                                        it.getJSONArray("choices").getJSONObject(0).getJSONObject("message")
-                                    }
+                                    val bodyStarted = PerformanceTrace.now()
+                                    var bodyStatus = PerformanceTrace.Status.ERROR
+                                    val raw = try { (r.body?.string() ?: error("空响应")).also { bodyStatus = PerformanceTrace.Status.OK } }
+                                    finally { trace.event(PerformanceTrace.Stage.MODEL_BODY, PerformanceTrace.elapsed(bodyStarted), bodyStatus, attempt = attempt) }
+                                    val parseStarted = PerformanceTrace.now()
+                                    var parseStatus = PerformanceTrace.Status.ERROR
+                                    var usage: JSONObject? = null
+                                    try {
+                                        JSONObject(raw).also {
+                                            it.getJSONArray("choices").getJSONObject(0).getJSONObject("message")
+                                            usage = it.optJSONObject("usage"); parseStatus = PerformanceTrace.Status.OK
+                                        }
+                                    } finally { trace.event(PerformanceTrace.Stage.MODEL_PARSE, PerformanceTrace.elapsed(parseStarted), parseStatus, attempt = attempt, usage = usage) }
                                 }
                                 if (continuation.isActive) continuation.resumeWith(result)
                             }
                         }
                     })
                 }
-            } }
+            }.also { requestStatus = PerformanceTrace.Status.OK }
+                } catch (cancel: CancellationException) { requestStatus = PerformanceTrace.Status.CANCELLED; throw cancel }
+                finally { trace.event(PerformanceTrace.Stage.MODEL_REQUEST, PerformanceTrace.elapsed(attemptStarted), requestStatus, attempt = attempt) }
+            }
             val message = response.getJSONArray("choices").getJSONObject(0).getJSONObject("message")
             messages.put(message)
             val content = if (message.isNull("content")) "" else message.optString("content")
@@ -219,6 +241,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
             }
             if (calls == null || calls.length() == 0) {
                 withContext(Dispatchers.IO) { recovery.clear(session.id) }
+                outcome = PerformanceTrace.Status.OK
                 return
             }
             // Persist the proposed calls before dispatch: an interrupted side effect is unknown, never auto-replayed.
@@ -228,6 +251,8 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                 val function = call.getJSONObject("function")
                 val name = function.getString("name")
                 notices[session.id] = ToolPresentation.progress(name); refresh()
+                val toolStarted = PerformanceTrace.now()
+                var toolStatus = PerformanceTrace.Status.RETURNED
                 val result = try {
                     val args = JSONObject(function.getString("arguments"))
                     if (!ToolPresentation.isInternal(name)) activeTools[session.id] = ToolActivity(call.getString("id"), toolLabel(name, args))
@@ -245,19 +270,23 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                                 JSONObject().put("status", "ok").put("attached", true).put("file", item).toString()
                             }
                             "python_env" -> pythonEnvironment.execute(session.id, args)
-                            "environment", "environment_check" -> capabilityTool.execute(session.id, args)
+                            "environment", "environment_check" -> capabilityTool.execute(session.id, args, trace)
                             "terminal" -> terminals.execute(session.id, args)
                             "android" -> androidTools.execute(args)
                             "profile_search" -> store.profile(args.getString("query"))
                             "list_files" -> store.workspace.list(session.id).joinToString("\n") { it.relativeTo(store.workspace.folder(session.id, "workspace").canonicalFile).path }
                             "read_file" -> store.workspace.file(session.id, args.getString("path")).let { require(it.length() <= 128_000) { "文件超过128KB" }; it.readText() }
                             "write_file" -> { val text = args.getString("content"); require(text.toByteArray().size <= 1_000_000); store.workspace.file(session.id, args.getString("path")).apply { parentFile?.mkdirs(); writeText(text) }; "写入成功" }
-                            "python_run" -> runtime.execute(session.id, args.getString("code"))
+                            "python_run" -> shortTasks.execute(session.id, args, trace)
                             else -> "未知工具"
                         }
                     }
-                } catch (e: CancellationException) { throw e } catch (e: Exception) { "工具失败：${e.message}" }
-                finally { activeTools.remove(session.id); refresh() }
+                } catch (e: CancellationException) { toolStatus = PerformanceTrace.Status.CANCELLED; throw e }
+                catch (e: Exception) { toolStatus = PerformanceTrace.Status.ERROR; "工具失败：${e.message}" }
+                finally {
+                    trace.event(PerformanceTrace.Stage.TOOL, PerformanceTrace.elapsed(toolStarted), toolStatus, tool = name)
+                    activeTools.remove(session.id); refresh()
+                }
                 if (!ToolPresentation.isInternal(name)) {
                     session.messages.add(Entry("tool", "$name\n${result.take(40_000)}")); persist()
                 }
@@ -266,5 +295,8 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
             }
         }
         session.messages.add(Entry("status", "已达到本轮 $MAX_MODEL_CALLS 次模型请求上限（含网络重试），结果已保留；发送“继续”可接续。"))
+        outcome = PerformanceTrace.Status.BUDGET
+        } catch (cancel: CancellationException) { outcome = PerformanceTrace.Status.CANCELLED; throw cancel }
+        finally { trace.finish(outcome) }
     }
 }

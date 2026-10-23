@@ -19,7 +19,7 @@ internal class ModelRequests(
 ) {
     var used = 0
         private set
-    suspend fun execute(onRetry: (Int, String) -> Unit = { _, _ -> }, block: suspend () -> JSONObject): JSONObject {
+    suspend fun execute(onRetry: (Int, String) -> Unit = { _, _ -> }, onBackoff: (Long) -> Unit = {}, block: suspend () -> JSONObject): JSONObject {
         repeat(3) { attempt ->
             currentCoroutineContext().ensureActive()
             if (used >= maximum) throw ModelRequestFailure("本轮模型请求预算已用尽", IllegalStateException())
@@ -47,7 +47,9 @@ internal class ModelRequests(
                 // Do not retry sooner than a server's long Retry-After. Leave explicit continuation to the user.
                 if (requested != null && requested > 5000) throw ModelRequestFailure(category, error)
                 onRetry(attempt + 1, category)
-                pause(maxOf(500L shl attempt, requested ?: 0))
+                val backoffStarted = System.nanoTime()
+                try { pause(maxOf(500L shl attempt, requested ?: 0)) }
+                finally { onBackoff(((System.nanoTime() - backoffStarted) / 1_000_000).coerceAtLeast(0)) }
             }
         }
         error("unreachable")

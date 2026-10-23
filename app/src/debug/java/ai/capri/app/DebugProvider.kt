@@ -29,6 +29,17 @@ internal object DebugBridge {
             "sessions" -> JSONObject().put("sessions", JSONArray().apply {
                 vm.sessions.forEach { put(JSONObject().put("chat_id", it.id).put("title", it.title).put("busy", vm.jobs.containsKey(it.id))) }
             })
+            "metrics" -> {
+                val chat = args.getString("chat_id").orEmpty()
+                require(vm.sessions.any { it.id == chat }) { "unknown chat_id" }
+                val directory = java.io.File(vm.store.workspace.root(chat), "metrics")
+                val file = directory.listFiles()?.filter { it.isFile && !java.nio.file.Files.isSymbolicLink(it.toPath()) && it.name.matches(Regex("[0-9a-f-]{36}\\.jsonl")) }?.maxByOrNull { it.lastModified() }
+                val events = JSONArray()
+                file?.takeIf { it.length() <= 262144 + 4096 }?.bufferedReader()?.useLines { lines ->
+                    lines.take(2000).forEach { line -> runCatching { JSONObject(line) }.getOrNull()?.let { events.put(it) } }
+                }
+                JSONObject().put("trace_id", file?.nameWithoutExtension ?: JSONObject.NULL).put("events", events)
+            }
             "send" -> {
                 val id = args.getString("request_id").orEmpty()
                 require(runCatching { UUID.fromString(id).toString() == id }.getOrDefault(false)) { "request_id must be a UUID" }

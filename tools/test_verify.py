@@ -34,3 +34,20 @@ class AgentMetricsTest(unittest.TestCase):
         self.assertIsNone(metrics['total_task_seconds'])
         unavailable = summarize([{'role': 'tool', 'text': 'android\n{"status":"error","data":null}'}])
         self.assertEqual(unavailable['tool_failures'][0]['kind'], 'error')
+
+class TimingTraceTest(unittest.TestCase):
+    def test_nested_stages_are_not_added_to_the_wall_time_twice(self):
+        from analyze_agent_run import summarize_trace
+        report = summarize_trace({'events': [
+            {'stage': 'turn', 'status': 'started', 'duration_ms': 0},
+            {'stage': 'model_request', 'duration_ms': 1000},
+            {'stage': 'model_headers', 'duration_ms': 700},
+            {'stage': 'model_body', 'duration_ms': 250},
+            {'stage': 'model_parse', 'duration_ms': 50, 'usage': {'prompt_tokens': 12}},
+            {'stage': 'tool', 'duration_ms': 500},
+            {'stage': 'prepare', 'duration_ms': 400, 'detail_ms': {'package_operations': 300}},
+            {'stage': 'turn', 'status': 'ok', 'duration_ms': 1600}]})
+        self.assertEqual(1600, report['total_ms']); self.assertEqual(100, report['other_ms'])
+        self.assertEqual(12, report['tokens']['prompt_tokens'])
+        self.assertEqual(300, report['environment_detail_ms']['package_operations'])
+        self.assertFalse(summarize_trace([])['complete'])

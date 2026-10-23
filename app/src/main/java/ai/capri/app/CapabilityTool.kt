@@ -67,20 +67,24 @@ internal object CapabilityContract {
 
 internal class CapabilityTool(private val context: Context, private val runtime: PythonRuntime) {
     companion object { private val installs = ConcurrentHashMap<String, Mutex>() }
-    suspend fun execute(chat: String, args: JSONObject): String = try {
+    suspend fun execute(chat: String, args: JSONObject, trace: PerformanceTrace? = null): String {
+        val started = PerformanceTrace.now()
+        val phases = JSONObject()
+        val result = try {
         val request = CapabilityContract.validate(args)
         if (request.getString("action") == "prepare") installs.getOrPut(context.filesDir.canonicalPath) { Mutex() }.withLock {
+            phases.put("queue", PerformanceTrace.elapsed(started))
             val token = EnvironmentForeground.hold(context)
             try {
-                runtime.ensureSession(chat)
+                timed(phases, "session") { runtime.ensureSession(chat) }
                 val packages = request.optJSONObject("requirements")?.optJSONArray("system_packages") ?: JSONArray()
                 if (packages.length() > 0) {
                     val names = (0 until packages.length()).map { packages.getString(it) }
-                    val test = runtime.runCommand(chat, listOf("/usr/bin/dpkg-query", "-W", "-f=\${db:Status-Status}\\n", *names.toTypedArray()))
-                    val installed = test.startsWith("exit=0\n") && test.substringAfter('\n').lineSequence().filter { it.isNotBlank() }.all { it == "installed" }
+                    val test = timed(phases, "system_check") { runtime.runCommand(chat, listOf("/usr/bin/dpkg-query", "-W", "-f=\${db:Status-Status}\\n", *names.toTypedArray())) }
+                    val installed = test.startsWith("exit=0\n") && test.substringAfter('\n').lineSequence().filter { it.isNotBlank() }.toList().let { it.size == names.size && it.all { line -> line == "installed" } }
                     if (!installed) {
                         val command = "apt-get update -qq && (dpkg --configure -a || DEBIAN_FRONTEND=noninteractive apt-get -f install -y --no-install-recommends) && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends " + names.joinToString(" ") { "'$it'" }
-                        val result = runtime.runCommand(chat, listOf("/bin/sh", "-c", command), 900, true)
+                        val result = timed(phases, "system_install") { runtime.runCommand(chat, listOf("/bin/sh", "-c", command), 900, true) }
                         if (!result.startsWith("exit=0\n")) return@withLock JSONObject().put("status", "installation_failed").put("evidence", result).toString()
                     }
                 }
@@ -90,6 +94,19 @@ internal class CapabilityTool(private val context: Context, private val runtime:
     } catch (cancel: CancellationException) { throw cancel }
     catch (error: IllegalArgumentException) { JSONObject().put("status", "invalid_argument").put("message", error.message).toString() }
     catch (error: Exception) { JSONObject().put("status", if (error.message?.let { "使用" in it || "正在准备依赖" in it } == true) "busy" else "error").put("message", error.message?.take(1500)).toString() }
+        val objectResult = JSONObject(result)
+        val timing = objectResult.optJSONObject("timings_ms") ?: JSONObject()
+        phases.keys().forEach { timing.put(it, phases.get(it)) }
+        timing.put("client_total", PerformanceTrace.elapsed(started))
+        trace?.event(PerformanceTrace.Stage.ENVIRONMENT, PerformanceTrace.elapsed(started),
+            if (objectResult.optString("status") == "ok") PerformanceTrace.Status.RETURNED else PerformanceTrace.Status.ERROR,
+            tool = "environment", details = timing)
+        return objectResult.put("timings_ms", timing).toString()
+    }
+    private suspend fun <T> timed(phases: JSONObject, key: String, block: suspend () -> T): T {
+        val started = PerformanceTrace.now()
+        try { return block() } finally { phases.put(key, PerformanceTrace.elapsed(started)) }
+    }
     private suspend fun invoke(chat: String, request: JSONObject, timeout: Long): String {
         val payload = java.util.Base64.getEncoder().encodeToString(request.toString().toByteArray())
         val code = "import base64,json,runpy,contextlib,io\nprobe=runpy.run_path('/opt/capri/bootstrap/task_environment.py')\ncaptured=io.StringIO()\nwith contextlib.redirect_stdout(captured),contextlib.redirect_stderr(captured):\n result=probe['execute'](json.loads(base64.b64decode('$payload')))\nif captured.getvalue(): result['diagnostics']=captured.getvalue()[-4000:]\nprint(json.dumps(result,ensure_ascii=False))"

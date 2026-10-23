@@ -25,3 +25,16 @@ class TaskEnvironmentTest(unittest.TestCase):
             self.assertFalse(result['requirements_satisfied'])
             self.assertEqual('1.2.3',result['project']['package.json']['dependencies']['example'])
             self.assertFalse(result['checks']['python:pip>=9999']['satisfies'])
+
+    def test_satisfied_versions_skip_pip_but_extras_and_missing_versions_do_not(self):
+        from unittest.mock import patch
+        with patch.object(module.importlib.metadata, 'version', return_value='2.0'):
+            self.assertEqual(['example>=3', 'example[extra]>=1'], module.pending_python_packages(['example>=1', 'example>=3', 'example[extra]>=1']))
+        with patch.object(module.importlib.metadata, 'version', side_effect=module.importlib.metadata.PackageNotFoundError):
+            self.assertEqual(['example'], module.pending_python_packages(['example']))
+
+    def test_process_failures_retain_exit_and_elapsed_time(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            result = module.run([sys.executable, '-c', 'raise SystemExit(9)'], temporary)
+            self.assertEqual(9, result['exit_code']); self.assertFalse(result['passed'])
+            self.assertGreaterEqual(result['elapsed_ms'], 0)

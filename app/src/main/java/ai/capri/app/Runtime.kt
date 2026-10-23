@@ -56,7 +56,7 @@ class PythonRuntime(private val context: Context, private val workspace: Workspa
                         check(completed == true) { "会话准备超时（60秒），可重试" }
                         check(process.exitValue() == 0) { "会话环境准备失败：" + output.readText().takeLast(1500) }
                         marker.writeText("ubuntu-noble-v1")
-                    } finally { process.destroyForcibly() }
+                    } finally { stop(process) }
                 }
             }
             environment.chatState(id, LinuxState("ready", "执行环境已就绪"))
@@ -85,13 +85,13 @@ class PythonRuntime(private val context: Context, private val workspace: Workspa
                 val count = reader.read(buffer)
                 if (count < 0) "" else String(buffer, 0, count)
             }
-        } finally { process.destroyForcibly(); script.setReadOnly() }
+        } finally { stop(process); script.setReadOnly() }
     }
     internal suspend fun runCommand(id: String, command: List<String>, timeout: Long = 60, exclusive: Boolean = false, resultLimit: Int = 30_000): String = withContext(Dispatchers.IO) {
         ensureSession(id)
         val run = workspace.folder(id, "runs").resolve(java.util.UUID.randomUUID().toString()).apply { mkdirs() }
         val output = File(run, "output.txt")
-        val launch = { processBuilder(id, run, command).redirectErrorStream(true).redirectOutput(output).start() }
+        val launch = { OwnedProcesses.start(processBuilder(id, run, command).redirectErrorStream(true).redirectOutput(output), run) }
         val process = if (exclusive) RuntimeGate.startExclusive(context, id, launch) else RuntimeGate.start(context, id, "环境检查", launch)
         try {
             val completed = withTimeoutOrNull(timeout * 1000) {
@@ -103,14 +103,15 @@ class PythonRuntime(private val context: Context, private val workspace: Workspa
             }
             check(completed == true) { "环境操作超时（${timeout}秒），进程已停止；部分安装可能保留，请检查后重试" }
             "exit=${process.exitValue()}\n" + output.readText().takeLast(resultLimit)
-        } finally { process.destroyForcibly() }
+        } finally { stop(process) }
     }
+    private fun stop(process: Process) = OwnedProcesses.stop(process)
     /** Shared launch configuration; both short Python and persistent terminals use the same mappings. */
     internal fun startProcess(id: String, run: File, command: List<String>, output: File? = null, kind: String = "脚本"): Process =
         RuntimeGate.start(context, id, kind) {
             val builder = processBuilder(id, run, command)
             if (output != null) builder.redirectErrorStream(true).redirectOutput(output)
-            builder.start()
+            OwnedProcesses.start(builder, run)
         }
     private fun processBuilder(id: String, run: File, command: List<String>): ProcessBuilder {
         check(ready) { status() }

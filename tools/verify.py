@@ -26,6 +26,7 @@ PACKAGE = 'ai.capri.app'
 RUNNER = PACKAGE + '.test/androidx.test.runner.AndroidJUnitRunner'
 PROFILES = {
     'local': [],
+    'short-task': ['ai.capri.app.ShortTaskDeviceTest'],
     'capability': ['ai.capri.app.CapabilityDeviceTest'],
     'runtime': ['ai.capri.app.CapabilityDeviceTest', 'ai.capri.app.LegacySessionResetDeviceTest'],
 }

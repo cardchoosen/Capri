@@ -30,6 +30,7 @@ files/
     home/.local/npm/                  # 当前会话npm-g前缀
     tmp/                              # /tmp
     runs/<run>/                       # 脚本/输出
+    metrics/<turn>.jsonl               # 仅阶段/耗时/状态/token数，不含正文或代码
     terminals/<terminal>/             # PTY监督器及命令/输出/状态
 shared_prefs/config.xml               # 模型配置，KeyStore AES-GCM加密Key
 shared_prefs/git-accounts.xml         # 全局Git账号，加密Token
@@ -40,7 +41,7 @@ cache/ubuntu-setup.log                # 最近一次环境准备日志
 
 `environment`按任务声明命令、Python包/版本/导入、系统包、头文件/链接库和编译器：inspect核对事实及项目清单；prepare正常apt/pip安装，from_project读取Python/npm/pnpm项目；verify执行明确argv的小样本，最多40秒。无固定绘图/语言场景枚举，不保证自动推断所有依赖。系统包全局安装一次，venv/node_modules/npm前缀按会话；缓存复用不等于依赖已安装。Node/npm/g++等按需安装，允许具备依赖后的源码构建。
 
-短脚本默认python_run（60秒、输出软上限2MB），与终端共用当前venv。持续终端为POSIX /bin/sh（dash），已进入会话venv，无需source激活。模型调用使用扁平参数（旧params仍兼容），run默认短等5秒且提前结束立即返回。终端保留cwd/变量/函数，支持stdin、增量输出、cancel/close和日志清理；前台服务承载，进程死亡标记中断。系统安装要求环境空闲，存活终端即使空闲也返回busy，不自动停止任务。
+短任务默认python_run：旧code调用保留，可一次带requirements准备并实际检查依赖后执行；code与steps二选一，steps按argv逐步执行，非零退出立即停止并保留中间文件。执行部分累计60秒、输出软上限2MB，与终端共用当前venv。任意code内被忽略的子进程退出码无法自动识别，编排应check=True，或使用steps独立核验。持续终端为POSIX /bin/sh（dash），已进入会话venv，无需source激活。模型调用使用扁平参数（旧params仍兼容），run默认短等5秒且提前结束立即返回。终端保留cwd/变量/函数，支持stdin、增量输出、cancel/close和日志清理；前台服务承载，进程死亡标记中断。系统安装要求环境空闲，存活终端即使空闲也返回busy，不自动停止任务。
 
 本次用户明确授权：新Ubuntu验证后一次性清空旧聊天、工作文件/附件、会话依赖/日志、终端记录/recovery及旧组件；保留全局SSH、Git Token、模型配置、设置与核心档案。以后普通升级不重复清理。不要pm clear或卸载主应用来部署。
 
@@ -60,10 +61,10 @@ cache/ubuntu-setup.log                # 最近一次环境准备日志
 
 ```sh
 python3 tools/verify.py --profile local
-python3 tools/verify.py --profile runtime --device --approve-capri-install
+python3 tools/verify.py --profile short-task --device --approve-capri-install
 ```
 
-聚合构建、JVM/宿主检查、APK摘要复用部署和选定真机用例；JDK17+（自动识别Android Studio JBR），SDK36。runtime精简覆盖Ubuntu/实际依赖执行/跨会话/终端及清理保留边界；不是全部旧场景回归。调试接口仅debug APK，见 `tools/capri_debug.py`；不会读取模型密钥。`tools/analyze_agent_run.py`统计工具调用/执行耗时。
+聚合构建、JVM/宿主检查、APK摘要复用部署和选定真机用例；JDK17+（自动识别Android Studio JBR），SDK36。runtime精简覆盖Ubuntu/实际依赖执行/跨会话/终端及清理保留边界；不是全部旧场景回归。调试接口仅debug APK，见 `tools/capri_debug.py`；不会读取模型密钥。`tools/analyze_agent_run.py`统计调用，--trace读取阶段计时。debug版本可用 `tools/capri_debug.py metrics --chat CHAT_ID` 导出该会话最新任务计时：模型请求/响应头/读取/解析/退避、工具与准备/执行/步骤、系统安装和Python操作。计时基于单调时钟，父子阶段不可相加；响应头不代表首token，包操作暂不拆分下载/安装，持续终端返回不代表后台任务结束。记录不包含模型正文、工具参数、代码、输出、URL或密钥。
 
 主要实现：LinuxEnvironment/LinuxSetupService（安装及前台准备）、Runtime/session_bootstrap（执行和venv）、CapabilityTool/task_environment（通用依赖）、TerminalManager/terminal_supervisor（持续PTY）、CapriModel（编排）、Store（会话与文件）、GitCredentialBroker/SshEnvironment（全局凭据）、ConversationTimeline（显示）。
 
