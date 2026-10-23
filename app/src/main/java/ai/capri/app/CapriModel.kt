@@ -29,7 +29,11 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
     val sessions = store.load()
     init { store.save(sessions) }
     var selected = sessions.first().id
-    internal val browser = ai.capri.app.browser.BrowserController(app, store.workspace) { selected }
+    internal val previews = ai.capri.app.preview.PreviewTabs()
+    internal val browser = ai.capri.app.browser.BrowserController(app, store.workspace) { selected }.apply {
+        pagesChanged = { chat, pages -> previews.syncBrowser(chat, pages.map { it.id to it.title }) }
+        displayedPage = { previews.current(selected)?.takeIf { it.kind == ai.capri.app.preview.PreviewKind.WEB }?.target }
+    }
     private val tick = MutableStateFlow(0)
     val updates = tick.asStateFlow()
     val jobs = ConcurrentHashMap<String, Job>()

@@ -12,11 +12,12 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
-internal data class BrowserUi(val shown: Boolean = false, val chat: String = "", val page: String? = null, val revision: Int = 0, val notice: String = "")
+internal data class BrowserUi(val chat: String = "", val page: String? = null, val revision: Int = 0, val notice: String = "", val busy: Boolean = false)
 internal class BrowserFault(val status: String, message: String) : Exception(message)
 
 /** Native browser engine; no shell, CDP socket, JavascriptInterface or arbitrary JS model tool. */
@@ -26,6 +27,11 @@ internal class BrowserController(private val context: Context, workspace: Worksp
     private val store = BrowserStore(workspace)
     private val pages = linkedMapOf<String, MutableList<Page>>() // Main thread only.
     private val operation = Mutex()
+    private val loadLocks = mutableMapOf<String, Mutex>()
+    private val saveLocks = mutableMapOf<String, Mutex>()
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    var pagesChanged: (String, List<BrowserRecord>) -> Unit = { _, _ -> }
+    var displayedPage: () -> String? = { null }
     private val mutableUi = MutableStateFlow(BrowserUi())
     val ui = mutableUi.asStateFlow()
     private var resumed = false
@@ -41,23 +47,35 @@ internal class BrowserController(private val context: Context, workspace: Worksp
             .put("message", if (supported) "支持会话独立登录环境" else "系统WebView不支持多Profile，请更新WebView；不会共享登录态降级")
             .put("actions", JSONArray(listOf("status", "tabs", "open", "observe", "show", "close")))
     }
-    private fun changed(notice: String = mutableUi.value.notice) { mutableUi.value = mutableUi.value.copy(revision = mutableUi.value.revision + 1, notice = notice) }
+    private fun changed(notice: String = mutableUi.value.notice) {
+        mutableUi.value = mutableUi.value.copy(revision = mutableUi.value.revision + 1, notice = notice)
+        pages.forEach { (chat, _) -> pagesChanged(chat, tabList(chat)) }
+    }
     fun hostResumed(value: Boolean) { resumed = value }
-    fun hide() { mutableUi.value = mutableUi.value.copy(shown = false) }
-    fun selectionChanged(chat: String) { if (mutableUi.value.chat != chat) hide() }
+    fun selectionChanged(chat: String) { changed() }
     fun view(id: String): WebView? = pages.values.flatten().firstOrNull { it.record.id == id }?.web
+    fun liveViews(chat: String) = pages[chat].orEmpty().mapNotNull { p -> p.web?.let { p.record.id to it } }
     fun tabList(chat: String): List<BrowserRecord> = pages[chat].orEmpty().map { it.record.copy() }
-    fun openPanel(chat: String) {
-        if (chat != selectedChat()) return
-        mutableUi.value = BrowserUi(true, chat, pages[chat]?.firstOrNull()?.record?.id, mutableUi.value.revision + 1)
+    /** User close is immediate, including while a page is loading. No retry or page resurrection. */
+    fun closePreview(chat: String, id: String) {
+        val p = pages[chat]?.firstOrNull { it.record.id == id } ?: return
+        destroy(p); pages[chat]!!.remove(p); changed("")
+        scope.launch { runCatching { persist(chat) }.onFailure { changed("标签保存未完成") } }
     }
     private suspend fun load(chat: String): MutableList<Page> {
         require(chat.matches(Regex("[a-zA-Z0-9-]+")))
-        return pages[chat] ?: withContext(Dispatchers.IO) { store.load(chat) }.map { Page(chat, it) }.toMutableList().also { pages[chat] = it; changed() }
+        return loadLocks.getOrPut(chat) { Mutex() }.withLock {
+            pages[chat] ?: withContext(Dispatchers.IO) { store.load(chat) }.map { Page(chat, it) }.toMutableList().also { pages[chat] = it; changed() }
+        }
     }
+
     private suspend fun persist(chat: String) {
-        val records = pages[chat].orEmpty().map { it.record.copy() }
-        withContext(Dispatchers.IO) { store.save(chat, records) }
+        val lock = saveLocks.getOrPut(chat) { Mutex() }
+        lock.lock()
+        try {
+            val records = pages[chat].orEmpty().map { it.record.copy() }
+            withContext(Dispatchers.IO) { store.save(chat, records) }
+        } finally { lock.unlock() }
     }
     private fun page(chat: String, id: String) = pages[chat]?.firstOrNull { it.record.id == id }
         ?: throw BrowserFault("invalid_argument", "页面不属于当前会话或已关闭")
@@ -67,17 +85,21 @@ internal class BrowserController(private val context: Context, workspace: Worksp
             return@withContext JSONObject().put("status", "invalid_argument").put("message", e.message).toString()
         }
         if (disposed) return@withContext JSONObject().put("status", "interrupted").toString()
+        if (args.getString("action") == "status") return@withContext status().toString()
+        if (args.getString("action") == "tabs") {
+            load(chat)
+            return@withContext JSONObject().put("status", "ok").put("tabs", JSONArray(tabList(chat).map {
+                JSONObject().put("page_id", it.id).put("url", it.url).put("title", it.title)
+            })).toString()
+        }
         if (!operation.tryLock()) return@withContext JSONObject().put("status", "browser_busy").put("message", "另一个浏览器操作正在执行").toString()
         var active: Page? = null
         var initiatedLoad = false
+        var createdView = false
         try {
             val action = args.getString("action")
             val result = withTimeout(20_000) {
-                if (action == "status") return@withTimeout status()
                 load(chat)
-                if (action == "tabs") return@withTimeout JSONObject().put("status", "ok").put("tabs", JSONArray(tabList(chat).map {
-                    JSONObject().put("page_id", it.id).put("url", it.url).put("title", it.title)
-                }))
                 if (chat != selectedChat()) throw BrowserFault("needs_foreground", "请先切换到目标聊天，再操作浏览器")
                 if (action == "close") {
                     val p = page(chat, args.getString("page_id")); destroy(p); pages[chat]!!.remove(p)
@@ -93,8 +115,10 @@ internal class BrowserController(private val context: Context, workspace: Worksp
                 } else page(chat, args.getString("page_id"))
                 active = p
                 val restored = p.web == null
+                createdView = restored
                 ensureView(p)
-                mutableUi.value = BrowserUi(true, chat, p.record.id, mutableUi.value.revision + 1, if (restored) "正在打开页面" else "")
+                mutableUi.value = BrowserUi(chat, p.record.id, mutableUi.value.revision + 1, if (restored) "正在打开页面" else "", busy = true)
+                changed()
                 awaitHost(p)
                 if (restored) {
                     initiatedLoad = true; p.loading = true; p.failure = null
@@ -119,20 +143,22 @@ internal class BrowserController(private val context: Context, workspace: Worksp
             if (initiatedLoad) active?.web?.stopLoading()
             JSONObject().put("status", (e as? BrowserFault)?.status ?: "error").put("page_id", active?.record?.id ?: JSONObject.NULL)
                 .put("message", if (e is BrowserFault || e is IllegalArgumentException) e.message else "浏览器操作未完成，可查看页面后重试").toString()
-        } finally { active?.let { if (initiatedLoad) it.loading = false }; operation.unlock() }
+        } finally {
+            active?.let { if (initiatedLoad) it.loading = false else if (createdView) destroy(it) }
+            mutableUi.value = mutableUi.value.copy(busy = false); changed(); operation.unlock()
+        }
     }
     private fun ensureHost(p: Page) {
-        val u = mutableUi.value
-        if (!resumed || !u.shown || u.chat != p.chat || u.page != p.record.id || selectedChat() != p.chat)
-            throw BrowserFault("needs_foreground", "请保持Capri浏览器在前台，页面未自动重放")
+        if (!resumed || selectedChat() != p.chat)
+            throw BrowserFault("needs_foreground", "请保持Capri及目标聊天在前台；无需切换网页预览")
         if (p.web == null) throw BrowserFault("renderer_gone", "页面已中断，请重新打开")
     }
     private suspend fun awaitHost(p: Page) {
         // The Compose dialog may not have mounted when show was requested.
         val until = System.nanoTime() + 3_000_000_000
         while (!resumed || p.web?.isAttachedToWindow != true || p.web!!.width == 0) {
-            if (!mutableUi.value.shown || selectedChat() != p.chat || System.nanoTime() > until)
-                throw BrowserFault("needs_foreground", "请打开Capri浏览器页面后重试")
+            if (selectedChat() != p.chat || System.nanoTime() > until)
+                throw BrowserFault("needs_foreground", "浏览器工作区未挂载，请保持Capri在前台后重试")
             delay(25)
         }
         ensureHost(p)
@@ -146,7 +172,7 @@ internal class BrowserController(private val context: Context, workspace: Worksp
     private fun ensureView(p: Page) {
         if (p.web != null) return
         val live = pages.values.flatten().filter { it.web != null }
-        if (live.size >= 2) destroy(live.firstOrNull { it.record.id != mutableUi.value.page } ?: live.first())
+        if (live.size >= 2) destroy(live.firstOrNull { it.record.id != displayedPage() } ?: live.first())
         val web = WebView(context)
         try {
             WebViewCompat.setProfile(web, "capri_chat_${p.chat}")
@@ -219,5 +245,5 @@ internal class BrowserController(private val context: Context, workspace: Worksp
             if (it.optString("snapshot_id") != token) throw BrowserFault("invalid_snapshot", "页面摘要无效")
         }
     }
-    fun dispose() { disposed = true; hide(); pages.values.flatten().forEach(::destroy) }
+    fun dispose() { disposed = true; scope.cancel(); pages.values.flatten().forEach(::destroy) }
 }

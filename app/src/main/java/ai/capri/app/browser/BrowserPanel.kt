@@ -1,86 +1,88 @@
 package ai.capri.app.browser
 
-import androidx.compose.foundation.horizontalScroll
+import android.content.Context
+import android.view.MotionEvent
+import android.view.View
+import android.widget.FrameLayout
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 
-@Composable internal fun BrowserPanel(browser: BrowserController) {
-    val ui by browser.ui.collectAsState()
-    if (!ui.shown) return
-    val scope = rememberCoroutineScope()
+/** Full-size resident engine views sit behind the opaque conversation/file surface. */
+@Composable internal fun BrowserCanvas(browser: BrowserController, chat: String, displayedPage: String?, modifier: Modifier = Modifier) {
+    browser.ui.collectAsState().value
     val owner = LocalLifecycleOwner.current
-    val capabilities = remember(browser) { browser.status() }
-    var address by remember(ui.chat, ui.page) { mutableStateOf(browser.tabList(ui.chat).firstOrNull { it.id == ui.page }?.url.orEmpty()) }
-    var working by remember { mutableStateOf(false) }
-    var message by remember(ui.chat) { mutableStateOf("") }
-    LaunchedEffect(ui.chat) { browser.execute(ui.chat, JSONObject().put("action", "tabs")) }
-    DisposableEffect(owner) {
+    DisposableEffect(browser, owner) {
         fun sync() { browser.hostResumed(owner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
-        val observer = LifecycleEventObserver { _, _ -> sync() }
-        owner.lifecycle.addObserver(observer); sync()
-        onDispose { owner.lifecycle.removeObserver(observer); browser.hostResumed(false) }
+        val listener = LifecycleEventObserver { _, _ -> sync() }
+        owner.lifecycle.addObserver(listener); sync()
+        onDispose { owner.lifecycle.removeObserver(listener); browser.hostResumed(false) }
     }
-    fun invoke(action: String, value: String? = null) {
-        if (working) return
-        working = true
-        scope.launch {
-            try {
-                val request = JSONObject().put("action", action)
-                if (action == "open") request.put("url", address) else value?.let { request.put("page_id", it) }
-                val result = JSONObject(browser.execute(ui.chat, request))
-                message = if (result.optString("status") == "ok") {
-                    result.optJSONObject("observation")?.let { "${it.optString("title")} · ${it.optJSONArray("elements")?.length() ?: 0} 个交互元素${if (it.optBoolean("truncated")) " · 摘要已截断" else ""}" } ?: "已关闭页面"
-                } else "${result.optString("status")}：${result.optString("message") }"
-            } finally { working = false }
-        }
+    Box(modifier) {
+        browser.liveViews(chat).sortedBy { if (it.first == displayedPage) 1 else 0 }.forEach { (id, web) -> key(id, web) {
+            val interactive = id == displayedPage
+            AndroidView(factory = { context -> BrowserViewHost(context) }, update = { host ->
+                host.interactive = interactive
+                host.importantForAccessibility = if (interactive) View.IMPORTANT_FOR_ACCESSIBILITY_AUTO else View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+                web.importantForAccessibility = if (interactive) View.IMPORTANT_FOR_ACCESSIBILITY_AUTO else View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+                web.isFocusable = interactive; web.isFocusableInTouchMode = interactive
+                if (!interactive) web.clearFocus()
+                if (web.parent !== host) {
+                    (web.parent as? android.view.ViewGroup)?.removeView(web)
+                    host.removeAllViews(); host.addView(web, FrameLayout.LayoutParams(-1, -1))
+                }
+            }, modifier = Modifier.fillMaxSize())
+        } }
     }
-    Dialog(onDismissRequest = { browser.hide() }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(Modifier.fillMaxSize().systemBarsPadding(), color = MaterialTheme.colorScheme.background) {
-            Column(Modifier.fillMaxSize().imePadding().padding(8.dp)) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("CAPRI / WEB", fontSize = 14.sp, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(8.dp))
-                    TextButton(onClick = { browser.hide() }) { Text("返回对话") }
+}
+private class BrowserViewHost(context: Context) : FrameLayout(context) {
+    var interactive = false
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean = interactive && super.dispatchTouchEvent(event)
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean = interactive && super.dispatchKeyEvent(event)
+}
+
+@Composable internal fun BrowserControls(browser: BrowserController, chat: String, page: String?, onOpened: (String) -> Unit) {
+    val state by browser.ui.collectAsState()
+    val scope = rememberCoroutineScope()
+    val record = browser.tabList(chat).firstOrNull { it.id == page }
+    var address by remember(chat, page) { mutableStateOf(record?.url.orEmpty()) }
+    var message by remember(chat, page) { mutableStateOf("") }
+    var working by remember(chat, page) { mutableStateOf(false) }
+    val supported = remember(browser) { browser.status().optBoolean("multi_profile") }
+    Column {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            OutlinedTextField(address, { address = it }, singleLine = true, placeholder = { Text("HTTPS网址", fontSize = 12.sp) }, modifier = Modifier.weight(1f))
+            TextButton(enabled = !working && supported && address.isNotBlank(), onClick = {
+                working = true
+                scope.launch {
+                    try {
+                        val result = JSONObject(browser.execute(chat, JSONObject().put("action", "open").put("url", address)))
+                        if (result.optString("status") == "ok") onOpened(result.getString("page_id"))
+                        else message = result.optString("message", result.optString("status"))
+                    } finally { working = false }
                 }
-                Text("当前会话独立登录环境 · ${capabilities.optString("version")}", fontSize = 11.sp, modifier = Modifier.padding(horizontal = 8.dp))
-                if (!capabilities.optBoolean("multi_profile")) Text(capabilities.optString("message"), color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(8.dp))
-                Row(Modifier.fillMaxWidth()) {
-                    OutlinedTextField(address, { address = it }, label = { Text("HTTPS网址") }, singleLine = true, modifier = Modifier.weight(1f))
-                    TextButton(onClick = { invoke("open") }, enabled = !working && address.isNotBlank() && capabilities.optBoolean("multi_profile")) { Text("新标签") }
+            }) { Text("打开", fontSize = 12.sp) }
+            if (page != null) TextButton(enabled = !working, onClick = {
+                scope.launch {
+                    working = true
+                    try {
+                        val result = JSONObject(browser.execute(chat, JSONObject().put("action", "show").put("page_id", page)))
+                        message = if (result.optString("status") == "ok") "页面已就绪" else result.optString("message", result.optString("status"))
+                    } finally { working = false }
                 }
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-                    browser.tabList(ui.chat).forEachIndexed { index, tab ->
-                        TextButton(onClick = { invoke("show", tab.id) }, enabled = !working,
-                            colors = ButtonDefaults.textButtonColors(contentColor = if (ui.page == tab.id) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)) {
-                            Text("${index + 1} ${tab.title.take(14)}", maxLines = 1)
-                        }
-                    }
-                }
-                Row {
-                    TextButton(onClick = { ui.page?.let { invoke("observe", it) } }, enabled = !working && ui.page != null) { Text("读取页面") }
-                    TextButton(onClick = { ui.page?.let { invoke("close", it) } }, enabled = !working && ui.page != null) { Text("关闭标签", color = MaterialTheme.colorScheme.error) }
-                }
-                if (working) LinearProgressIndicator(Modifier.fillMaxWidth())
-                val notice = ui.notice.ifBlank { message }
-                if (notice.isNotBlank()) Text(notice, fontSize = 11.sp, maxLines = 2, modifier = Modifier.padding(4.dp))
-                val web = ui.page?.let(browser::view)
-                if (web == null) Box(Modifier.weight(1f).fillMaxWidth()) { Text("输入网址打开页面；当前支持读取与手动浏览。", modifier = Modifier.padding(12.dp), fontSize = 12.sp) }
-                else key(ui.page, web) {
-                    AndroidView(factory = { (web.parent as? android.view.ViewGroup)?.removeView(web); web }, modifier = Modifier.weight(1f).fillMaxWidth())
-                }
-            }
+            }) { Text("读取", fontSize = 12.sp) }
         }
+        if (!supported) Text("系统WebView不支持独立登录环境，请更新WebView", color = MaterialTheme.colorScheme.error, fontSize = 11.sp)
+        val notice = if (state.chat == chat && state.page == page) state.notice.ifBlank { message } else message
+        if (notice.isNotBlank()) Text(notice, fontSize = 11.sp, maxLines = 2, modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp))
     }
 }

@@ -167,6 +167,12 @@ class MainActivity : ComponentActivity() {
             // Apply only the IME inset remaining after the stable Scaffold bottom bar.
             Column(Modifier.padding(padding).consumeWindowInsets(padding).imePadding().fillMaxSize()) {
                 if (banner.isNotEmpty()) { TextButton(onClick = { banner = "" }) { Text(banner, color = Green, fontSize = 12.sp) } }
+                ai.capri.app.preview.WorkspaceSurface(vm.previews, vm.browser, vm.store.workspace, session.id,
+                    active = tab == 0, modifier = Modifier.weight(1f), onExport = { path ->
+                        val file = vm.store.workspace.file(session.id, path)
+                        val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
+                        context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("application/octet-stream").putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "导出文件"))
+                    }) {
                 when (tab) {
                     0 -> {
                         if (entries.isEmpty()) {
@@ -195,14 +201,21 @@ class MainActivity : ComponentActivity() {
                     }
                     1 -> {
                         Row(Modifier.fillMaxWidth().padding(20.dp), verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text("工作区", fontSize = 24.sp); Text(session.title, color = Muted, fontSize = 12.sp) }; OutlinedButton(enabled = !vm.migrating, onClick = { importer.launch(arrayOf("*/*")) }) { Text("导入") } }
-                        Text("文件仅属于当前会话 · 点击导出", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 20.dp))
+                        Text("文件仅属于当前会话 · 点击预览，右侧导出", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 20.dp))
                         val files = vm.store.workspace.list(session.id)
                         if(files.isEmpty()) Empty("这里还没有文件", "导入资料，或让 Capri 为你创建。")
                         LazyColumn(contentPadding = PaddingValues(16.dp)) { items(files) { file ->
                             Row(Modifier.fillMaxWidth().clickable {
-                                val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
-                                context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("application/octet-stream").putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "导出文件"))
-                            }.padding(vertical = 16.dp), verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.Description, null, tint = Green); Column(Modifier.weight(1f).padding(horizontal = 14.dp)) { Text(file.relativeTo(vm.store.workspace.folder(session.id, "workspace")).path); Text("${file.length()} bytes", fontSize = 11.sp, color = Muted) }; Icon(Icons.Outlined.IosShare, "导出", tint = Muted, modifier = Modifier.size(18.dp)) }; HorizontalDivider(color = Line)
+                                vm.previews.openFile(session.id, file.relativeTo(vm.store.workspace.folder(session.id, "workspace")).path)
+                                tab = 0; focusManager.clearFocus(); keyboard?.hide()
+                            }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Outlined.Description, null, tint = Green)
+                                Column(Modifier.weight(1f).padding(horizontal = 14.dp)) { Text(file.relativeTo(vm.store.workspace.folder(session.id, "workspace")).path); Text("${file.length()} bytes", fontSize = 11.sp, color = Muted) }
+                                IconButton(onClick = {
+                                    val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
+                                    context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("application/octet-stream").putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "导出文件"))
+                                }) { Icon(Icons.Outlined.IosShare, "导出", tint = Muted, modifier = Modifier.size(18.dp)) }
+                            }; HorizontalDivider(color = Line)
                         } }
                     }
                     2 -> {
@@ -210,7 +223,7 @@ class MainActivity : ComponentActivity() {
                             Text("执行环境", fontSize = 22.sp); Spacer(Modifier.height(12.dp))
                             OutlinedButton(onClick = { nativeCapabilities = true }) { Icon(Icons.Outlined.PhonelinkSetup, null, Modifier.size(16.dp)); Spacer(Modifier.width(8.dp)); Text("Android 原生能力") }
                             OutlinedButton(onClick = { terminalPanel = true }) { Icon(Icons.Outlined.Terminal, null, Modifier.size(16.dp)); Spacer(Modifier.width(8.dp)); Text("持续终端") }
-                            OutlinedButton(onClick = { vm.browser.openPanel(session.id) }) { Text("浏览器 · 当前会话") }
+                            OutlinedButton(onClick = { vm.previews.openBrowserHome(session.id); tab = 0; focusManager.clearFocus(); keyboard?.hide() }) { Text("浏览器 · 当前会话") }
                             OutlinedButton(onClick = { sshPanel = true }, enabled = vm.runtime.ready) { Text("SSH · 全局") }
                             OutlinedButton(onClick = { gitAccounts = true }) { Text("Git 账号 · 全局") }
                             Text("设备、网络、Wi-Fi、定位、应用与系统操作统一由 android 工具调用。", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(vertical = 12.dp))
@@ -222,10 +235,10 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
+                }
             }
         }
     }
-    ai.capri.app.browser.BrowserPanel(vm.browser)
     if(sshPanel) SshPanel(vm.runtime, session.id, onDismiss = { sshPanel = false })
     if(gitAccounts) ai.capri.app.git.GitAccountsDialog(vm.gitAccounts, onDismiss = { gitAccounts = false })
     if(settings) Settings(vm, onDismiss = { settings = false })
