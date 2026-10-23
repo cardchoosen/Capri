@@ -36,3 +36,8 @@ f149774236db1e69b36cc1e4ed3866c7094db2eee52da0d4956aa63a9bb26929 libproot-loader
 Markdown使用Markwon 4.6.2（core/tables/strikethrough），源码及许可：https://github.com/noties/Markwon 。宿主SSH测试使用Paramiko，只供loopback测试，不进入主APK。Gradle依赖版本以app/build.gradle.kts为准。
 
 旧运行时来源和许可证清单保留作历史审计，见 [LEGACY_RUNTIME.md](LEGACY_RUNTIME.md) 及原JSON记录；脚本移至tools/legacy，不再生成或随APK发布那些资源。
+
+
+## Android WebView（03-A）
+
+浏览器使用手机系统WebView，不将Chromium内核打包入APK。新增适配依赖AndroidX WebKit 1.14.0（Apache-2.0），运行时检测MULTI_PROFILE。API来源：https://developer.android.com/jetpack/androidx/releases/webkit 。借鉴Operit、Playwright MCP与browser-use的架构/观察思路，未复制其浏览器实现代码；具体参考与差异记录在独立文档仓库architecture/Browser.md。

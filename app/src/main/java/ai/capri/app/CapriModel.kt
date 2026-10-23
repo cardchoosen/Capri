@@ -29,6 +29,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
     val sessions = store.load()
     init { store.save(sessions) }
     var selected = sessions.first().id
+    internal val browser = ai.capri.app.browser.BrowserController(app, store.workspace) { selected }
     private val tick = MutableStateFlow(0)
     val updates = tick.asStateFlow()
     val jobs = ConcurrentHashMap<String, Job>()
@@ -108,13 +109,14 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
             finally { runtimeBusy = false; refresh() }
         }
     }
+    override fun onCleared() { browser.dispose(); super.onCleared() }
     fun refresh() { tick.value++ }
     fun current() = sessions.first { it.id == selected }
     fun create() {
         if (migrating || runtimeBusy) return
-        Session().also { sessions.add(0, it); selected = it.id }; persist(); prepareSession(selected)
+        Session().also { sessions.add(0, it); selected = it.id }; browser.selectionChanged(selected); persist(); prepareSession(selected)
     }
-    fun select(id: String) { selected = id; if (!runtime.environment.chats.value.containsKey(id)) prepareSession(id); refresh() }
+    fun select(id: String) { selected = id; browser.selectionChanged(id); if (!runtime.environment.chats.value.containsKey(id)) prepareSession(id); refresh() }
     fun persist() { store.save(sessions); refresh() }
     fun stop() { jobs[selected]?.cancel(); notices[selected] = "已请求停止"; refresh() }
     fun send(text: String): Boolean = sendTo(selected, text)
@@ -184,6 +186,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
             .put(CapabilityContract.specification())
             .put(androidTools.specification())
             .put(ai.capri.app.terminal.TerminalContract.specification())
+            .put(ai.capri.app.browser.BrowserContract.specification())
         val requests = ModelRequests(MAX_MODEL_CALLS)
         while (requests.used < MAX_MODEL_CALLS) {
             currentCoroutineContext().ensureActive()
@@ -283,6 +286,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                             }
                             "python_env" -> pythonEnvironment.execute(session.id, args)
                             "environment", "environment_check" -> capabilityTool.execute(session.id, args, trace)
+                            "browser" -> browser.execute(session.id, args)
                             "terminal" -> terminals.execute(session.id, args)
                             "android" -> androidTools.execute(args)
                             "profile_search" -> store.profile(args.getString("query"))

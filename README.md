@@ -14,6 +14,8 @@ Agent 循环和工具在手机运行；推理由用户配置的远端模型提�
 
 运行 → 诊断与维护提供会话 tmp/runs 清理、全局 pip/npm/apt 下载缓存清理、当前会话 .venv/托管 npm 重置。执行前展示范围与文件字节估算；有运行中的终端/脚本时拒绝，不自动中断。重置离线重建 Python，保留工作区（包括项目 node_modules）、其他 HOME 文件、聊天和全局凭据；失败可重试准备。
 
+运行页的“浏览器 · 当前会话”使用系统WebView；每聊天独立Profile、最多5个逻辑标签，全局最多2个存活页面。browser提供status/tabs/open/observe/show/close，支持HTTPS、可见页面与有界主frame DOM摘要；不支持多Profile的设备明确拒绝，不降级共享Cookie。标签元数据可恢复，但查询参数/fragment不持久化、表单与JS内存不恢复；不读取外部Chrome登录态。点击/填写/文件等属于后续03-B/C。
+
 ## 环境、文件和执行
 
 ```text
@@ -49,7 +51,7 @@ cache/ubuntu-setup.log                # 最近一次环境准备日志
 
 ## 能力与边界
 
-- 九个模型入口：profile_search、list_files、read_file、write_file、python_run、android、terminal、send_file、environment。旧python_env/environment_check仅兼容分发。
+- 十个模型入口：profile_search、list_files、read_file、write_file、python_run、android、terminal、send_file、environment、browser。旧python_env/environment_check仅兼容分发。
 - android包含34个封闭原生action，按需权限；不提供系统最高权限。目录见 [docs/ANDROID_TOOLS.md](docs/ANDROID_TOOLS.md)。
 - 多聊天独立任务及文件，单聊天一个模型任务；最多50次模型请求尝试（含有界网络重试），未完成检查点可显式继续，不自动重放副作用。
 - Markdown、代码复制、最终正文渐进显示、阅读锚点保护、单行工具轮播/折叠和按轮次二级折叠；本地图片/GIF与文件附件，单个20MB。
@@ -57,7 +59,7 @@ cache/ubuntu-setup.log                # 最近一次环境准备日志
 - 应用级Git Token按HTTPS主机共享，加密保存；GitHub只填Token自动识别login，其他主机保留用户名，支持仓库读取测试。Token不传模型或命令URL，无OAuth。
 - SSH全局生成设备密钥或导入命名无口令私钥，提供公共身份清单；严格指纹校验，私钥不发送模型。远端账号权限由服务器决定，无加密私钥解锁代理、删钥/轮换表单或手机SSH服务。
 
-同一Android UID和内核，共享根可写。PRoot及venv目录组织**不是恶意代码沙箱**，不隔离同UID秘密或系统包；没有独立内核、资源硬配额、网络隔离。文件工具限制workspace路径，任意代码仍有应用权限。后台受Android/厂商限制。未交付浏览器Agent、长期记忆、MCP/Skills/Plugins/Rules/工作流或正式互联网查询工具，见独立文档仓库Plans。
+同一Android UID和内核，共享根可写。PRoot及venv目录组织**不是恶意代码沙箱**，不隔离同UID秘密或系统包；没有独立内核、资源硬配额、网络隔离。文件工具限制workspace路径，任意代码仍有应用权限。后台受Android/厂商限制。浏览器已交付03-A的页面打开/读取与独立Profile，点击/填写/下载仍待后续；未交付长期记忆、MCP/Skills/Plugins/Rules/工作流或正式互联网查询工具，见独立文档仓库Plans。
 
 ## 开发与验证
 

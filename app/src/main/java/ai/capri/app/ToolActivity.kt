@@ -11,6 +11,7 @@ internal fun toolLabel(name: String, args: JSONObject?): String = when (name) {
         "input" -> "输入终端"; "cancel" -> "停止命令"; "close" -> "关闭终端"
         "clear_history", "delete" -> "清理终端记录"; else -> "终端"
     }
+    "browser" -> when (args?.optString("action")) { "open" -> "打开网页"; "observe" -> "读取网页"; "show" -> "切换网页"; "close" -> "关闭网页"; else -> "查看浏览器" }
     "python_env" -> when (args?.optString("action")) {
         "install" -> "安装 Python 依赖"; "uninstall" -> "卸载 Python 依赖"; "list", "freeze" -> "查看 Python 依赖"
         "check" -> "检查 Python 依赖"; else -> "诊断 Python 环境"
