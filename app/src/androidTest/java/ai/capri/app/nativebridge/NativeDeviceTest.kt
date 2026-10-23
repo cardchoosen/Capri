@@ -11,6 +11,22 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class NativeDeviceTest {
+    @Test fun networkCheckReportsEvidenceAndReusesShortCache() = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as Application
+        val tool = AndroidTool(context)
+        val args = JSONObject().put("action", "network_check").put("params", JSONObject().put("url", "https://www.baidu.com/private?q=secret"))
+        val first = JSONObject(tool.execute(args))
+        assertEquals(first.toString(), "ok", first.getString("status"))
+        val data = first.getJSONObject("data")
+        assertEquals(3, data.getJSONArray("checks").length())
+        assertEquals("https://www.baidu.com/", data.getJSONObject("target").getString("origin"))
+        assertFalse(data.toString().contains("secret"))
+        assertTrue(data.getString("international_samples") in setOf("reachable", "partial", "unreachable"))
+        val second = JSONObject(tool.execute(args)).getJSONObject("data").getJSONArray("checks")
+        for (i in 0 until second.length()) assertTrue(second.getJSONObject(i).getBoolean("cached"))
+        val bad = JSONObject(tool.execute(JSONObject().put("action", "network_check").put("params", JSONObject().put("url", "file:///secret"))))
+        assertEquals("invalid_argument", bad.getString("status"))
+    }
     @Test fun nativeQueriesRunWithoutPRootOrPrivileges() = runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as Application
         val tool = AndroidTool(context)

@@ -17,6 +17,7 @@ internal object NativeCatalog {
         NativeAction("battery_info", "电量、充电与省电状态", "无"),
         NativeAction("storage_info", "应用存储空间与内存", "无"),
         NativeAction("display_info", "屏幕尺寸、密度、亮度与锁屏状态", "无"),
+        NativeAction("network_check", "按需检测外网代表站点及任务目标可达性", "url:可选HTTPS目标；仅探测origin，不发凭据；并行最多6秒、同网络缓存30秒；不是全外网保证"),
         NativeAction("network_info", "网络类型、IP、路由、DNS与VPN状态", "无"),
         NativeAction("wifi_info", "当前Wi-Fi连接信息", "SSID/BSSID需要精确定位授权和位置开关；缺少时返回partial"),
         NativeAction("wifi_scan", "读取最近的Wi-Fi扫描结果", "需精确定位和位置开关；返回缓存结果和时间，不发起新扫描"),
@@ -48,7 +49,7 @@ internal object NativeCatalog {
     fun find(name: String) = actions.firstOrNull { it.name == name }
     fun spec(): JSONObject = JSONObject().put("type", "function").put("function", JSONObject()
         .put("name", "android")
-        .put("description", "手机原生Android能力统一入口，无root/ADB/Shizuku。先用capabilities了解能力。Wi-Fi、设备状态、应用、定位等应优先使用此工具而非PRoot。缺少授权时按结果调用request_permissions并重试；不能把Python失败说成手机无法实现。params填写对应action的参数，未知参数不执行。launch类仅打开系统页面，不代表用户完成了操作。")
+        .put("description", "手机原生Android能力统一入口，无root/ADB/Shizuku。网络任务不确定或失败时用network_check，可传目标url；network_info只说明系统联网，不证明外网站点可达。先用capabilities了解能力。Wi-Fi、设备状态、应用、定位等应优先使用此工具而非PRoot。缺少授权时按结果调用request_permissions并重试；不能把Python失败说成手机无法实现。params填写对应action的参数，未知参数不执行。launch类仅打开系统页面，不代表用户完成了操作。")
         .put("parameters", JSONObject().put("type", "object").put("required", JSONArray(listOf("action")))
             .put("properties", JSONObject()
                 .put("action", JSONObject().put("type", "string").put("enum", JSONArray(actions.map { it.name })))

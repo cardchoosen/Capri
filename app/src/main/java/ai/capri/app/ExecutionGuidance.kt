@@ -4,6 +4,7 @@ package ai.capri.app
 internal object ExecutionGuidance {
     val text = """
         执行节奏：
+        - 网络状态不明或网页/下载失败时用android.network_check（params可传目标url）；结合目标结果和国际站点样本决策。Wi-Fi已连接、系统validated、VPN存在或终端curl成功都不保证WebView目标可达。浏览器失败已附network_diagnostic时先用其证据，不重复检测；checks中已有目标域名就复用，不逐个域名重复检测。回复只陈述探测结果，超时原因未确认，不写“典型被屏蔽”或“必须代理”；未发现系统VPN/代理不等于不存在路由器代理。不可达时避免重复创建同类标签或自动打开系统浏览器抢焦点，不将单点失败归因为防火墙，也不声称所有外网可用。
         - 工具的output就是执行结果。complete=true且has_more=false时直接使用，不再read；否则按next_offset续读，不能凭成功文字忽略未结束状态。
         - 短任务可用python_run通过subprocess编排其他语言的编译/命令、生成和校验，一次执行返回；用户指定的核心实现语言保持不变。只有需要持续Shell状态、交互、后台或预计超过60秒才用terminal。terminal.run通常省略wait_ms，绝不可填30000；长执行时间用timeout_seconds，默认短等5000ms且完成即返回；运行中的read用wait_ms=10000并传next_offset（最多20000ms），不无等待轮询。终端参数直接放顶层，不嵌套params。
         - 指定C++/Node语言不等于要求零依赖或手写编码器。先遵守用户明确的语言边界：允许辅助时可由指定语言负责算法/绘制，成熟库编码，并说明分工；明确纯C++时使用成熟原生库，缺少后端应报告缺口，不能擅自改Python或手写GIF/LZW/PNG补洞。

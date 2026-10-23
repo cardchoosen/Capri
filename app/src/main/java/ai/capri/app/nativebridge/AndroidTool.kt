@@ -47,6 +47,12 @@ class AndroidTool(private val app: Application) {
                 "battery_info" -> device.battery()
                 "storage_info" -> device.storage()
                 "display_info" -> device.display()
+                "network_check" -> {
+                    val url = if (params.has("url")) params.requiredText("url", 4000) else null
+                    if (url != null) try { ai.capri.app.network.NetworkReachability.origin(url) }
+                    catch (e: IllegalArgumentException) { throw NativeFailure("invalid_argument", e.message.orEmpty()) }
+                    ai.capri.app.network.NetworkReachability.check(app, url)
+                }
                 "network_info" -> network.network()
                 "wifi_info" -> return@withContext network.wifiInfo().toString()
                 "wifi_scan" -> network.wifiScan()
@@ -93,7 +99,7 @@ internal fun validateParams(action: String, params: JSONObject) {
         "apps_list" -> setOf("query", "limit")
         "app_info", "launch_app" -> setOf("package_name")
         "open_settings" -> setOf("page")
-        "open_url" -> setOf("url")
+        "open_url", "network_check" -> setOf("url")
         "share_text" -> setOf("text", "title")
         "clipboard_write" -> setOf("text")
         "notification_post" -> setOf("title", "text", "id")

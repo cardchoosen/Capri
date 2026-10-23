@@ -133,20 +133,28 @@ internal class BrowserController(private val context: Context, workspace: Worksp
             }
             result.put("elapsed_ms", (System.nanoTime() - start) / 1_000_000).toString()
         } catch (timeout: TimeoutCancellationException) {
-            if (initiatedLoad) active?.web?.stopLoading()
+            if (initiatedLoad) { active?.failure = "页面加载超时，尚未确认可用"; active?.web?.stopLoading() }
             JSONObject().put("status", "timeout").put("page_id", active?.record?.id ?: JSONObject.NULL)
-                .put("message", "页面等待超时，标签保留；可重新观察，不自动重放").toString()
+                .put("message", "页面等待超时，未确认加载成功；标签保留，不自动重放").withNetworkDiagnostic(active?.record?.url).toString()
         } catch (cancel: CancellationException) {
             if (initiatedLoad) active?.web?.stopLoading()
             throw cancel
         } catch (e: Exception) {
             if (initiatedLoad) active?.web?.stopLoading()
             JSONObject().put("status", (e as? BrowserFault)?.status ?: "error").put("page_id", active?.record?.id ?: JSONObject.NULL)
-                .put("message", if (e is BrowserFault || e is IllegalArgumentException) e.message else "浏览器操作未完成，可查看页面后重试").toString()
+                .put("message", if (e is BrowserFault || e is IllegalArgumentException) e.message else "浏览器操作未完成，可查看页面后重试")
+                .let { if (e is BrowserFault && e.status in setOf("load_failed", "not_loaded")) it.withNetworkDiagnostic(active?.record?.url) else it }.toString()
         } finally {
             active?.let { if (initiatedLoad) it.loading = false else if (createdView) destroy(it) }
             mutableUi.value = mutableUi.value.copy(busy = false); changed(); operation.unlock()
         }
+    }
+    private suspend fun JSONObject.withNetworkDiagnostic(url: String?): JSONObject {
+        if (url?.startsWith("https://") != true) return this
+        try { put("network_diagnostic", ai.capri.app.network.NetworkReachability.check(context, url)) }
+        catch (e: CancellationException) { throw e }
+        catch (_: Exception) { put("network_diagnostic", JSONObject().put("status", "unavailable")) }
+        return this
     }
     private fun ensureHost(p: Page) {
         if (!resumed || selectedChat() != p.chat)
@@ -230,6 +238,9 @@ internal class BrowserController(private val context: Context, workspace: Worksp
     }
     private suspend fun observe(p: Page): JSONObject {
         ensureHost(p)
+        p.failure?.let { throw BrowserFault("load_failed", it) }
+        if (p.web?.url.isNullOrBlank() || p.web?.url == "about:blank" || p.web?.url?.startsWith("chrome-error:") == true)
+            throw BrowserFault("not_loaded", "尚无可读取的已加载网页，不能把空白页视为成功")
         val epoch = p.epoch
         val token = UUID.randomUUID().toString()
         val script = observer.replace("__CAPRI_SNAPSHOT__", JSONObject.quote(token))
