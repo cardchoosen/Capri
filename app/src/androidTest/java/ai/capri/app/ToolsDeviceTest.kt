@@ -120,12 +120,23 @@ for line in sys.stdin:
             assertFalse(catalog.any { it.description.contains("install_toolpack") })
             assertEquals("fixture-value", JSONObject(vm.extensions.call(chat, ExtensionManager.toolName(server, tools.first()), JSONObject().put("text", "fixture-value"))).getJSONArray("content").getJSONObject(0).getString("text"))
             click { it == "运行" }; click { it == "能力与扩展 · Tools / MCP / Skills" }
-            await { it.startsWith("Tools ·") }; await { it.startsWith("13 个内置") }
-            click { it == "MCP 工具" }; await { it.contains("fixture_echo") }
-            click { it == "用途与参数" }; await { it == "参数定义" }; await { it.contains("\"required\"") && it.contains("\"text\"") }
+            await { it.startsWith("Tools ·") }; await { it == "内置" }
+            instrumentation.uiAutomation.clearCache()
+            assertNull(find(instrumentation.uiAutomation.rootInActiveWindow) { it in setOf("全部", "MCP 工具") })
+            suspend fun search(value: String) {
+                var node: android.view.accessibility.AccessibilityNodeInfo? = await { it == "搜索工具" }
+                while (node != null && !node.isEditable) node = node.parent
+                assertNotNull(node)
+                val args = android.os.Bundle().apply { putCharSequence(android.view.accessibility.AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, value) }
+                assertTrue(node!!.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_TEXT, args))
+            }
+            search("fixture_echo"); await { it.contains("fixture_echo") && it.startsWith("MCP ·") }
+            click { it == "详情" }; await { it == "参数定义" }; await { it.contains("\"required\"") && it.contains("\"text\"") }
             click { it == "返回工具列表" }
             vm.extensions.deactivate(chat, server)
-            await { it.startsWith("当前会话尚无已连接的 MCP 工具") }
+            await { it == "没有匹配的工具。" }
+            search(""); await { it == "内置" }
+
             instrumentation.uiAutomation.clearCache()
             assertNull(find(instrumentation.uiAutomation.rootInActiveWindow) { it.startsWith("工具包 ·") })
         } finally {

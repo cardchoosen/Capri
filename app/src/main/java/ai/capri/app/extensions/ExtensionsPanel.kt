@@ -5,6 +5,8 @@ import ai.capri.app.toolLabel
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -36,7 +38,6 @@ import org.json.JSONObject
     var detailTitle by remember { mutableStateOf("Skill 指令") }
     var toolDetail by remember { mutableStateOf<CatalogTool?>(null) }
     var toolQuery by remember { mutableStateOf("") }
-    var toolSource by remember { mutableIntStateOf(0) }
     var tools by remember { mutableStateOf<List<CatalogTool>>(emptyList()) }
     val toolsScroll = rememberScrollState()
     val mcpScroll = rememberScrollState()
@@ -74,7 +75,6 @@ import org.json.JSONObject
         Surface(Modifier.fillMaxWidth().fillMaxHeight(.92f).padding(12.dp)) {
             Column(Modifier.padding(14.dp)) {
                 Text("能力与扩展", fontSize = 21.sp)
-                Text("Tools 查看实际能力 · MCP 管理连接 · Skills 提供任务方法", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
                 Row(Modifier.padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(selected = category == 2, onClick = { category = 2 }, label = { Text("Tools · ${tools.size}") })
                     FilterChip(selected = category == 0, onClick = { category = 0 }, label = { Text("MCP · ${configs.size}") })
@@ -122,21 +122,21 @@ import org.json.JSONObject
                             }
                         }
                     } else {
-                        Text("当前会话可提供给模型的工具。内置工具调用时仍需检查权限与环境；MCP 工具仅在连接成功后显示，断开后移除。这里展示工具说明，不会执行工具。", fontSize = 12.sp)
-                        OutlinedTextField(toolQuery, { toolQuery = it }, label = { Text("搜索工具名称、用途或来源") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            listOf("全部", "内置", "MCP 工具").forEachIndexed { index, name -> FilterChip(selected = toolSource == index, onClick = { toolSource = index }, label = { Text(name) }) }
-                        }
-                        Text("${tools.count { !it.mcp }} 个内置 · ${tools.count { it.mcp }} 个 MCP 工具", fontSize = 12.sp)
-                        val matches = ToolsCatalog.filter(tools, toolQuery, toolSource)
-                        if (matches.isEmpty()) Text(if (toolSource == 2 && tools.none { it.mcp }) "当前会话尚无已连接的 MCP 工具，请在 MCP 页连接服务。" else "没有匹配的工具。", fontSize = 12.sp)
+                        OutlinedTextField(toolQuery, { toolQuery = it }, label = { Text("搜索工具") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                        val matches = ToolsCatalog.filter(tools, toolQuery)
+                        if (matches.isEmpty()) Text("没有匹配的工具。", Modifier.padding(vertical = 12.dp), fontSize = 12.sp)
                         matches.forEach { item ->
                             HorizontalDivider()
-                            Text(item.title, Modifier.padding(top = 12.dp), color = MaterialTheme.colorScheme.primary)
-                            Text(item.name, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-                            Text("${item.source} · 已加入当前会话工具集", fontSize = 11.sp)
-                            Text(item.description, fontSize = 12.sp)
-                            TextButton(onClick = { toolDetail = item }) { Text("用途与参数") }
+                            Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                                    Text(item.title, Modifier.weight(1f, fill = false), color = MaterialTheme.colorScheme.primary, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                    if (!item.mcp) Surface(Modifier.padding(start = 8.dp), color = MaterialTheme.colorScheme.secondaryContainer, shape = MaterialTheme.shapes.extraSmall) {
+                                        Text("内置", Modifier.padding(horizontal = 6.dp, vertical = 2.dp), fontSize = 10.sp, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                                    }
+                                }
+                                TextButton(onClick = { toolDetail = item }) { Text("详情") }
+                            }
+                            Text(item.description, Modifier.padding(bottom = 12.dp), fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                         }
 
                     }

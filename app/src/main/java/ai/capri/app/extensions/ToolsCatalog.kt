@@ -14,8 +14,7 @@ internal object ToolsCatalog {
         }
         return (0 until builtins.length()).map { entry(builtins.getJSONObject(it), false) } + mcp.map { entry(it, true) }
     }
-    fun filter(tools: List<CatalogTool>, query: String, source: Int): List<CatalogTool> = tools.filter {
-        (source == 0 || (source == 1 && !it.mcp) || (source == 2 && it.mcp)) &&
+    fun filter(tools: List<CatalogTool>, query: String): List<CatalogTool> = tools.filter {
             (query.isBlank() || "${it.name} ${it.title} ${it.source} ${it.description}".contains(query.trim(), ignoreCase = true))
     }
 }

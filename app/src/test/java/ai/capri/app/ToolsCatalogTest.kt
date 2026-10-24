@@ -12,15 +12,15 @@ class ToolsCatalogTest {
             .put("properties", JSONObject().put("query", JSONObject().put("type", "string")))
         return JSONObject().put("function", JSONObject().put("name", name).put("description", "Search documentation").put("parameters", parameters))
     }
-    @Test fun catalogUsesExactContractsAndFiltersBySource() {
+    @Test fun catalogUsesExactContractsAndSearchesAllSources() {
         val builtins = JSONArray().put(spec("read_file")); val external = spec("mcp_abc")
         val tools = ToolsCatalog.entries(builtins, listOf(external), { "读取文件" }, { "MCP · docs / query" })
         assertEquals(listOf("read_file", "mcp_abc"), tools.map { it.name })
         assertEquals("MCP · docs", tools.last().source)
         assertEquals(external.getJSONObject("function").getJSONObject("parameters").toString(), tools.last().parameters.toString())
-        assertEquals(1, ToolsCatalog.filter(tools, "", 1).size)
-        assertEquals("mcp_abc", ToolsCatalog.filter(tools, "DOCS", 2).single().name)
-        assertEquals(0, ToolsCatalog.filter(tools, "不存在", 0).size)
+        assertEquals(2, ToolsCatalog.filter(tools, "").size)
+        assertEquals("mcp_abc", ToolsCatalog.filter(tools, "DOCS").single().name)
+        assertEquals(0, ToolsCatalog.filter(tools, "不存在").size)
         external.getJSONObject("function").getJSONObject("parameters").put("modified", true)
         assertFalse(tools.last().parameters.has("modified"))
     }
