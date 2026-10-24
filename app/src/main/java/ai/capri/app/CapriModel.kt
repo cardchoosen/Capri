@@ -20,6 +20,9 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
     companion object { const val MAX_MODEL_CALLS = 50 }
     internal val gitAccounts = ai.capri.app.git.GitAccounts(app)
     val store = Store(app)
+    internal val knowledge = ai.capri.app.knowledge.KnowledgeStore(File(app.filesDir, "knowledge"), store.workspace)
+    internal val contextHistory = ai.capri.app.knowledge.ContextHistory(File(app.filesDir, "context-history"))
+    private val knowledgeTool = ai.capri.app.knowledge.KnowledgeTool(knowledge)
     val runtime = PythonRuntime(app, store.workspace)
     internal val terminals = ai.capri.app.terminal.TerminalManager.get(app)
     internal val capabilityTool = CapabilityTool(app, runtime)
@@ -148,6 +151,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
         val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
             try { respond(session, config) }
             catch (e: CancellationException) { session.messages.add(Entry("status", "执行已停止")); throw e }
+            catch (e: ai.capri.app.knowledge.ContextBudgetFailure) { session.messages.add(Entry("status", e.message.orEmpty())) }
             catch (e: ModelRequestFailure) {
                 Log.w("CapriModelRequest", "failed category=${e.category} type=${e.cause?.javaClass?.simpleName}")
                 session.messages.add(Entry("status", "${e.category}，模型回复未完成。已记录的工具结果保留，持续终端不会因此自动停止。发送“继续”可接续；结果未确认的操作会先核验，不直接重跑。"))
@@ -166,18 +170,17 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
         try {
         val saved = withContext(Dispatchers.IO) { recovery.load(session.id) }
         val continuing = saved != null && RecoveryMessages.isContinuation(session.messages.last().text)
-        val messages = if (saved != null) RecoveryMessages.forResume(saved) else JSONArray()
+        var messages = if (saved != null) RecoveryMessages.forResume(saved) else JSONArray()
         val rules = getApplication<Application>().assets.open("persona/core.txt").bufferedReader().use { it.readText() } + "\n" +
             getApplication<Application>().assets.open("runtime/execution_rules.txt").bufferedReader().use { it.readText() } +
-            "\n" + extensions.guidance() + "\n本轮最多 $MAX_MODEL_CALLS 次模型请求（包含网络重试），这是客户端预算；验证任务后及时回复。\n" + ExecutionGuidance.text
+            "\n" + extensions.guidance() + "\n本轮最多 $MAX_MODEL_CALLS 次模型请求（包含网络重试），这是客户端预算；验证任务后及时回复。\n" + ExecutionGuidance.text + "\n" + ai.capri.app.knowledge.KnowledgeTool.guidance
         if (saved != null) {
             messages.getJSONObject(0).put("content", rules)
             val instruction = if (continuing) "接续检查点，已记录的工具不得因网络重试重复执行。"
                 else "这是新请求；先前记录仅用于核验现存资源，不要自行继续先前目标。"
             messages.put(JSONObject().put("role", "user").put("content", session.messages.last().text + "；" + instruction))
         } else {
-            messages.put(JSONObject().put("role", "system").put("content", rules))
-            session.messages.filter { it.role in listOf("user", "assistant") }.takeLast(30).forEach { messages.put(JSONObject().put("role", it.role).put("content", it.text)) }
+            messages = withContext(Dispatchers.IO) { contextHistory.fresh(session.id, session.messages.toList(), rules) }
         }
         suspend fun checkpoint() = withContext(Dispatchers.IO) { recovery.save(session.id, messages) }
         checkpoint()
@@ -188,6 +191,8 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
             .put(tool("read_file", "读取当前工作区文本文件", props("path"), listOf("path")))
             .put(tool("write_file", "写入当前工作区文本文件", props("path", "content"), listOf("path", "content")))
             .put(tool("send_file", "把当前会话工作区已有文件发送到聊天。PNG/JPEG/GIF/WebP内联显示（GIF可播放）；其他文件可分享导出。最大20MB，不发送私钥或凭据。path为相对路径或/workspace/路径，caption可选。", props("path", "caption"), listOf("path")))
+            .put(ai.capri.app.knowledge.KnowledgeTool.specification())
+            .put(ai.capri.app.knowledge.KnowledgeTool.historySpecification())
             .put(ShortTaskContract.specification())
             .put(CapabilityContract.specification())
             .put(androidTools.specification())
@@ -198,6 +203,8 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
         while (requests.used < MAX_MODEL_CALLS) {
             currentCoroutineContext().ensureActive()
             val tools = withContext(Dispatchers.IO) { JSONArray(baseTools.toString()).apply { extensions.specifications(session.id).forEach { put(it) } } }
+            messages = withContext(Dispatchers.IO) { knowledgeTool.refreshResults(session.id, messages); contextHistory.fit(session.id, messages, tools) }
+            checkpoint()
             notices[session.id] = "思考中"; refresh()
             val response = requests.execute(onRetry = { attempt, category ->
                 notices[session.id] = "模型连接重试 $attempt/2"; refresh()
@@ -209,7 +216,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                 try { withContext(Dispatchers.IO) {
                 val url = config.endpoint.trimEnd('/') + "/chat/completions"
                 require(url.startsWith("https://")) { "模型接口须使用 HTTPS" }
-                val body = JSONObject().put("model", config.model).put("messages", messages).put("tools", tools).put("stream", false)
+                val body = JSONObject().put("model", config.model).put("messages", messages).put("tools", tools).put("stream", false).put("max_tokens", ai.capri.app.knowledge.ContextHistory.OUTPUT_TOKENS)
                 val startedAt = android.os.SystemClock.elapsedRealtime()
                 val call = http.newCall(Request.Builder().url(url).header("Authorization", "Bearer ${config.key}").post(body.toString().toRequestBody("application/json".toMediaType())).build())
                 suspendCancellableCoroutine<JSONObject> { continuation ->
@@ -251,7 +258,13 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                 } catch (cancel: CancellationException) { requestStatus = PerformanceTrace.Status.CANCELLED; throw cancel }
                 finally { trace.event(PerformanceTrace.Stage.MODEL_REQUEST, PerformanceTrace.elapsed(attemptStarted), requestStatus, attempt = attempt) }
             }
-            val message = response.getJSONArray("choices").getJSONObject(0).getJSONObject("message")
+            val choice = response.getJSONArray("choices").getJSONObject(0)
+            if (choice.optString("finish_reason") == "length") {
+                session.messages.add(Entry("status", "模型输出达到4096 token上限，截断的回复或工具参数未执行。已有结果和检查点已保留，请要求分段输出或发送“继续”。"))
+                outcome = PerformanceTrace.Status.BUDGET
+                return
+            }
+            val message = choice.getJSONObject("message")
             messages.put(message)
             val content = if (message.isNull("content")) "" else message.optString("content")
             val calls = message.optJSONArray("tool_calls")
@@ -263,7 +276,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                 session.messages.add(Entry("assistant", content, if (finalReply) FinalReplyReveal() else null)); persist()
             }
             if (calls == null || calls.length() == 0) {
-                withContext(Dispatchers.IO) { recovery.clear(session.id) }
+                withContext(Dispatchers.IO) { contextHistory.finish(session.id, messages); recovery.clear(session.id) }
                 outcome = PerformanceTrace.Status.OK
                 return
             }
@@ -293,6 +306,8 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                                 }
                                 JSONObject().put("status", "ok").put("attached", true).put("file", item).toString()
                             }
+                            "knowledge" -> knowledgeTool.execute(session.id, session.messages.toList(), args)
+                            "context_history" -> contextHistory.query(session.id, session.messages.toList(), args)
                             "python_env" -> pythonEnvironment.execute(session.id, args)
                             "environment", "environment_check" -> capabilityTool.execute(session.id, args, trace)
                             "extensions" -> extensions.execute(session.id, args)

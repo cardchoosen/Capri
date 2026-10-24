@@ -88,6 +88,7 @@ class MainActivity : ComponentActivity() {
     var gitAccounts by remember { mutableStateOf(false) }
     var settings by remember { mutableStateOf(false) }
     var nativeCapabilities by remember { mutableStateOf(false) }
+    var knowledgePanel by remember { mutableStateOf(false) }
     var extensionsPanel by remember { mutableStateOf(false) }
     var terminalPanel by remember { mutableStateOf(false) }
     val pendingNativePermission by vm.androidTools.permissions.pending.collectAsState()
@@ -230,6 +231,7 @@ class MainActivity : ComponentActivity() {
                             Text("设备、网络、Wi-Fi、定位、应用与系统操作统一由 android 工具调用。", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(vertical = 12.dp))
                             Text("ON DEVICE / ARM64", color = Green, fontSize = 11.sp, fontFamily = FontFamily.Monospace, letterSpacing = 2.sp)
                             OutlinedButton(onClick = { extensionsPanel = true }) { Text("MCP / Skills · 扩展管理") }
+                            OutlinedButton(onClick = { knowledgePanel = true }) { Text("上下文 / 记忆 / 文档") }
                             EnvironmentPanel(vm)
                             Spacer(Modifier.height(24.dp)); Text("会话独立目录", color = Green); Text("workspace / 任务文件\nhome / 用户目录\ntmp / 临时文件\nruns / 脚本与执行日志", color = Muted, lineHeight = 28.sp, modifier = Modifier.padding(vertical = 12.dp), fontFamily = FontFamily.Monospace)
                             Text("运行模型：单 APK · Android 原生调度 · PRoot/Ubuntu。PRoot 与 Android 共用内核，各会话属于同一应用 UID；目录分离不构成恶意代码安全隔离。", color = Muted, lineHeight = 24.sp, fontSize = 13.sp)
@@ -241,6 +243,7 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+    if(knowledgePanel) ai.capri.app.knowledge.KnowledgePanel(vm) { knowledgePanel = false }
     if(extensionsPanel) ai.capri.app.extensions.ExtensionsPanel(vm) { extensionsPanel = false }
     if(sshPanel) SshPanel(vm.runtime, session.id, onDismiss = { sshPanel = false })
     if(gitAccounts) ai.capri.app.git.GitAccountsDialog(vm.gitAccounts, onDismiss = { gitAccounts = false })

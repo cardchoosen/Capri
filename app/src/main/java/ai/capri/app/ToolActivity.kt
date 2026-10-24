@@ -5,6 +5,8 @@ import org.json.JSONObject
 internal data class ToolActivity(val id: String, val label: String)
 
 internal fun toolLabel(name: String, args: JSONObject?): String = when (name) {
+    "knowledge" -> "检索与管理知识"
+    "context_history" -> "查阅会话历史"
     "android" -> args?.optString("action")?.let { ai.capri.app.nativebridge.NativeCatalog.find(it)?.title } ?: "Android 原生工具"
     "terminal" -> when (args?.optString("action")) {
         "open" -> "创建终端"; "list", "attach" -> "查看终端"; "run" -> "执行命令"; "read" -> "读取终端输出"

@@ -39,10 +39,14 @@ internal object RecoveryMessages {
             val calls = m.optJSONArray("tool_calls")
             if (calls != null) for (j in 0 until calls.length()) {
                 val call = calls.getJSONObject(j)
-                if (call.getJSONObject("function").optString("name") == "profile_search") internalIds += call.getString("id")
+                if (call.getJSONObject("function").optString("name") in setOf("profile_search", "knowledge", "context_history")) {
+                    internalIds += call.getString("id")
+                    // Remember/index arguments may themselves contain private knowledge. Do not replay from archives.
+                    if (call.getJSONObject("function").optString("name") == "knowledge") call.getJSONObject("function").put("arguments", "{}")
+                }
             }
             if (m.optString("role") == "tool" && m.optString("tool_call_id") in internalIds)
-                m.put("content", "内部档案结果未持久化，需要时重新检索。")
+                m.put("content", "内部档案结果或知识检索结果未持久化，需要时重新检索当前启用资料。")
         }
         return copy
     }
