@@ -41,3 +41,10 @@ Markdown使用Markwon 4.6.2（core/tables/strikethrough），源码及许可：h
 ## Android WebView（03-A）
 
 浏览器使用手机系统WebView，不将Chromium内核打包入APK。新增适配依赖AndroidX WebKit 1.14.0（Apache-2.0），运行时检测MULTI_PROFILE。API来源：https://developer.android.com/jetpack/androidx/releases/webkit 。借鉴Operit、Playwright MCP与browser-use的架构/观察思路，未复制其浏览器实现代码；具体参考与差异记录在独立文档仓库architecture/Browser.md。
+
+## HTTP 信息检索（V2-06）
+
+- Jsoup 1.23.2：HTML解析与清洗，MIT；https://jsoup.org/ 、https://github.com/jhy/jsoup 。
+- Readability4J 1.0.8：正文提取回退，Apache-2.0；https://github.com/dankito/Readability4J 。其README说明源自Mozilla Readability；上游及各文件许可按对应源码保留，https://github.com/mozilla/readability 。
+- desugar_jdk_libs 2.1.5：Android旧版本Java API兼容，Apache-2.0及随源码第三方声明；https://github.com/google/desugar_jdk_libs 。
+- 多源适配/统一结果参考SearXNG及Open WebUI的架构思路，没有复制其实现代码；搜索请求由原生OkHttp完成，不使用WebView或浏览器登录态。

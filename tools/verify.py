@@ -26,6 +26,8 @@ PACKAGE = 'ai.capri.app'
 RUNNER = PACKAGE + '.test/androidx.test.runner.AndroidJUnitRunner'
 PROFILES = {
     'local': [],
+    'retrieval': ['ai.capri.app.WebRetrievalDeviceTest'],
+    'web-research': ['ai.capri.app.WebResearchDeviceTest'],
     'tools': ['ai.capri.app.ToolsDeviceTest#toolsPanelUsesActualBuiltinsAndConnectedMcp'],
     'knowledge': ['ai.capri.app.KnowledgeDeviceTest'],
     'extensions': ['ai.capri.app.ExtensionsDeviceTest', 'ai.capri.app.ToolsDeviceTest'],

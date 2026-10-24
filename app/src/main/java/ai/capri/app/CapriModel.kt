@@ -23,6 +23,15 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
     internal val knowledge = ai.capri.app.knowledge.KnowledgeStore(File(app.filesDir, "knowledge"), store.workspace)
     internal val contextHistory = ai.capri.app.knowledge.ContextHistory(File(app.filesDir, "context-history"))
     private val knowledgeTool = ai.capri.app.knowledge.KnowledgeTool(knowledge)
+    internal val enhancements = ai.capri.app.retrieval.Enhancements(app)
+    internal val retrieval = ai.capri.app.retrieval.WebRetrieval(
+        ai.capri.app.retrieval.RetrievalStore(File(app.filesDir, "web-retrieval")), ai.capri.app.retrieval.PublicHttp(),
+        { store.config() }, { enhancements.enabled(ai.capri.app.retrieval.ProviderCapabilities.DEEPSEEK_WEB) },
+        { enhancements.record(it) }, {
+            val cm = app.getSystemService(android.net.ConnectivityManager::class.java)
+            val net = cm.activeNetwork; val link = net?.let(cm::getLinkProperties); val caps = cm.getNetworkCapabilities(net)
+            "$net|${link?.dnsServers}|${link?.httpProxy}|$caps"
+        })
     val runtime = PythonRuntime(app, store.workspace)
     internal val terminals = ai.capri.app.terminal.TerminalManager.get(app)
     internal val capabilityTool = CapabilityTool(app, runtime)
@@ -177,6 +186,8 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
             .put(ai.capri.app.terminal.TerminalContract.specification())
             .put(ai.capri.app.browser.BrowserContract.specification())
             .put(extensions.specification())
+            .put(ai.capri.app.retrieval.WebContract.search())
+            .put(ai.capri.app.retrieval.WebContract.read())
 
     private suspend fun respond(session: Session, config: ModelConfig) {
         val trace = PerformanceTrace(File(store.workspace.root(session.id), "metrics/${java.util.UUID.randomUUID()}.jsonl"))
@@ -187,7 +198,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
         var messages = if (saved != null) RecoveryMessages.forResume(saved) else JSONArray()
         val rules = getApplication<Application>().assets.open("persona/core.txt").bufferedReader().use { it.readText() } + "\n" +
             getApplication<Application>().assets.open("runtime/execution_rules.txt").bufferedReader().use { it.readText() } +
-            "\n" + extensions.guidance() + "\n本轮最多 $MAX_MODEL_CALLS 次模型请求（包含网络重试），这是客户端预算；验证任务后及时回复。\n" + ExecutionGuidance.text + "\n" + ai.capri.app.knowledge.KnowledgeTool.guidance
+            "\n" + extensions.guidance() + "\n本轮最多 $MAX_MODEL_CALLS 次模型请求（包含网络重试），这是客户端预算；验证任务后及时回复。\n" + ExecutionGuidance.text + "\n" + ai.capri.app.knowledge.KnowledgeTool.guidance + "\n" + ai.capri.app.retrieval.WebContract.guidance
         if (saved != null) {
             messages.getJSONObject(0).put("content", rules)
             val instruction = if (continuing) "接续检查点，已记录的工具不得因网络重试重复执行。"
@@ -308,6 +319,8 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                                 }
                                 JSONObject().put("status", "ok").put("attached", true).put("file", item).toString()
                             }
+                            "web_search" -> retrieval.search(session.id, args)
+                            "web_read" -> retrieval.read(session.id, args)
                             "knowledge" -> knowledgeTool.execute(session.id, session.messages.toList(), args)
                             "context_history" -> contextHistory.query(session.id, session.messages.toList(), args)
                             "python_env" -> pythonEnvironment.execute(session.id, args)

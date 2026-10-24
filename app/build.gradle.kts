@@ -17,6 +17,7 @@ android {
     }
     buildFeatures { compose = true }
     compileOptions {
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
@@ -35,6 +36,9 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.4")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("org.jsoup:jsoup:1.23.2")
+    implementation("net.dankito.readability4j:readability4j:1.0.8")
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
     implementation("androidx.core:core-ktx:1.17.0")
     implementation("androidx.webkit:webkit:1.14.0")
     implementation("io.modelcontextprotocol:kotlin-sdk-client:0.7.7")
