@@ -32,10 +32,15 @@ import org.json.JSONObject
     var editingExisting by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<JSONObject?>(null) }
     var skillBody by remember { mutableStateOf<String?>(null) }
+    var detailTitle by remember { mutableStateOf("Skill 指令") }
+    var upgradingPack by remember { mutableStateOf<String?>(null) }
+    var removingPack by remember { mutableStateOf<JSONObject?>(null) }
     val mcpScroll = rememberScrollState()
     val skillsScroll = rememberScrollState()
     val modelRevision by vm.updates.collectAsState()
-    val configs = remember(revision, modelRevision) { manager.store.configs() }
+    val allConfigs = remember(revision, modelRevision) { manager.store.configs() }
+    val configs = allConfigs.filter { it.optJSONObject("toolpack") == null }
+    val packs = allConfigs.filter { it.optJSONObject("toolpack") != null }
     val skills = remember(revision, modelRevision) { manager.store.skills() }
     fun action(block: suspend () -> String) {
         if (busy) return
@@ -56,14 +61,33 @@ import org.json.JSONObject
             }
         }
     }
+    val packImporter = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            val expected = upgradingPack
+            action {
+                val source = java.io.File(context.cacheDir, "toolpack-${java.util.UUID.randomUUID()}.zip")
+                try {
+                    context.contentResolver.openInputStream(uri).use { raw ->
+                        requireNotNull(raw)
+                        source.outputStream().use { output ->
+                            var total = 0L; val buffer = ByteArray(8192)
+                            while (true) { val n = raw.read(buffer); if (n < 0) break; total += n; require(total <= ExtensionInstall.MAX_BYTES) { "工具包ZIP超过10MB" }; output.write(buffer, 0, n) }
+                        }
+                    }
+                    manager.importToolPack(chat, source, expected != null, expected)
+                } finally { ai.capri.app.RuntimeFiles.delete(source) }
+            }
+        }
+    }
     Dialog(onDismissRequest = { if (!busy) onDismiss() }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(Modifier.fillMaxWidth().fillMaxHeight(.92f).padding(12.dp)) {
             Column(Modifier.padding(14.dp)) {
-                Text("MCP / Skills", fontSize = 21.sp)
+                Text("MCP / Skills / 工具包", fontSize = 21.sp)
                 Text("配置全局共享 · MCP连接属于当前会话", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
                 Row(Modifier.padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(selected = category == 0, onClick = { category = 0 }, label = { Text("MCP · ${configs.size}") })
                     FilterChip(selected = category == 1, onClick = { category = 1 }, label = { Text("Skills · ${skills.size}") })
+                    FilterChip(selected = category == 2, onClick = { category = 2 }, label = { Text("工具包 · ${packs.size}") })
                 }
                 Column(Modifier.weight(1f).verticalScroll(if (category == 0) mcpScroll else skillsScroll)) {
                     if (category == 0) {
@@ -91,7 +115,7 @@ import org.json.JSONObject
                                 TextButton(enabled = !busy, onClick = { action { manager.deactivate(chat, id); "已断开当前会话" } }) { Text("断开") }
                             }
                         }
-                    } else {
+                    } else if (category == 1) {
                         Text("仅名称与简介参与发现，正文和资源按需读取。支持标准SKILL.md或单技能ZIP；也可让Capri从工作区安装。导入后不自动执行脚本。", fontSize = 12.sp)
                         TextButton(enabled = !busy && vm.jobs.isEmpty(), onClick = { importer.launch(arrayOf("*/*")) }) { Text("导入 Skill / ZIP") }
                         skills.forEach { skill ->
@@ -102,8 +126,37 @@ import org.json.JSONObject
                             }
                             Text(skill.description, fontSize = 12.sp)
                             Row {
-                                TextButton(onClick = { skillBody = skill.directory.resolve("SKILL.md").readText() }) { Text("查看指令") }
+                                TextButton(onClick = { detailTitle = "Skill 指令"; skillBody = skill.directory.resolve("SKILL.md").readText() }) { Text("查看指令") }
                                 if (!skill.builtin) TextButton(enabled = !busy && vm.jobs.isEmpty(), onClick = { action { manager.store.removeSkill(skill.id); "已删除技能，已生成的会话产物保留" } }) { Text("删除") }
+                            }
+                        }
+                    } else {
+                        Text("安装含来源和版本清单的工具包ZIP。启用后按需连接；升级保留启停状态，重新验证后使用。", fontSize = 12.sp)
+                        TextButton(enabled = !busy && vm.jobs.isEmpty(), onClick = { upgradingPack = null; packImporter.launch(arrayOf("*/*")) }) { Text("安装工具包 ZIP") }
+                        packs.forEach { config ->
+                            val pack = config.getJSONObject("toolpack")
+                            val id = pack.getString("id"); val mcpId = config.getString("id")
+                            HorizontalDivider()
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Column(Modifier.weight(1f).padding(top = 12.dp)) {
+                                    Text(pack.getString("name"), color = MaterialTheme.colorScheme.primary)
+                                    Text("$id · ${pack.getString("version")}", fontSize = 11.sp)
+                                }
+                                Switch(checked = config.getBoolean("enabled"), enabled = !busy && vm.jobs.isEmpty(), onCheckedChange = { enabled -> action { manager.execute(chat, JSONObject().put("action", "enable_toolpack").put("id", id).put("enabled", enabled)) } })
+                            }
+                            Text(config.optString("description"), fontSize = 12.sp)
+                            Text("来源：${pack.getString("source")}", fontSize = 11.sp)
+                            Text("SHA256：${pack.getString("sha256")}", fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                            Text(manager.state(chat, mcpId), fontSize = 11.sp)
+                            Row {
+                                TextButton(onClick = { detailTitle = "工具包清单"; skillBody = java.io.File(manager.store.root, "mcp/$mcpId/current/toolpack.json").readText() }) { Text("清单") }
+                                TextButton(enabled = !busy && vm.jobs.isEmpty(), onClick = { editingExisting = true; editing = config }) { Text("凭据") }
+                                TextButton(enabled = !busy && config.getBoolean("enabled"), onClick = { action { manager.activate(chat, mcpId); manager.state(chat, mcpId) } }) { Text("连接") }
+                            }
+                            Row {
+                                TextButton(enabled = !busy && vm.jobs.isEmpty(), onClick = { upgradingPack = id; packImporter.launch(arrayOf("*/*")) }) { Text("升级") }
+                                TextButton(enabled = !busy && vm.jobs.isEmpty(), onClick = { removingPack = pack }) { Text("卸载") }
+                                TextButton(enabled = !busy, onClick = { action { manager.deactivate(chat, mcpId); "已断开当前会话" } }) { Text("断开") }
                             }
                         }
                     }
@@ -128,7 +181,7 @@ import org.json.JSONObject
                 Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState())) {
                     Text("MCP 配置", fontSize = 20.sp)
                     Text("command为参数数组；本地路径可用\${extension}、\${workspace}。依赖按需安装到扩展专属目录。tools可选，用原工具名筛选。", fontSize = 11.sp)
-                    OutlinedTextField(value = text, onValueChange = { text = it }, modifier = Modifier.fillMaxWidth().heightIn(min = 200.dp), label = { Text("配置 JSON") }, enabled = !saving)
+                    OutlinedTextField(value = text, onValueChange = { text = it }, modifier = Modifier.fillMaxWidth().heightIn(min = 200.dp), label = { Text("配置 JSON") }, enabled = !saving && original.optJSONObject("toolpack") == null)
                     OutlinedTextField(value = token, onValueChange = { token = it; replaceSecret = true }, label = { Text("Token / API Key（留空保留原值）") }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth(), enabled = !saving)
                     Row {
                         TextButton(enabled = !saving, onClick = { token = ""; replaceSecret = true }) { Text("移除已存凭据") }
@@ -156,11 +209,17 @@ import org.json.JSONObject
                             }
                         }) { Text("保存") }
                         TextButton(enabled = !saving, onClick = { editing = null }) { Text("取消") }
-                        TextButton(enabled = !saving && editingExisting, onClick = { action { manager.disconnectConfig(originalId); manager.store.removeConfig(originalId); "已删除配置" }; editing = null }) { Text("删除配置") }
+                        TextButton(enabled = !saving && editingExisting && original.optJSONObject("toolpack") == null, onClick = { action { manager.disconnectConfig(originalId); manager.store.removeConfig(originalId); "已删除配置" }; editing = null }) { Text("删除配置") }
                     }
                 }
             }
         }
     }
-    skillBody?.let { body -> AlertDialog(onDismissRequest = { skillBody = null }, title = { Text("Skill 指令") }, text = { Text(body, Modifier.heightIn(max = 450.dp).verticalScroll(rememberScrollState()), fontSize = 12.sp) }, confirmButton = { TextButton(onClick = { skillBody = null }) { Text("关闭") } }) }
+    skillBody?.let { body -> AlertDialog(onDismissRequest = { skillBody = null }, title = { Text(detailTitle) }, text = { Text(body, Modifier.heightIn(max = 450.dp).verticalScroll(rememberScrollState()), fontSize = 12.sp) }, confirmButton = { TextButton(onClick = { skillBody = null }) { Text("关闭") } }) }
+    removingPack?.let { pack ->
+        AlertDialog(onDismissRequest = { removingPack = null }, title = { Text("卸载 ${pack.getString("name")}") }, text = { Text("删除此工具包的配置、凭据、源码和依赖；当前连接会断开，工作区产物保留。") },
+            confirmButton = { TextButton(onClick = { removingPack = null; action { manager.execute(chat, JSONObject().put("action", "uninstall_toolpack").put("id", pack.getString("id"))) } }) { Text("卸载") } },
+            dismissButton = { TextButton(onClick = { removingPack = null }) { Text("取消") } })
+    }
+
 }

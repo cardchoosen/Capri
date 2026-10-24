@@ -22,4 +22,4 @@ description: 说明技能的能力和触发场景。
 
 更新已有用户技能时先用list/load_skill查看现有内容，在工作区保留需要的资源并修改，然后install_skill时传replace=true。内置技能由APK维护，不能覆盖；用户需要另一套方法时创建不同名称的技能。更新保留原启停状态；未启用时请用户在运行页启用，不声称已经可加载。
 
-安装结果返回installed后，用load_skill确认新正文和资源可读取；如有脚本，区分导入成功与脚本已验证。可以用真实的小任务检查指引是否有用，只修有证据的问题。安装不自动执行脚本、不新增Android权限。MCP接入使用extensions.install_mcp，配置与本地资源格式见 [references/extensions-install.md](references/extensions-install.md)，按需读取。
+安装结果返回installed后，用load_skill确认新正文和资源可读取；如有脚本，区分导入成功与脚本已验证。可以用真实的小任务检查指引是否有用，只修有证据的问题。安装不自动执行脚本、不新增Android权限。MCP接入使用extensions.install_mcp；有版本/来源和生命周期要求时使用工具包入口。MCP配置、本地资源及工具包清单格式见 [references/extensions-install.md](references/extensions-install.md)，按需读取。

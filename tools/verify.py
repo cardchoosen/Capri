@@ -26,7 +26,9 @@ PACKAGE = 'ai.capri.app'
 RUNNER = PACKAGE + '.test/androidx.test.runner.AndroidJUnitRunner'
 PROFILES = {
     'local': [],
-    'extensions': ['ai.capri.app.ExtensionsDeviceTest'],
+    'extensions': ['ai.capri.app.ExtensionsDeviceTest', 'ai.capri.app.ToolPackDeviceTest'],
+    'real-mcp': ['ai.capri.app.RealMcpDeviceTest#remoteContext7Public', 'ai.capri.app.RealMcpDeviceTest#localOfficialTime'],
+    'real-mcp-deepwiki': ['ai.capri.app.RealMcpDeviceTest#remoteDeepWiki'],
     'browser': ['ai.capri.app.BrowserDeviceTest'],
     'network': ['ai.capri.app.nativebridge.NativeDeviceTest#networkCheckReportsEvidenceAndReusesShortCache', 'ai.capri.app.BrowserDeviceTest'],
     'maintenance': ['ai.capri.app.EnvironmentMaintenanceDeviceTest'],

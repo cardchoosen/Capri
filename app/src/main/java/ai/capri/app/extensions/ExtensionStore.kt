@@ -93,7 +93,8 @@ internal class ExtensionStore(private val context: Context) {
     companion object { private val lock = Any() }
     init {
         synchronized(lock) {
-            if (!configFile.baseFile.exists()) writeConfigs(JSONArray().put(JSONObject("""{"id":"github","name":"GitHub","type":"remote","url":"https://api.githubcopilot.com/mcp/","enabled":false,"read_only":true,"description":"仓库、Issue与PR；绑定GitHub Token后按需连接","timeout_seconds":60}""")).put(JSONObject("""{"id":"context7","name":"Context7","type":"remote","url":"https://mcp.context7.com/mcp","enabled":false,"description":"软件库文档查询；配置服务Key后按需连接","timeout_seconds":60}""")))
+            if (!configFile.baseFile.exists()) writeConfigs(JSONArray().put(JSONObject("""{"id":"github","name":"GitHub","type":"remote","url":"https://api.githubcopilot.com/mcp/","enabled":false,"read_only":true,"description":"仓库、Issue与PR；绑定GitHub Token后按需连接","timeout_seconds":60}""")).put(JSONObject("""{"id":"context7","name":"Context7","type":"remote","url":"https://mcp.context7.com/mcp","enabled":false,"description":"软件库文档查询；支持匿名限流访问，可绑定Key","timeout_seconds":60}""")))
+            recoverToolPacks()
             for (id in context.assets.list("extensions/skills").orEmpty()) {
                 val dir = File(skillsRoot, id).apply { mkdirs() }
                 // Builtins update with the APK. User imports may not overwrite them.
@@ -150,6 +151,122 @@ internal class ExtensionStore(private val context: Context) {
             if (published) ai.capri.app.RuntimeFiles.delete(target)
             throw error
         } finally { ai.capri.app.RuntimeFiles.delete(stage) }
+    }
+    fun toolPacks(): List<JSONObject> = configs().filter { it.optJSONObject("toolpack") != null }
+    private fun clearActive(id: String) {
+        val edit = prefs.edit()
+        prefs.all.keys.filter { it.startsWith("active:") && it.endsWith(":$id") }.forEach { edit.remove(it) }
+        edit.apply()
+    }
+    /** Journal plus one temporary previous directory; startup completes or rolls back an interrupted switch. */
+    fun installToolPack(source: File, upgrade: Boolean): JSONObject = synchronized(lock) {
+        val staging = File(root, "toolpack-stage-${UUID.randomUUID()}")
+        try {
+            ExtensionInstall.copyDirectory(source, staging)
+            require(!File(staging, ".dependencies").exists()) { "工具包不能携带运行时依赖标记" }
+            val manifest = ToolPackPolicy.manifest(staging)
+            val id = ToolPackPolicy.mcpId(manifest.getString("id"))
+            val old = configs().firstOrNull { it.getString("id") == id }
+            if (upgrade) {
+                require(old?.optJSONObject("toolpack") != null) { "工具包尚未安装，不能升级" }
+                require(old!!.getJSONObject("toolpack").getString("version") != manifest.getString("version")) { "版本未变化；请明确新的版本号" }
+            } else require(old == null) { "同名扩展已存在；更新工具包请用upgrade_toolpack" }
+            val config = ExtensionPolicy.config(ToolPackPolicy.config(manifest, old?.optBoolean("enabled") ?: true))
+            if (old != null && hasSecret(id)) {
+                require(old.optString("type") == config.optString("type") && old.optString("url") == config.optString("url") && old.optString("credential", "stored") == config.optString("credential", "stored") && old.optString("token_env") == config.optString("token_env")) { "已绑定凭据的服务目标变化；请先在运行页移除凭据，再升级并重新绑定" }
+            }
+            val metadata = JSONObject().put("id", manifest.getString("id")).put("name", manifest.getString("name")).put("version", manifest.getString("version")).put("source", manifest.getString("source")).put("sha256", ToolPackPolicy.hash(staging))
+            config.put("toolpack", metadata)
+            val directory = File(root, "mcp/$id")
+            if (old == null) require(!directory.exists()) { "已有同名依赖目录，请先处理旧工具包" }
+            directory.mkdirs()
+            val journal = File(directory, ".toolpack-transaction.json")
+            require(!journal.exists()) { "工具包事务尚未恢复，请重启后处理" }
+            val next = File(directory, "current.next"); val current = File(directory, "current"); val previous = File(directory, "current.previous")
+            require(!next.exists() && !previous.exists()) { "工具包存在未恢复的目录" }
+            check(staging.renameTo(next))
+            try {
+                atomic(journal, JSONObject().put("config", config).put("had_previous", current.exists()).toString())
+                if (current.exists()) check(current.renameTo(previous))
+                check(next.renameTo(current))
+                saveConfig(config)
+                clearActive(id)
+                ai.capri.app.RuntimeFiles.delete(previous)
+                android.util.AtomicFile(journal).delete()
+            } catch (error: Exception) { runCatching { recoverToolPack(directory) }; throw error }
+            metadata
+        } finally { ai.capri.app.RuntimeFiles.delete(staging) }
+    }
+    fun setToolPackEnabled(id: String, enabled: Boolean) = synchronized(lock) {
+        val mcpId = ToolPackPolicy.mcpId(id)
+        val config = config(mcpId)
+        require(config.optJSONObject("toolpack")?.getString("id") == id)
+        saveConfig(config.put("enabled", enabled)); clearActive(mcpId)
+    }
+    fun removeToolPack(id: String) = synchronized(lock) {
+        val mcpId = ToolPackPolicy.mcpId(id)
+        val config = config(mcpId)
+        require(config.optJSONObject("toolpack")?.getString("id") == id) { "不是受管工具包" }
+        val directory = File(root, "mcp/$mcpId")
+        directory.mkdirs()
+        atomic(File(directory, ".toolpack-remove.json"), JSONObject().put("id", id).toString())
+        removeConfig(mcpId)
+        clearActive(mcpId)
+        clearToolPackRuntime(mcpId)
+        ai.capri.app.RuntimeFiles.delete(directory)
+    }
+    private fun clearToolPackRuntime(mcpId: String) {
+        val sessions = File(context.filesDir, "sessions")
+        require(!java.nio.file.Files.isSymbolicLink(sessions.toPath()))
+        sessions.listFiles().orEmpty().filter { it.isDirectory && !java.nio.file.Files.isSymbolicLink(it.toPath()) }.forEach { chat ->
+            val extensions = File(chat, "extensions")
+            require(!java.nio.file.Files.isSymbolicLink(extensions.toPath())) { "会话扩展目录异常，卸载尚未完成" }
+            ai.capri.app.RuntimeFiles.delete(File(extensions, mcpId))
+        }
+    }
+    private fun recoverToolPacks() {
+        File(root, "mcp").listFiles().orEmpty().filter { it.isDirectory && !java.nio.file.Files.isSymbolicLink(it.toPath()) && it.name.startsWith("pack-") }.forEach { directory ->
+            // Leave an unrecoverable transaction visible on disk; never activate its partial contents.
+            runCatching { recoverToolPack(directory) }
+        }
+    }
+    private fun recoverToolPack(directory: File) {
+        val removing = android.util.AtomicFile(File(directory, ".toolpack-remove.json"))
+        if (!removing.baseFile.exists() && !File(removing.baseFile.path + ".bak").exists() && File(removing.baseFile.path + ".new").exists()) removing.delete()
+        if (removing.baseFile.exists() || File(removing.baseFile.path + ".bak").exists()) {
+            val id = JSONObject(removing.openRead().bufferedReader().use { it.readText() }).getString("id")
+            require(ToolPackPolicy.mcpId(id) == directory.name)
+            val existing = configs().firstOrNull { it.getString("id") == directory.name }
+            require(existing == null || existing.optJSONObject("toolpack")?.optString("id") == id)
+            removeConfig(directory.name); clearActive(directory.name); clearToolPackRuntime(directory.name); ai.capri.app.RuntimeFiles.delete(directory); return
+        }
+        val file = android.util.AtomicFile(File(directory, ".toolpack-transaction.json"))
+        if (!file.baseFile.exists() && !File(file.baseFile.path + ".bak").exists()) {
+            // No committed journal means switching current was never allowed to start.
+            require(!File(directory, "current.previous").exists()) { "工具包恢复记录缺失" }
+            ai.capri.app.RuntimeFiles.delete(File(directory, "current.next")); file.delete()
+            if (configs().none { it.getString("id") == directory.name } && directory.listFiles().orEmpty().isEmpty()) ai.capri.app.RuntimeFiles.delete(directory)
+            return
+        }
+        val journal = JSONObject(file.openRead().bufferedReader().use { it.readText() })
+        val config = journal.getJSONObject("config")
+        require(config.getString("id") == directory.name && ToolPackPolicy.mcpId(config.getJSONObject("toolpack").getString("id")) == directory.name)
+        val current = File(directory, "current"); val previous = File(directory, "current.previous")
+        val published = configs().firstOrNull { it.getString("id") == directory.name }?.optJSONObject("toolpack")?.optString("sha256") == config.getJSONObject("toolpack").getString("sha256")
+        if (published) {
+            require(current.isDirectory) { "工具包当前目录缺失" }
+            ai.capri.app.RuntimeFiles.delete(previous); clearActive(directory.name)
+        } else if (previous.exists()) {
+            ai.capri.app.RuntimeFiles.delete(current); check(previous.renameTo(current))
+        } else if (!journal.getBoolean("had_previous")) ai.capri.app.RuntimeFiles.delete(current)
+        ai.capri.app.RuntimeFiles.delete(File(directory, "current.next")); file.delete()
+        if (configs().none { it.getString("id") == directory.name } && directory.listFiles().orEmpty().isEmpty()) ai.capri.app.RuntimeFiles.delete(directory)
+    }
+    fun checkToolPackReady(id: String) {
+        if (id.startsWith("pack-")) {
+            val directory = File(root, "mcp/$id")
+            require(listOf(".toolpack-transaction.json", ".toolpack-remove.json").none { File(directory, it).exists() || File(directory, "$it.bak").exists() || File(directory, "$it.new").exists() }) { "工具包安装/卸载未完成，请重启恢复" }
+        }
     }
     fun removeConfig(id: String) = synchronized(lock) { writeConfigs(JSONArray(configs().filterNot { it.getString("id") == id })); secretPrefs.edit().remove(id).apply(); Unit }
     fun skills(): List<SkillInfo> = synchronized(lock) { skillsRoot.listFiles().orEmpty().filter { it.isDirectory }.mapNotNull {

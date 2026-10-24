@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "id": "context7-tools",
+  "name": "Context7 文档工具",
+  "version": "0.1.0",
+  "source": "https://github.com/cardchoosen/Capri/tree/main/examples/toolpacks/context7",
+  "description": "通过 Context7 查询软件库文档；支持匿名限流访问，可在工具包凭据页绑定自己的 Key。",
+  "mcp": {
+    "type": "remote",
+    "url": "https://mcp.context7.com/mcp",
+    "timeout_seconds": 90
+  }
+}
