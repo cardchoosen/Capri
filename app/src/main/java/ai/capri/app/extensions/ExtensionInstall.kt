@@ -62,22 +62,19 @@ internal object ExtensionInstall {
     }
     fun specification(): JSONObject {
         fun string(description: String) = JSONObject().put("type", "string").put("description", description)
-        val actions = listOf("list", "search", "load_skill", "read_resource", "activate", "deactivate", "install_skill", "install_mcp", "install_toolpack", "upgrade_toolpack", "enable_toolpack", "uninstall_toolpack")
+        val actions = listOf("list", "search", "load_skill", "read_resource", "activate", "deactivate", "install_skill", "install_mcp")
         val properties = JSONObject()
             .put("action", JSONObject().put("type", "string").put("enum", JSONArray(actions)))
             .put("query", string("search的关键词"))
-            .put("id", string("已安装MCP配置/技能ID，或enable_toolpack/uninstall_toolpack的工具包ID（不加pack-前缀）"))
-            .put("path", string("read_resource为技能内相对路径；install_skill为当前工作区的SKILL.md、单技能ZIP或目录；install_mcp为当前工作区的MCP配置JSON。install_toolpack/upgrade_toolpack为含toolpack.json的目录或ZIP；安装也接受/workspace/前缀。"))
+            .put("id", string("已安装MCP配置/技能ID"))
+            .put("path", string("read_resource为技能内相对路径；install_skill为当前工作区的SKILL.md、单技能ZIP或目录；install_mcp为当前工作区的MCP配置JSON。安装也接受/workspace/前缀。"))
             .put("offset", JSONObject().put("type", "integer").put("minimum", 0).put("description", "read_resource字符偏移，默认0"))
-            .put("enabled", JSONObject().put("type", "boolean").put("description", "enable_toolpack设置启停；不自动连接"))
             .put("replace", JSONObject().put("type", "boolean").put("description", "仅install_skill：明确更新已有用户技能时设true；默认false，不能覆盖内置技能"))
             .put("source_path", string("仅install_mcp：可选本地服务源码目录，复制到持久扩展目录，command通过\${extension}引用；不要包含venv/node_modules，依赖用配置声明。远端MCP不可提供。"))
         val branches = JSONArray().put(JSONObject().put("properties", JSONObject().put("action", JSONObject().put("enum", JSONArray(actions.take(6))))))
-        for (action in listOf("install_skill", "install_mcp", "install_toolpack", "upgrade_toolpack")) branches.put(JSONObject().put("properties", JSONObject().put("action", JSONObject().put("const", action))).put("required", JSONArray(listOf("path"))))
-        branches.put(JSONObject().put("properties", JSONObject().put("action", JSONObject().put("const", "enable_toolpack"))).put("required", JSONArray(listOf("id", "enabled"))))
-        branches.put(JSONObject().put("properties", JSONObject().put("action", JSONObject().put("const", "uninstall_toolpack"))).put("required", JSONArray(listOf("id"))))
+        for (action in listOf("install_skill", "install_mcp")) branches.put(JSONObject().put("properties", JSONObject().put("action", JSONObject().put("const", action))).put("required", JSONArray(listOf("path"))))
         return JSONObject().put("type", "function").put("function", JSONObject().put("name", "extensions")
-            .put("description", "发现/加载Skills、连接MCP，或从当前工作区为自己安装Skill和MCP。install_skill支持SKILL.md/ZIP/目录，跨会话可发现；install_mcp读取{id,name,type,...} JSON，remote提供HTTPS url，local提供command参数数组及可选python_packages/npm_packages。默认enabled=true，安装不连接或执行代码，之后activate安装声明依赖并连接；凭据在运行页绑定，配置不含密钥。同名MCP拒绝覆盖；安装失败先list核验，不能把安装成功当作连接/工具调用成功。工具包是含schema_version=1/id/name/version/source(HTTPS)/mcp配置的toolpack.json加源码资源，使用MCP参数/结果协议；install_toolpack、upgrade_toolpack读取目录/ZIP，enable_toolpack启停、uninstall_toolpack卸载配置/源码/依赖，保留聊天产物。创建技能或工具包先load_skill skill-creator并按需读取安装参考。")
+            .put("description", "发现/加载Skills、连接MCP，或从当前工作区为自己安装Skill和MCP。install_skill支持SKILL.md/ZIP/目录，跨会话可发现；install_mcp读取{id,name,type,...} JSON，remote提供HTTPS url，local提供command参数数组及可选python_packages/npm_packages。默认enabled=true，安装不连接或执行代码，之后activate安装声明依赖并连接；凭据在运行页绑定，配置不含密钥。同名MCP拒绝覆盖；安装失败先list核验，不能把安装成功当作连接/工具调用成功。创建技能先load_skill skill-creator并按需读取安装参考。")
             .put("parameters", JSONObject().put("type", "object").put("properties", properties).put("required", JSONArray(listOf("action"))).put("additionalProperties", false).put("oneOf", branches)))
     }
 }

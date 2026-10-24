@@ -27,7 +27,7 @@ RUNNER = PACKAGE + '.test/androidx.test.runner.AndroidJUnitRunner'
 PROFILES = {
     'local': [],
     'knowledge': ['ai.capri.app.KnowledgeDeviceTest'],
-    'extensions': ['ai.capri.app.ExtensionsDeviceTest', 'ai.capri.app.ToolPackDeviceTest'],
+    'extensions': ['ai.capri.app.ExtensionsDeviceTest', 'ai.capri.app.ToolsDeviceTest'],
     'real-mcp': ['ai.capri.app.RealMcpDeviceTest#remoteContext7Public', 'ai.capri.app.RealMcpDeviceTest#localOfficialTime'],
     'real-mcp-deepwiki': ['ai.capri.app.RealMcpDeviceTest#remoteDeepWiki'],
     'browser': ['ai.capri.app.BrowserDeviceTest'],

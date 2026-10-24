@@ -7,6 +7,6 @@ Android 原生个人 AI Agent，在手机上执行任务。
 - Android 原生工具与浏览器操作
 - 全局 Git / SSH 配置
 - MCP 扩展与按需加载的 Skills
-- 版本化工具包的安装、启停、升级与卸载
+- Tools 能力目录，查看内置与已连接 MCP 工具
 - 可追溯的历史摘录、分作用域的长期记忆与文本资料检索
 - Markdown、文件、图片与 GIF 展示

@@ -164,6 +164,20 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
     }
     private fun tool(name: String, description: String, properties: JSONObject, required: List<String>) = JSONObject().put("type", "function").put("function", JSONObject().put("name", name).put("description", description).put("parameters", JSONObject().put("type", "object").put("properties", properties).put("required", JSONArray(required))))
     private fun props(vararg names: String) = JSONObject().apply { names.forEach { put(it, JSONObject().put("type", "string")) } }
+    internal fun builtinTools(): JSONArray = JSONArray().put(tool("profile_search", "仅在用户询问你自身身份、角色、经历、外观时检索核心档案。", props("query"), listOf("query")))
+            .put(tool("list_files", "列出当前会话工作区文件", props(), emptyList()))
+            .put(tool("read_file", "读取当前工作区文本文件", props("path"), listOf("path")))
+            .put(tool("write_file", "写入当前工作区文本文件", props("path", "content"), listOf("path", "content")))
+            .put(tool("send_file", "把当前会话工作区已有文件发送到聊天。PNG/JPEG/GIF/WebP内联显示（GIF可播放）；其他文件可分享导出。最大20MB，不发送私钥或凭据。path为相对路径或/workspace/路径，caption可选。", props("path", "caption"), listOf("path")))
+            .put(ai.capri.app.knowledge.KnowledgeTool.specification())
+            .put(ai.capri.app.knowledge.KnowledgeTool.historySpecification())
+            .put(ShortTaskContract.specification())
+            .put(CapabilityContract.specification())
+            .put(androidTools.specification())
+            .put(ai.capri.app.terminal.TerminalContract.specification())
+            .put(ai.capri.app.browser.BrowserContract.specification())
+            .put(extensions.specification())
+
     private suspend fun respond(session: Session, config: ModelConfig) {
         val trace = PerformanceTrace(File(store.workspace.root(session.id), "metrics/${java.util.UUID.randomUUID()}.jsonl"))
         var outcome = PerformanceTrace.Status.ERROR
@@ -186,19 +200,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
         checkpoint()
 
         withContext(Dispatchers.IO) { extensions.restore(session.id) }
-        val baseTools = JSONArray().put(tool("profile_search", "仅在用户询问你自身身份、角色、经历、外观时检索核心档案。", props("query"), listOf("query")))
-            .put(tool("list_files", "列出当前会话工作区文件", props(), emptyList()))
-            .put(tool("read_file", "读取当前工作区文本文件", props("path"), listOf("path")))
-            .put(tool("write_file", "写入当前工作区文本文件", props("path", "content"), listOf("path", "content")))
-            .put(tool("send_file", "把当前会话工作区已有文件发送到聊天。PNG/JPEG/GIF/WebP内联显示（GIF可播放）；其他文件可分享导出。最大20MB，不发送私钥或凭据。path为相对路径或/workspace/路径，caption可选。", props("path", "caption"), listOf("path")))
-            .put(ai.capri.app.knowledge.KnowledgeTool.specification())
-            .put(ai.capri.app.knowledge.KnowledgeTool.historySpecification())
-            .put(ShortTaskContract.specification())
-            .put(CapabilityContract.specification())
-            .put(androidTools.specification())
-            .put(ai.capri.app.terminal.TerminalContract.specification())
-            .put(ai.capri.app.browser.BrowserContract.specification())
-            .put(extensions.specification())
+        val baseTools = builtinTools()
         val requests = ModelRequests(MAX_MODEL_CALLS)
         while (requests.used < MAX_MODEL_CALLS) {
             currentCoroutineContext().ensureActive()

@@ -19,7 +19,7 @@ internal fun toolLabel(name: String, args: JSONObject?): String = when (name) {
         "check" -> "检查 Python 依赖"; else -> "诊断 Python 环境"
     }
     "environment", "environment_check" -> when (args?.optString("action")) { "prepare" -> "准备任务环境"; "verify" -> "验证任务环境"; else -> "检查任务环境" }
-    "extensions" -> when (args?.optString("action")) { "install_skill" -> "安装技能"; "install_mcp" -> "安装 MCP"; "install_toolpack" -> "安装工具包"; "upgrade_toolpack" -> "升级工具包"; "enable_toolpack" -> "启停工具包"; "uninstall_toolpack" -> "卸载工具包"; "load_skill" -> "加载技能"; "activate" -> "连接扩展"; "deactivate" -> "断开扩展"; "read_resource" -> "读取技能资源"; else -> "查找扩展" }
+    "extensions" -> when (args?.optString("action")) { "install_skill" -> "安装技能"; "install_mcp" -> "安装 MCP"; "load_skill" -> "加载技能"; "activate" -> "连接扩展"; "deactivate" -> "断开扩展"; "read_resource" -> "读取技能资源"; else -> "查找扩展" }
     "python_run" -> "运行 Python"; "list_files" -> "查看工作区"; "read_file" -> "读取文件"
     "write_file" -> "写入文件"; "send_file" -> "发送附件"; else -> name
 }

@@ -230,7 +230,7 @@ class MainActivity : ComponentActivity() {
                             OutlinedButton(onClick = { gitAccounts = true }) { Text("Git 账号 · 全局") }
                             Text("设备、网络、Wi-Fi、定位、应用与系统操作统一由 android 工具调用。", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(vertical = 12.dp))
                             Text("ON DEVICE / ARM64", color = Green, fontSize = 11.sp, fontFamily = FontFamily.Monospace, letterSpacing = 2.sp)
-                            OutlinedButton(onClick = { extensionsPanel = true }) { Text("MCP / Skills · 扩展管理") }
+                            OutlinedButton(onClick = { extensionsPanel = true }) { Text("能力与扩展 · Tools / MCP / Skills") }
                             OutlinedButton(onClick = { knowledgePanel = true }) { Text("上下文 / 记忆 / 文档") }
                             EnvironmentPanel(vm)
                             Spacer(Modifier.height(24.dp)); Text("会话独立目录", color = Green); Text("workspace / 任务文件\nhome / 用户目录\ntmp / 临时文件\nruns / 脚本与执行日志", color = Muted, lineHeight = 28.sp, modifier = Modifier.padding(vertical = 12.dp), fontFamily = FontFamily.Monospace)

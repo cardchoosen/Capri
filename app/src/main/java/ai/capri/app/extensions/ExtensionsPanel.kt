@@ -1,6 +1,7 @@
 package ai.capri.app.extensions
 
 import ai.capri.app.CapriModel
+import ai.capri.app.toolLabel
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
@@ -21,11 +22,11 @@ import org.json.JSONObject
 
 @Composable internal fun ExtensionsPanel(vm: CapriModel, onDismiss: () -> Unit) {
     val manager = vm.extensions
-    val chat = vm.selected
+    val chat = remember { vm.selected }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var revision by remember { mutableIntStateOf(0) }
-    var category by remember { mutableIntStateOf(0) }
+    var category by remember { mutableIntStateOf(2) }
     var busy by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("") }
     var job by remember { mutableStateOf<Job?>(null) }
@@ -33,14 +34,16 @@ import org.json.JSONObject
     var editing by remember { mutableStateOf<JSONObject?>(null) }
     var skillBody by remember { mutableStateOf<String?>(null) }
     var detailTitle by remember { mutableStateOf("Skill 指令") }
-    var upgradingPack by remember { mutableStateOf<String?>(null) }
-    var removingPack by remember { mutableStateOf<JSONObject?>(null) }
+    var toolDetail by remember { mutableStateOf<CatalogTool?>(null) }
+    var toolQuery by remember { mutableStateOf("") }
+    var toolSource by remember { mutableIntStateOf(0) }
+    var tools by remember { mutableStateOf<List<CatalogTool>>(emptyList()) }
+    val toolsScroll = rememberScrollState()
     val mcpScroll = rememberScrollState()
     val skillsScroll = rememberScrollState()
     val modelRevision by vm.updates.collectAsState()
     val allConfigs = remember(revision, modelRevision) { manager.store.configs() }
-    val configs = allConfigs.filter { it.optJSONObject("toolpack") == null }
-    val packs = allConfigs.filter { it.optJSONObject("toolpack") != null }
+    val configs = allConfigs
     val skills = remember(revision, modelRevision) { manager.store.skills() }
     fun action(block: suspend () -> String) {
         if (busy) return
@@ -61,35 +64,23 @@ import org.json.JSONObject
             }
         }
     }
-    val packImporter = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) {
-            val expected = upgradingPack
-            action {
-                val source = java.io.File(context.cacheDir, "toolpack-${java.util.UUID.randomUUID()}.zip")
-                try {
-                    context.contentResolver.openInputStream(uri).use { raw ->
-                        requireNotNull(raw)
-                        source.outputStream().use { output ->
-                            var total = 0L; val buffer = ByteArray(8192)
-                            while (true) { val n = raw.read(buffer); if (n < 0) break; total += n; require(total <= ExtensionInstall.MAX_BYTES) { "工具包ZIP超过10MB" }; output.write(buffer, 0, n) }
-                        }
-                    }
-                    manager.importToolPack(chat, source, expected != null, expected)
-                } finally { ai.capri.app.RuntimeFiles.delete(source) }
-            }
-        }
+    LaunchedEffect(revision, modelRevision, chat) {
+        tools = withContext(Dispatchers.IO) { ToolsCatalog.entries(vm.builtinTools(), manager.specifications(chat),
+            { toolLabel(it, null) }, { manager.label(chat, it) }) }
     }
+    // Connections may close or expire while the panel is idle; re-read without connecting services.
+    LaunchedEffect(chat) { while (isActive) { delay(2000); revision++ } }
     Dialog(onDismissRequest = { if (!busy) onDismiss() }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(Modifier.fillMaxWidth().fillMaxHeight(.92f).padding(12.dp)) {
             Column(Modifier.padding(14.dp)) {
-                Text("MCP / Skills / 工具包", fontSize = 21.sp)
-                Text("配置全局共享 · MCP连接属于当前会话", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                Text("能力与扩展", fontSize = 21.sp)
+                Text("Tools 查看实际能力 · MCP 管理连接 · Skills 提供任务方法", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
                 Row(Modifier.padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(selected = category == 2, onClick = { category = 2 }, label = { Text("Tools · ${tools.size}") })
                     FilterChip(selected = category == 0, onClick = { category = 0 }, label = { Text("MCP · ${configs.size}") })
                     FilterChip(selected = category == 1, onClick = { category = 1 }, label = { Text("Skills · ${skills.size}") })
-                    FilterChip(selected = category == 2, onClick = { category = 2 }, label = { Text("工具包 · ${packs.size}") })
                 }
-                Column(Modifier.weight(1f).verticalScroll(if (category == 0) mcpScroll else skillsScroll)) {
+                Column(Modifier.weight(1f).verticalScroll(when (category) { 0 -> mcpScroll; 1 -> skillsScroll; else -> toolsScroll })) {
                     if (category == 0) {
                         Text("默认模板尚未连接；启用后可由Capri按任务激活。支持stdio / Streamable HTTP；协议2025-03-26、2024-11-05。", fontSize = 12.sp)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -131,34 +122,23 @@ import org.json.JSONObject
                             }
                         }
                     } else {
-                        Text("安装含来源和版本清单的工具包ZIP。启用后按需连接；升级保留启停状态，重新验证后使用。", fontSize = 12.sp)
-                        TextButton(enabled = !busy && vm.jobs.isEmpty(), onClick = { upgradingPack = null; packImporter.launch(arrayOf("*/*")) }) { Text("安装工具包 ZIP") }
-                        packs.forEach { config ->
-                            val pack = config.getJSONObject("toolpack")
-                            val id = pack.getString("id"); val mcpId = config.getString("id")
-                            HorizontalDivider()
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Column(Modifier.weight(1f).padding(top = 12.dp)) {
-                                    Text(pack.getString("name"), color = MaterialTheme.colorScheme.primary)
-                                    Text("$id · ${pack.getString("version")}", fontSize = 11.sp)
-                                }
-                                Switch(checked = config.getBoolean("enabled"), enabled = !busy && vm.jobs.isEmpty(), onCheckedChange = { enabled -> action { manager.execute(chat, JSONObject().put("action", "enable_toolpack").put("id", id).put("enabled", enabled)) } })
-                            }
-                            Text(config.optString("description"), fontSize = 12.sp)
-                            Text("来源：${pack.getString("source")}", fontSize = 11.sp)
-                            Text("SHA256：${pack.getString("sha256")}", fontSize = 10.sp, fontFamily = FontFamily.Monospace)
-                            Text(manager.state(chat, mcpId), fontSize = 11.sp)
-                            Row {
-                                TextButton(onClick = { detailTitle = "工具包清单"; skillBody = java.io.File(manager.store.root, "mcp/$mcpId/current/toolpack.json").readText() }) { Text("清单") }
-                                TextButton(enabled = !busy && vm.jobs.isEmpty(), onClick = { editingExisting = true; editing = config }) { Text("凭据") }
-                                TextButton(enabled = !busy && config.getBoolean("enabled"), onClick = { action { manager.activate(chat, mcpId); manager.state(chat, mcpId) } }) { Text("连接") }
-                            }
-                            Row {
-                                TextButton(enabled = !busy && vm.jobs.isEmpty(), onClick = { upgradingPack = id; packImporter.launch(arrayOf("*/*")) }) { Text("升级") }
-                                TextButton(enabled = !busy && vm.jobs.isEmpty(), onClick = { removingPack = pack }) { Text("卸载") }
-                                TextButton(enabled = !busy, onClick = { action { manager.deactivate(chat, mcpId); "已断开当前会话" } }) { Text("断开") }
-                            }
+                        Text("当前会话可提供给模型的工具。内置工具调用时仍需检查权限与环境；MCP 工具仅在连接成功后显示，断开后移除。这里展示工具说明，不会执行工具。", fontSize = 12.sp)
+                        OutlinedTextField(toolQuery, { toolQuery = it }, label = { Text("搜索工具名称、用途或来源") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            listOf("全部", "内置", "MCP 工具").forEachIndexed { index, name -> FilterChip(selected = toolSource == index, onClick = { toolSource = index }, label = { Text(name) }) }
                         }
+                        Text("${tools.count { !it.mcp }} 个内置 · ${tools.count { it.mcp }} 个 MCP 工具", fontSize = 12.sp)
+                        val matches = ToolsCatalog.filter(tools, toolQuery, toolSource)
+                        if (matches.isEmpty()) Text(if (toolSource == 2 && tools.none { it.mcp }) "当前会话尚无已连接的 MCP 工具，请在 MCP 页连接服务。" else "没有匹配的工具。", fontSize = 12.sp)
+                        matches.forEach { item ->
+                            HorizontalDivider()
+                            Text(item.title, Modifier.padding(top = 12.dp), color = MaterialTheme.colorScheme.primary)
+                            Text(item.name, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                            Text("${item.source} · 已加入当前会话工具集", fontSize = 11.sp)
+                            Text(item.description, fontSize = 12.sp)
+                            TextButton(onClick = { toolDetail = item }) { Text("用途与参数") }
+                        }
+
                     }
                 }
                 if (status.isNotBlank()) Text(status, Modifier.padding(vertical = 8.dp), fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
@@ -181,7 +161,7 @@ import org.json.JSONObject
                 Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState())) {
                     Text("MCP 配置", fontSize = 20.sp)
                     Text("command为参数数组；本地路径可用\${extension}、\${workspace}。依赖按需安装到扩展专属目录。tools可选，用原工具名筛选。", fontSize = 11.sp)
-                    OutlinedTextField(value = text, onValueChange = { text = it }, modifier = Modifier.fillMaxWidth().heightIn(min = 200.dp), label = { Text("配置 JSON") }, enabled = !saving && original.optJSONObject("toolpack") == null)
+                    OutlinedTextField(value = text, onValueChange = { text = it }, modifier = Modifier.fillMaxWidth().heightIn(min = 200.dp), label = { Text("配置 JSON") }, enabled = !saving)
                     OutlinedTextField(value = token, onValueChange = { token = it; replaceSecret = true }, label = { Text("Token / API Key（留空保留原值）") }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth(), enabled = !saving)
                     Row {
                         TextButton(enabled = !saving, onClick = { token = ""; replaceSecret = true }) { Text("移除已存凭据") }
@@ -209,17 +189,28 @@ import org.json.JSONObject
                             }
                         }) { Text("保存") }
                         TextButton(enabled = !saving, onClick = { editing = null }) { Text("取消") }
-                        TextButton(enabled = !saving && editingExisting && original.optJSONObject("toolpack") == null, onClick = { action { manager.disconnectConfig(originalId); manager.store.removeConfig(originalId); "已删除配置" }; editing = null }) { Text("删除配置") }
+                        TextButton(enabled = !saving && editingExisting, onClick = { action { manager.disconnectConfig(originalId); manager.store.removeConfig(originalId); "已删除配置" }; editing = null }) { Text("删除配置") }
                     }
                 }
             }
         }
     }
     skillBody?.let { body -> AlertDialog(onDismissRequest = { skillBody = null }, title = { Text(detailTitle) }, text = { Text(body, Modifier.heightIn(max = 450.dp).verticalScroll(rememberScrollState()), fontSize = 12.sp) }, confirmButton = { TextButton(onClick = { skillBody = null }) { Text("关闭") } }) }
-    removingPack?.let { pack ->
-        AlertDialog(onDismissRequest = { removingPack = null }, title = { Text("卸载 ${pack.getString("name")}") }, text = { Text("删除此工具包的配置、凭据、源码和依赖；当前连接会断开，工作区产物保留。") },
-            confirmButton = { TextButton(onClick = { removingPack = null; action { manager.execute(chat, JSONObject().put("action", "uninstall_toolpack").put("id", pack.getString("id"))) } }) { Text("卸载") } },
-            dismissButton = { TextButton(onClick = { removingPack = null }) { Text("取消") } })
+    toolDetail?.let { item ->
+        Dialog(onDismissRequest = { toolDetail = null }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+            Surface(Modifier.fillMaxWidth().fillMaxHeight(.9f).padding(12.dp)) {
+                Column(Modifier.padding(16.dp)) {
+                    Text(item.title, fontSize = 20.sp)
+                    Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+                        Text(item.name, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+                        Text(item.source, fontSize = 12.sp)
+                        Text(item.description, Modifier.padding(vertical = 12.dp), fontSize = 13.sp)
+                        Text("参数定义", fontSize = 16.sp)
+                        Text(item.parameters.toString(2), fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+                    }
+                    TextButton(onClick = { toolDetail = null }) { Text("返回工具列表") }
+                }
+            }
+        }
     }
-
 }
