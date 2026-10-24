@@ -34,8 +34,9 @@ import org.json.JSONObject
     var skillBody by remember { mutableStateOf<String?>(null) }
     val mcpScroll = rememberScrollState()
     val skillsScroll = rememberScrollState()
-    val configs = remember(revision) { manager.store.configs() }
-    val skills = remember(revision) { manager.store.skills() }
+    val modelRevision by vm.updates.collectAsState()
+    val configs = remember(revision, modelRevision) { manager.store.configs() }
+    val skills = remember(revision, modelRevision) { manager.store.skills() }
     fun action(block: suspend () -> String) {
         if (busy) return
         job = scope.launch { busy = true; status = "处理中…"
@@ -91,7 +92,7 @@ import org.json.JSONObject
                             }
                         }
                     } else {
-                        Text("仅名称与简介参与发现，正文和资源按需读取。支持标准SKILL.md或单技能ZIP。导入后不自动执行脚本。", fontSize = 12.sp)
+                        Text("仅名称与简介参与发现，正文和资源按需读取。支持标准SKILL.md或单技能ZIP；也可让Capri从工作区安装。导入后不自动执行脚本。", fontSize = 12.sp)
                         TextButton(enabled = !busy && vm.jobs.isEmpty(), onClick = { importer.launch(arrayOf("*/*")) }) { Text("导入 Skill / ZIP") }
                         skills.forEach { skill ->
                             HorizontalDivider()

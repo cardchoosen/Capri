@@ -97,12 +97,23 @@ internal class ExtensionStore(private val context: Context) {
             for (id in context.assets.list("extensions/skills").orEmpty()) {
                 val dir = File(skillsRoot, id).apply { mkdirs() }
                 // Builtins update with the APK. User imports may not overwrite them.
-                val body = context.assets.open("extensions/skills/$id/SKILL.md").bufferedReader().use { it.readText() }
-                if (File(dir, "SKILL.md").readTextOrNull() != body) atomic(File(dir, "SKILL.md"), body)
+                copyBuiltin("extensions/skills/$id", dir)
             }
         }
     }
-    private fun File.readTextOrNull() = if (isFile) readText() else null
+    private fun copyBuiltin(asset: String, target: File) {
+        val children = context.assets.list(asset).orEmpty()
+        if (children.isNotEmpty()) {
+            target.mkdirs()
+            children.forEach { copyBuiltin("$asset/$it", File(target, it)) }
+        } else {
+            val bytes = context.assets.open(asset).use { it.readBytes() }
+            if (!target.isFile || !target.readBytes().contentEquals(bytes)) {
+                val af = AtomicFile(target); val output = af.startWrite()
+                try { output.write(bytes); af.finishWrite(output) } catch (error: Exception) { af.failWrite(output); throw error }
+            }
+        }
+    }
     private fun atomic(file: File, text: String) {
         val af = AtomicFile(file); val output = af.startWrite()
         try { output.write(text.toByteArray()); af.finishWrite(output) } catch (e: Exception) { af.failWrite(output); throw e }
@@ -119,15 +130,37 @@ internal class ExtensionStore(private val context: Context) {
         require(all.size <= 100) { "最多100个MCP配置" }
         writeConfigs(JSONArray(all))
     }
+    /** Add-only publication: model installation cannot overwrite an existing definition or credential. */
+    fun installConfig(raw: JSONObject, source: File? = null) = synchronized(lock) {
+        val config = ExtensionPolicy.config(raw)
+        val id = config.getString("id")
+        require(configs().none { it.getString("id") == id }) { "同名MCP已存在，请先list核验；安装不会覆盖已有配置" }
+        require(source == null || config.getString("type") == "local")
+        val target = File(root, "mcp/$id")
+        require(!target.exists()) { "该ID已有依赖目录，请使用其他ID或在运行页处理旧配置" }
+        val stage = File(root, "install-${UUID.randomUUID()}").apply { mkdirs() }
+        var published = false
+        try {
+            val current = File(stage, "current")
+            if (source != null) ExtensionInstall.copyDirectory(source, current) else check(current.mkdirs())
+            target.parentFile!!.mkdirs()
+            check(stage.renameTo(target)) { "MCP源码安装未完成" }; published = true
+            saveConfig(config)
+        } catch (error: Exception) {
+            if (published) ai.capri.app.RuntimeFiles.delete(target)
+            throw error
+        } finally { ai.capri.app.RuntimeFiles.delete(stage) }
+    }
     fun removeConfig(id: String) = synchronized(lock) { writeConfigs(JSONArray(configs().filterNot { it.getString("id") == id })); secretPrefs.edit().remove(id).apply(); Unit }
-    fun skills(): List<SkillInfo> = skillsRoot.listFiles().orEmpty().filter { it.isDirectory }.mapNotNull {
+    fun skills(): List<SkillInfo> = synchronized(lock) { skillsRoot.listFiles().orEmpty().filter { it.isDirectory }.mapNotNull {
         runCatching { SkillParser.parse(it, context.assets.list("extensions/skills").orEmpty().contains(it.name)) }.getOrNull()
-    }.sortedBy { it.id }
+    }.sortedBy { it.id } }
     fun enabled(skill: SkillInfo) = prefs.getBoolean("skill:${skill.id}", true)
     fun enable(skill: SkillInfo, value: Boolean) { prefs.edit().putBoolean("skill:${skill.id}", value).apply() }
     fun skill(id: String) = skills().firstOrNull { it.id == id && enabled(it) } ?: error("技能不存在或已停用")
-    fun removeSkill(id: String) { val s = skills().first { it.id == id }; require(!s.builtin) { "内置技能可停用，不可删除" }; ai.capri.app.RuntimeFiles.delete(s.directory) }
-    fun importSkill(input: InputStream, zip: Boolean): String = synchronized(lock) {
+    fun <T> withSkill(id: String, block: (SkillInfo) -> T): T = synchronized(lock) { block(skill(id)) }
+    fun removeSkill(id: String) = synchronized(lock) { val s = skills().first { it.id == id }; require(!s.builtin) { "内置技能可停用，不可删除" }; ai.capri.app.RuntimeFiles.delete(s.directory) }
+    fun importSkill(input: InputStream, zip: Boolean, replace: Boolean = false): String = synchronized(lock) {
         val stage = File(root, "import-${UUID.randomUUID()}").apply { mkdirs() }
         try {
             if (zip) {
@@ -150,15 +183,26 @@ internal class ExtensionStore(private val context: Context) {
                 require(sources.size == 1) { "请导入仅包含一个技能的ZIP" }
                 val source = sources.single().parentFile!!
                 // A root-level SKILL.md is accepted; determine its canonical name through frontmatter.
-                val text = File(source, "SKILL.md").readText()
+                val skillFile = File(source, "SKILL.md"); require(skillFile.length() <= 128_000) { "技能文件超过128KB" }
+                val text = skillFile.readText()
                 val name = nameOf(text)
-                installStage(source, name)
+                installStage(source, name, replace)
             } else {
                 val raw = input.use { stream -> val out = java.io.ByteArrayOutputStream(); val buffer = ByteArray(4096); while (out.size() <= 128_000) { val n = stream.read(buffer, 0, minOf(buffer.size, 128_001 - out.size())); if (n < 0) break; out.write(buffer, 0, n) }; out.toByteArray() }; require(raw.size <= 128_000) { "技能文件超过128KB" }
                 val text = raw.toString(Charsets.UTF_8); val name = nameOf(text)
                 val source = File(stage, name).apply { mkdirs() }; File(source, "SKILL.md").writeText(text)
-                installStage(source, name)
+                installStage(source, name, replace)
             }
+        } finally { ai.capri.app.RuntimeFiles.delete(stage) }
+    }
+    fun importSkillDirectory(source: File, replace: Boolean = false): String = synchronized(lock) {
+        val stage = File(root, "import-${UUID.randomUUID()}").apply { mkdirs() }
+        try {
+            val copy = File(stage, "source")
+            ExtensionInstall.copyDirectory(source, copy)
+            val skillFile = File(copy, "SKILL.md")
+            require(skillFile.isFile && skillFile.length() <= 128_000) { "技能目录根部需有不超过128KB的SKILL.md" }
+            installStage(copy, nameOf(skillFile.readText()), replace)
         } finally { ai.capri.app.RuntimeFiles.delete(stage) }
     }
     private fun nameOf(text: String): String {
@@ -167,16 +211,27 @@ internal class ExtensionStore(private val context: Context) {
         val header = Yaml(SafeConstructor(options)).load<Any>(normalized.substring(4, end)) as? Map<*, *> ?: error("元数据无效")
         return ExtensionPolicy.id(header["name"] as? String ?: error("缺少name"))
     }
-    private fun installStage(source: File, name: String): String {
-        val target = File(skillsRoot, name); require(!target.exists()) { "同名技能已存在，请先删除用户技能；内置技能不可覆盖" }
+    private fun installStage(source: File, name: String, replace: Boolean): String {
+        val target = File(skillsRoot, name)
+        require(name !in context.assets.list("extensions/skills").orEmpty()) { "内置技能不可覆盖" }
+        require(!target.exists() || replace) { "同名技能已存在；明确更新用户技能时使用replace=true" }
         val validation = File(root, "validate-${UUID.randomUUID()}").apply { mkdirs() }
+        val backup = File(validation, ".previous")
         try {
             val normalized = File(validation, name)
             check(source.renameTo(normalized)) { "无法准备技能目录" }
             SkillParser.parse(normalized)
-            check(normalized.renameTo(target)) { "技能安装未完成" }
+            if (target.exists()) check(target.renameTo(backup)) { "无法暂存原技能" }
+            if (!normalized.renameTo(target)) {
+                if (backup.exists()) check(backup.renameTo(target)) { "技能恢复失败" }
+                error("技能安装未完成，原技能已保留")
+            }
             return name
-        } finally { ai.capri.app.RuntimeFiles.delete(validation) }
+        } finally {
+            // Do not discard the original if publication failed and it could not be restored.
+            if (backup.exists() && !target.exists()) backup.renameTo(target)
+            if (!backup.exists() || target.exists()) ai.capri.app.RuntimeFiles.delete(validation)
+        }
     }
     fun setActive(chat: String, id: String, active: Boolean) { prefs.edit().putBoolean("active:$chat:$id", active).apply() }
     fun active(chat: String, id: String) = prefs.getBoolean("active:$chat:$id", false)

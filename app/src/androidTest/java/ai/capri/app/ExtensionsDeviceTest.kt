@@ -58,13 +58,16 @@ class ExtensionsDeviceTest {
             for (c in manager.store.configs().filter { it.getString("id").startsWith("test-local-") || it.getString("id").startsWith("test-remote-") }) { val id = c.getString("id"); manager.store.removeConfig(id); RuntimeFiles.delete(File(manager.store.root, "mcp/$id")) }
             manager.store.skills().filter { it.id.startsWith("test-skill-") }.forEach { manager.store.removeSkill(it.id) }
             File(context.filesDir, "sessions").listFiles().orEmpty().filter { it.name.startsWith("test-mcp-") }.forEach(RuntimeFiles::delete)
-            assertEquals(5, manager.store.skills().count { it.builtin })
+            assertEquals(6, manager.store.skills().count { it.builtin })
+            assertTrue(JSONObject(manager.execute(first, JSONObject().put("action", "load_skill").put("id", "skill-creator"))).getString("instructions").contains("install_skill"))
+            assertTrue(workspace.file(first, ".capri/skills/skill-creator/references/extensions-install.md").isFile)
             val zip = ByteArrayOutputStream()
             ZipOutputStream(zip).use { out ->
                 out.putNextEntry(ZipEntry("SKILL.md")); out.write("---\nname: $skill\ndescription: Test skill\n---\nRead references/example.txt then use the existing tools.".toByteArray()); out.closeEntry()
                 out.putNextEntry(ZipEntry("references/example.txt")); out.write("fixture-reference".toByteArray()); out.closeEntry()
             }
-            assertEquals(skill, manager.store.importSkill(zip.toByteArray().inputStream(), true))
+            workspace.file(first, "skill.zip").writeBytes(zip.toByteArray())
+            assertEquals(skill, JSONObject(manager.execute(first, JSONObject().put("action", "install_skill").put("path", "/workspace/skill.zip"))).getString("id"))
             val loaded = JSONObject(manager.execute(first, JSONObject().put("action", "load_skill").put("id", skill)))
             assertTrue(loaded.getString("instructions").contains("Test skill"))
             assertEquals("fixture-reference", workspace.file(first, ".capri/skills/$skill/references/example.txt").readText())
@@ -74,6 +77,25 @@ class ExtensionsDeviceTest {
             val unsafeZip = ByteArrayOutputStream()
             ZipOutputStream(unsafeZip).use { it.putNextEntry(ZipEntry("../escape")); it.write("bad".toByteArray()); it.closeEntry() }
             assertTrue(runCatching { manager.store.importSkill(unsafeZip.toByteArray().inputStream(), true) }.isFailure)
+            val directory = workspace.file(first, "edited-skill").apply { mkdirs() }
+            directory.resolve("SKILL.md").writeText("---\nname: $skill\ndescription: Updated skill\n---\nUpdated instructions")
+            directory.resolve("references").mkdirs(); directory.resolve("references/example.txt").writeText("updated-reference")
+            assertTrue(runCatching { manager.execute(first, JSONObject().put("action", "install_skill").put("path", "edited-skill")) }.isFailure)
+            manager.store.enable(manager.store.skill(skill), false)
+            manager.execute(first, JSONObject().put("action", "install_skill").put("path", "edited-skill").put("replace", true))
+            assertFalse(manager.store.enabled(manager.store.skills().first { it.id == skill }))
+            manager.store.enable(manager.store.skills().first { it.id == skill }, true)
+            assertTrue(JSONObject(manager.execute(second, JSONObject().put("action", "load_skill").put("id", skill))).getString("instructions").contains("Updated instructions"))
+            assertEquals("updated-reference", workspace.file(second, ".capri/skills/$skill/references/example.txt").readText())
+            directory.resolve("SKILL.md").writeText("---\nname: $skill\ndescription: []\n---\nInvalid")
+            assertTrue(runCatching { manager.execute(first, JSONObject().put("action", "install_skill").put("path", "edited-skill").put("replace", true)) }.isFailure)
+            assertEquals("Updated skill", manager.store.skill(skill).description)
+            directory.resolve("SKILL.md").writeText("---\nname: skill-creator\ndescription: Attempted replacement\n---\nNot allowed")
+            assertTrue(runCatching { manager.execute(first, JSONObject().put("action", "install_skill").put("path", "edited-skill").put("replace", true)) }.isFailure)
+            workspace.file(first, "single.md").writeText("---\nname: $skill\ndescription: Single file update\n---\nSingle file instructions")
+            manager.execute(first, JSONObject().put("action", "install_skill").put("path", "single.md").put("replace", true))
+            assertEquals("Single file update", manager.store.skill(skill).description)
+            assertTrue(runCatching { manager.execute(first, JSONObject().put("action", "install_skill").put("path", "../outside.md")) }.isFailure)
             val fixture = """
 import json,os,sys,time
 from pathlib import Path
@@ -97,8 +119,12 @@ for line in sys.stdin:
     else: result={}
     print(json.dumps({'jsonrpc':'2.0','id':r['id'],'result':result}),flush=True)
 """.trimIndent()
-            for (chat in listOf(first, second)) { runtime.ensureSession(chat); workspace.file(chat, "mcp_fixture.py").writeText(fixture) }
-            manager.store.saveConfig(JSONObject().put("id", local).put("name", "Local fixture").put("timeout_seconds", 5).put("type", "local").put("enabled", true).put("command", JSONArray(listOf("/usr/bin/python3", "-u", "/workspace/mcp_fixture.py"))))
+            runtime.ensureSession(first); runtime.ensureSession(second)
+            workspace.file(first, "server-source/server.py").apply { parentFile!!.mkdirs(); writeText(fixture) }
+            workspace.file(first, "local.json").writeText(JSONObject().put("id", local).put("name", "Local fixture").put("timeout_seconds", 5).put("type", "local").put("command", JSONArray(listOf("/usr/bin/python3", "-u", "\${extension}/server.py"))).toString())
+            val installedLocal = JSONObject(manager.execute(first, JSONObject().put("action", "install_mcp").put("path", "local.json").put("source_path", "server-source")))
+            assertFalse(installedLocal.getBoolean("active")); assertTrue(manager.specifications(first).isEmpty())
+            RuntimeFiles.delete(workspace.file(first, "server-source"))
             suspend fun echo(chat: String, text: String): JSONObject {
                 manager.activate(chat, local)
                 val name = ExtensionManager.toolName(local, "echo")
@@ -110,7 +136,10 @@ for line in sys.stdin:
             assertEquals("first", echo(first, "first-again").getString("previous"))
             val localSchema = manager.specifications(first).single().getJSONObject("function").getJSONObject("parameters")
             assertFalse(localSchema.toString(), localSchema.getBoolean("additionalProperties"))
-            manager.store.saveConfig(JSONObject().put("id", remote).put("name", "HTTPS fixture").put("type", "remote").put("enabled", true).put("url", server.url("/mcp").toString()))
+            workspace.file(first, "remote.json").writeText(JSONObject().put("id", remote).put("name", "HTTPS fixture").put("type", "remote").put("url", server.url("/mcp").toString()).toString())
+            assertEquals(remote, JSONObject(manager.execute(first, JSONObject().put("action", "install_mcp").put("path", "remote.json"))).getString("id"))
+            assertTrue(manager.store.config(remote).getBoolean("enabled"))
+            assertTrue(runCatching { manager.execute(first, JSONObject().put("action", "install_mcp").put("path", "remote.json")) }.isFailure)
             manager.store.saveSecret(remote, "fixture-secret-never-return")
             manager.activate(first, remote)
             val response = manager.call(first, ExtensionManager.toolName(remote, "echo"), JSONObject().put("text", "remote-ok"))
