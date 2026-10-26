@@ -10,7 +10,7 @@ internal class PerformanceTrace(private val file: File, private val clock: () ->
     private val origin = clock()
     private var closed = false
     companion object {
-        private val tools = setOf("certificate", "model_info", "profile_search", "list_files", "read_file", "write_file", "send_file", "python_run", "environment", "environment_check", "python_env", "android", "terminal", "browser")
+        private val tools = setOf("model_info", "profile_search", "list_files", "read_file", "write_file", "send_file", "python_run", "environment", "environment_check", "python_env", "android", "terminal", "browser")
         private val usageFields = setOf("prompt_tokens", "completion_tokens", "total_tokens", "prompt_cache_hit_tokens", "prompt_cache_miss_tokens")
         fun now() = System.nanoTime()
         fun elapsed(start: Long) = ((System.nanoTime() - start) / 1_000_000).coerceAtLeast(0)

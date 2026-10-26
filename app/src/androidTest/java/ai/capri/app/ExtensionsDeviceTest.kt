@@ -58,7 +58,7 @@ class ExtensionsDeviceTest {
             for (c in manager.store.configs().filter { it.getString("id").startsWith("test-local-") || it.getString("id").startsWith("test-remote-") }) { val id = c.getString("id"); manager.store.removeConfig(id); RuntimeFiles.delete(File(manager.store.root, "mcp/$id")) }
             manager.store.skills().filter { it.id.startsWith("test-skill-") }.forEach { manager.store.removeSkill(it.id) }
             File(context.filesDir, "sessions").listFiles().orEmpty().filter { it.name.startsWith("test-mcp-") }.forEach(RuntimeFiles::delete)
-            assertEquals(7, manager.store.skills().count { it.builtin })
+            assertEquals(6, manager.store.skills().count { it.builtin })
             assertTrue(JSONObject(manager.execute(first, JSONObject().put("action", "load_skill").put("id", "skill-creator"))).getString("instructions").contains("install_skill"))
             assertTrue(workspace.file(first, ".capri/skills/skill-creator/references/extensions-install.md").isFile)
             val zip = ByteArrayOutputStream()
