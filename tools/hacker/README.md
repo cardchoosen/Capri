@@ -41,3 +41,21 @@ python3 tools/hacker/verify_netns.py --serial DEVICE_SERIAL --adb /path/to/adb -
 ```
 
 The verifier compares the original namespace ID, IPv4 policy rules/routes, filter rules, selected IPv4 parameters and SELinux state before/after. Report: ignored `work/hacker-prototype/netns-forwarding-report.json`. It removes the temporary device binary and does not install/update Capri. The experiment does not involve the vivo target or real Wi-Fi traffic, NAT, ARP interception, a proxy, HTTPS or a Skill. It provides controlled kernel/data-plane evidence for subsequent design.
+
+## Single-pair Wi-Fi relay experiment
+
+`local_http_fixture.py` runs a bounded, non-file-serving HTTP fixture on the Mac, serving only the selected vivo source address. A fixed test page generates tiny same-origin requests; logs contain only event type, time, selected source and counters. A public fixture token can be reused on restart. The fixture binds one explicit LAN address, supports an owner-side stop marker and a time limit, and avoids reverse DNS during startup.
+
+`pair_relay.c` is a **fixed developer-lab prototype**, currently pinned to Pixel 192.168.1.8, vivo 192.168.1.10, Mac fixture 192.168.1.16 and wlan0. It is not a general-purpose proxy or installed Capri feature. It validates the interface and both neighbor identities, records recovery intent before intervention, and admits only the selected incoming IPv4 direction with a kernel socket filter. It does not enable promiscuous mode, log payloads, change the gateway mapping, or write host routes/firewall/forwarding parameters.
+
+A single eight-second trial temporarily directs vivo's Mac-bound IPv4 frames through Pixel. A userspace L2 relay preserves IP/TCP contents while forwarding them to the real Mac. Replies normally travel directly from Mac to vivo. The filter admits the whole selected pair direction so other protocols between that same pair are not intentionally blackholed; only fixture TCP/GET counters are interpreted. The experiment does not cover IPv6, Internet gateway traffic, bidirectional proxying, HTTPS decryption, certificate signing or an eMudhra exploit.
+
+The parent waits for a ready worker before sending any redirection announcement. Both processes retain restoration material; the worker has parent-death handling and an independent deadline. Restoration verifies the current interface/neighbor identity before sending corrective information, then observes whether matching frames still reach Pixel. Remaining intent is retained if recovery is uncertain. `recover` is restricted to that validated saved context. These mechanisms do not guarantee immediate restoration if all processes disappear or the device/network changes; active-flow crash recovery still needs dedicated validation.
+
+`preflight` validates scope and attaches the receive filter without announcements or packet reads. `guardcheck` exercises the ready handshake/deadline without ARP announcements, reads or forwarding. `verify_pair_relay.py` requires fresh vivo fixture traffic before starting, then checks fixture continuity, relay counters, recovery observations and unchanged host rules/routes/parameters, and removes device artifacts when safe.
+
+```sh
+python3 tools/hacker/verify_pair_relay.py --serial DEVICE_SERIAL --adb /path/to/adb --ndk /path/to/ndk --fixture work/hacker-prototype/FIXTURE_DIRECTORY
+```
+
+Observed first trial: 40 forwarded frames, 8 fixture GET-containing frames, zero send errors; 11 fixture requests across the active/cleanup interval, 3 more after stopping; zero selected frames in the 2.5-second post-restoration observation. Host baseline hashes matched and device artifacts were removed. These observations support restored direct access, not a direct read of vivo's neighbor table. The worker-ready handshake was hardened after this trial and exercised using the no-ARP guardcheck rather than repeating active intervention. Reports remain under ignored `work/hacker-prototype/`; this is not an APK/Skill delivery.
