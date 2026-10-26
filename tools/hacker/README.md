@@ -29,3 +29,15 @@ python3 tools/hacker/verify_lifecycle.py --serial DEVICE_SERIAL --adb /path/to/a
 The current compiler layout is macOS Android NDK `darwin-x86_64`. Reports, rule inventories and binaries go under ignored `work/hacker-prototype/`. Four tests cover simulated mode; six tests cover firewall mode including abrupt loss of both helpers and conflicting-rule preservation. Firewall mode compares the complete filter-table rule inventory before/after; both modes compare selected forwarding and SELinux state. The runner removes its device files on success and reports incomplete cleanup without blanket restoration on failure.
 
 The runner does not install/update Capri, clear application data or change rooting configuration. Existing active tasks/residue are left for investigation rather than automatically stopped. Development ADB Root authorization does not prove the Capri application has Root authorization.
+
+## Isolated routing and forwarding experiment
+
+`netns_forwarding.c` plus `verify_netns.py` exercises real kernel forwarding inside disconnected, temporary network namespaces. An outer supervisor remains in the original namespace. The lab creates two virtual endpoint namespaces and two veth pairs entirely inside the lab; it never moves a physical interface or attaches the lab to Wi-Fi. Every configuration subprocess and sysctl write checks that its namespace differs from the original and has no wlan0. Command arguments and documentation-range addresses are fixed, with no arbitrary target input. Helpers have parent-death termination and the outer supervisor has a deadline.
+
+The experiment first verifies direct links, confirms end-to-end failure with forwarding disabled, enables isolated IPv4 forwarding and verifies end-to-end ICMP, then restores forwarding and recorded per-interface IPv4 parameters and verifies failure again. It removes its virtual routes/addresses/interfaces. Abrupt failures rely on the lifetime of private namespaces to contain/release resources; this is not a test of restoring Pixel's live Wi-Fi routing. Changing ip_forward can alter related IPv4 configuration, so restoring only its boolean value is insufficient as a general strategy.
+
+```sh
+python3 tools/hacker/verify_netns.py --serial DEVICE_SERIAL --adb /path/to/adb --ndk /path/to/ndk
+```
+
+The verifier compares the original namespace ID, IPv4 policy rules/routes, filter rules, selected IPv4 parameters and SELinux state before/after. Report: ignored `work/hacker-prototype/netns-forwarding-report.json`. It removes the temporary device binary and does not install/update Capri. The experiment does not involve the vivo target or real Wi-Fi traffic, NAT, ARP interception, a proxy, HTTPS or a Skill. It provides controlled kernel/data-plane evidence for subsequent design.
