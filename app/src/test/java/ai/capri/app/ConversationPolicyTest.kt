@@ -21,5 +21,10 @@ class ConversationPolicyTest {
         assertTrue(ToolPresentation.visible(Entry("assistant", "profile_search 是内部检索工具")))
         assertTrue(ToolPresentation.visible(Entry("tool", "python_run\nexit=0")))
         assertTrue(ToolPresentation.showPreamble(listOf("python_run")))
+        assertTrue(ToolPresentation.isInternal("model_info"))
+        assertFalse(ToolPresentation.visible(Entry("tool", "model_info\nprivate model metadata")))
+        assertFalse(ToolPresentation.showPreamble(listOf("model_info")))
+        assertEquals("思考中", ToolPresentation.progress("model_info"))
+        assertFalse(IdentityReply.matches("你现在是什么模型"))
     }
 }

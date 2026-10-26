@@ -181,6 +181,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
             .put(tool("read_file", "读取当前工作区文本文件", props("path"), listOf("path")))
             .put(tool("write_file", "写入当前工作区文本文件", props("path", "content"), listOf("path", "content")))
             .put(tool("send_file", "把当前会话工作区已有文件发送到聊天。PNG/JPEG/GIF/WebP内联显示（GIF可播放）；其他文件可分享导出。最大20MB，不发送私钥或凭据。path为相对路径或/workspace/路径，caption可选。", props("path", "caption"), listOf("path")))
+            .put(ai.capri.app.model.ModelInfoTool.specification())
             .put(ai.capri.app.knowledge.KnowledgeTool.specification())
             .put(ai.capri.app.knowledge.KnowledgeTool.historySpecification())
             .put(ShortTaskContract.specification())
@@ -209,7 +210,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
         var messages = if (saved != null) RecoveryMessages.forResume(saved) else JSONArray()
         val rules = getApplication<Application>().assets.open("persona/core.txt").bufferedReader().use { it.readText() } + "\n" +
             getApplication<Application>().assets.open("runtime/execution_rules.txt").bufferedReader().use { it.readText() } +
-            "\n" + extensions.guidance() + "\n本轮最多 $MAX_MODEL_CALLS 次模型请求（包含网络重试），这是客户端预算；验证任务后及时回复。\n" + ExecutionGuidance.text + "\n" + ai.capri.app.knowledge.KnowledgeTool.guidance + "\n" + ai.capri.app.retrieval.WebContract.guidance
+            "\n" + extensions.guidance() + "\n本轮最多 $MAX_MODEL_CALLS 次模型请求（包含网络重试），这是客户端预算；验证任务后及时回复。\n" + ExecutionGuidance.text + "\n" + ai.capri.app.knowledge.KnowledgeTool.guidance + "\n" + ai.capri.app.retrieval.WebContract.guidance + "\n" + ai.capri.app.model.ModelInfoTool.guidance
         if (saved != null) {
             messages.getJSONObject(0).put("content", rules)
             val instruction = if (continuing) "接续检查点，已记录的工具不得因网络重试重复执行。"
@@ -350,6 +351,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                             "web_search" -> retrieval.search(session.id, args)
                             "web_read" -> retrieval.read(session.id, args)
                             "knowledge" -> knowledgeTool.execute(session.id, session.messages.toList(), args)
+                            "model_info" -> ai.capri.app.model.ModelInfoTool.execute(config, store.config(session.id), store.models.all(), args, contextBudget)
                             "context_history" -> contextHistory.query(session.id, session.messages.toList(), args)
                             "python_env" -> pythonEnvironment.execute(session.id, args)
                             "environment", "environment_check" -> capabilityTool.execute(session.id, args, trace)

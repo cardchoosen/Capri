@@ -39,7 +39,7 @@ internal object RecoveryMessages {
             val calls = m.optJSONArray("tool_calls")
             if (calls != null) for (j in 0 until calls.length()) {
                 val call = calls.getJSONObject(j)
-                if (call.getJSONObject("function").optString("name") in setOf("profile_search", "knowledge", "context_history")) {
+                if (call.getJSONObject("function").optString("name") in setOf("profile_search", "knowledge", "context_history", "model_info")) {
                     internalIds += call.getString("id")
                     m.remove("_capri_wire")
                     // Remember/index arguments may themselves contain private knowledge. Do not replay from archives.

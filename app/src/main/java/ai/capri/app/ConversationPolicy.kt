@@ -22,7 +22,7 @@ object IdentityReply {
 
 /** Internal lookups never become conversation events or execution cards. */
 object ToolPresentation {
-    fun isInternal(name: String) = name == "profile_search"
+    fun isInternal(name: String) = name in setOf("profile_search", "model_info")
     fun progress(name: String) = if (isInternal(name)) "思考中" else "执行 · $name"
     fun visible(entry: Entry) = entry.role != "tool" || !isInternal(entry.text.substringBefore('\n').trim())
     fun showPreamble(toolNames: List<String>) = toolNames.none(::isInternal)

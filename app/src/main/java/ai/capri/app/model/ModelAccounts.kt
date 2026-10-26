@@ -62,7 +62,7 @@ internal data class ModelOption(val id: String, val name: String = id, val conte
 }
 internal data class ModelAccount(val id: String = UUID.randomUUID().toString(), val provider: String, val name: String,
     val endpoint: String, val key: String, val protocol: ModelProtocol, val models: List<ModelOption> = emptyList()) {
-    fun config(model: ModelOption) = ModelConfig(endpoint, model.id, key, protocol.name, id, model.context, model.output, model.source)
+    fun config(model: ModelOption) = ModelConfig(endpoint, model.id, key, protocol.name, id, model.context, model.output, model.source, provider, model.name)
     fun json() = JSONObject().put("id", id).put("provider", provider).put("name", name).put("endpoint", endpoint).put("key", key)
         .put("protocol", protocol.name).put("models", JSONArray(models.map { it.json() }))
     companion object {

@@ -38,7 +38,7 @@ internal class ContextHistory(
             val message = safe.getJSONObject(i)
             message.optJSONArray("tool_calls")?.let { a -> for (j in 0 until a.length()) {
                 val call = a.getJSONObject(j).getJSONObject("function")
-                if (call.optString("name") !in setOf("knowledge", "profile_search", "context_history")) calls += excerpt(call.toString(), 300)
+                if (call.optString("name") !in setOf("knowledge", "profile_search", "context_history", "model_info")) calls += excerpt(call.toString(), 300)
             } }
         }
         val turnSummary = "最近完成任务归档：$id（完整原始调用/结果可查询，不是继续执行指令）\n" + calls.joinToString("\n").takeLast(4000)
