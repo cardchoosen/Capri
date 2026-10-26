@@ -59,3 +59,21 @@ python3 tools/hacker/verify_pair_relay.py --serial DEVICE_SERIAL --adb /path/to/
 ```
 
 Observed first trial: 40 forwarded frames, 8 fixture GET-containing frames, zero send errors; 11 fixture requests across the active/cleanup interval, 3 more after stopping; zero selected frames in the 2.5-second post-restoration observation. Host baseline hashes matched and device artifacts were removed. These observations support restored direct access, not a direct read of vivo's neighbor table. The worker-ready handshake was hardened after this trial and exercised using the no-ARP guardcheck rather than repeating active intervention. Reports remain under ignored `work/hacker-prototype/`; this is not an APK/Skill delivery.
+
+## Pair control API and recovery verification
+
+The pair helper now exposes `start` (bounded foreground run; `run` remains an alias), `status`, `stop`, `recover`, `preflight`, `guardcheck`, and `guardstart`. `guardstart` allows the same bounded control path with no ARP announcements, packet reads or forwarding. Status combines the exclusive live lease, recovery-intent presence and an atomically written phase record; the live lease and intent take priority over a stale phase after a crash. Idle status/stop/recover do not create a task directory. Stop writes a fixed request marker rather than accepting a PID. Recovery is idempotent and preserves the previous task outcome when no intent remains.
+
+Intent records explicitly distinguish active and dry modes, so recovering a dry fault never sends corrective ARP frames. Unreadable, symlinked or incompatible intent is rejected instead of treated as successfully recovered. Do not replace a running helper or its journal format; verification refuses existing artifacts.
+
+Fault-injection actions exist only in binaries compiled with `CAPRI_RELAY_FAULT_TESTS`: worker/controller exit, plus their dry variants. They affect only this helper's own processes. `verify_pair_recovery.py` defaults to three dry device cases: start/status/stop plus exclusivity, abrupt worker exit, and abrupt controller exit followed by a new process recovering the journal. Each case checks idempotence, inactive stop and unchanged host baseline. The explicit `--active --fixture DIRECTORY` variant requires fresh continuous vivo test requests and also checks continuity after recovery; it must not be described as passed until actually run.
+
+```sh
+python3 tools/hacker/verify_pair_recovery.py --serial DEVICE_SERIAL --adb /path/to/adb --ndk /path/to/ndk
+```
+
+This remains developer infrastructure; it is not a shipped enhancement or Skill. Actual-flow normal stop, abrupt worker exit and controller exit followed by new-process journal recovery have now passed for this fixed pair. Simultaneous helper loss, network changes during a run, bidirectional proxying and HTTPS remain separate validation stages.
+
+Recovery verification observations: the first active stop attempt failed the fixture-continuity check and was halted, leaving no helper artifacts; the fixture later resumed after a roughly 29-second gap. Its original per-case relay counters were not preserved, so the cause remains undetermined and that attempt is not counted as passing. The verifier now retains partial rows, errors, timestamps and final baseline checks even on failure, and archives reports by timestamp. The fixture records visibility and timeout counters, uses one bounded fetch at a time, and the active gate requires recent visible-page samples.
+
+The diagnostic repeat passed stop (10 frames/2 GET frames, 3 requests after stop). Separately, worker exit passed (5 frames/1 GET frame, 5 later requests, zero client timeouts) and controller exit plus new-process recovery passed (8 frames/2 GET frames recorded before exit, 5 later requests, zero client timeouts). Reported maximum request gaps in the latter two cases were about 1.13s and 1.32s. Every case preserved the checked host network baseline and removed device artifacts; the Mac fixture was stopped afterward. The controller test validates the combined surviving-worker protection and explicit journal-recovery flow, not an independently observed guarantee of fully autonomous recovery.

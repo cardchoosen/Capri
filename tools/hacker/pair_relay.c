@@ -30,16 +30,17 @@
 #define SERVER "192.168.1.16"
 struct context { unsigned char magic[8];int index;uint32_t self,target,server;unsigned char own[6],client[6],backend[6]; };
 struct counters { atomic_ulong forwarded,fixture_tcp,fixture_get,errors; };
+static struct counters *current_counters;
 static volatile sig_atomic_t stop_now;
 static void stopped(int value) { (void)value;stop_now=1; }
 static long long now_ms(void) { struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return (long long)t.tv_sec*1000+t.tv_nsec/1000000; }
 static void delay(int ms) { struct timespec t={ms/1000,(ms%1000)*1000000};nanosleep(&t,NULL); }
-static int directory(void) {
+static int directory(int create) {
     if(geteuid()!=0)return -1;
-    if(mkdir(DIR,0700) && errno!=EEXIST)return -1;
+    if(create && mkdir(DIR,0700) && errno!=EEXIST)return -1;
     int fd=open(DIR,O_RDONLY|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC);struct stat s;
     if(fd<0)return -1;
-    if(fstat(fd,&s)||s.st_uid!=0||(s.st_mode&0777)!=0700){close(fd);return -1;}
+    if(fstat(fd,&s)||s.st_uid!=0||(s.st_mode&0777)!=0700){close(fd);errno=EPERM;return -1;}
     return fd;
 }
 static int local_file(int dir,const char *name,int flags) {
@@ -70,7 +71,11 @@ static int context(struct context *c) {
     result=0;
 done:close(fd);return result;
 }
-static int matching(const struct context *c) { struct context current;return !context(&current)&&!memcmp(c,&current,sizeof(current)); }
+static int matching(const struct context *c) {
+    struct context current;
+    return !context(&current)&&c->index==current.index&&c->self==current.self&&c->target==current.target&&c->server==current.server&&
+        !memcmp(c->magic,current.magic,8)&&!memcmp(c->own,current.own,6)&&!memcmp(c->client,current.client,6)&&!memcmp(c->backend,current.backend,6);
+}
 static int arp_socket(const struct context *c) {
     int fd=socket(AF_PACKET,SOCK_RAW|SOCK_CLOEXEC,0);if(fd<0)return -1;
     struct sockaddr_ll a;memset(&a,0,sizeof(a));a.sll_family=AF_PACKET;a.sll_ifindex=c->index;
@@ -132,38 +137,85 @@ static int reap(pid_t pid) {
     while(now_ms()<deadline){pid_t r=waitpid(pid,&status,WNOHANG);if(r==pid)return 0;if(r<0&&errno!=EINTR)return -1;delay(20);}
     kill(pid,SIGKILL);while(waitpid(pid,&status,0)<0&&errno==EINTR){}return 0;
 }
+struct intent { struct context c;uint32_t dry_run; };
+static int present(int dir,const char *name) { struct stat s;return fstatat(dir,name,&s,AT_SYMLINK_NOFOLLOW)==0; }
+static int phase(int dir,const char *name,int dry,int restored) {
+    unlinkat(dir,"status.tmp",0);
+    int fd=local_file(dir,"status.tmp",O_WRONLY|O_CREAT|O_EXCL);if(fd<0)return -1;
+    char metrics[192]="null";
+    if(current_counters)snprintf(metrics,sizeof(metrics),"{\"forwarded_frames\":%lu,\"fixture_get_requests\":%lu,\"send_errors\":%lu}",atomic_load(&current_counters->forwarded),atomic_load(&current_counters->fixture_get),atomic_load(&current_counters->errors));
+    char json[512];int n=snprintf(json,sizeof(json),"{\"phase\":\"%s\",\"dry_run\":%s,\"restoration_frames_sent\":%s,\"metrics\":%s}",name,dry?"true":"false",restored?"true":"false",metrics);
+    int good=write(fd,json,(size_t)n)==n&&fsync(fd)==0;close(fd);
+    return !good||renameat(dir,"status.tmp",dir,"status.json")||fsync(dir)?-1:0;
+}
+static int status_or_stop(int dir,int stop) {
+    int lock=local_file(dir,"lock",O_RDWR|O_CREAT);if(lock<0)return 85;
+    int active=flock(lock,LOCK_EX|LOCK_NB)!=0;
+    if(active && errno!=EWOULDBLOCK && errno!=EAGAIN){close(lock);return 85;}
+    if(active && stop) {
+        int fd=local_file(dir,"stop.request",O_WRONLY|O_CREAT|O_EXCL);
+        if(fd<0 && errno!=EEXIST){close(lock);return 86;}
+        if(fd>=0){fsync(fd);close(fd);fsync(dir);}
+    }
+    char value[512]="null";int fd=local_file(dir,"status.json",O_RDONLY);
+    if(fd>=0){ssize_t n=read(fd,value,sizeof(value)-1);close(fd);if(n>0)value[n]=0;}
+    int pending=present(dir,"intent");
+    printf("{\"active\":%s,\"intent_present\":%s,\"recovery_required\":%s,\"stop_requested\":%s,\"state\":%s}\n",active?"true":"false",pending?"true":"false",!active&&pending?"true":"false",active&&stop?"true":"false",value);
+    close(lock);return 0;
+}
 int main(int argc,char **argv) {
-    if(argc!=2 || (strcmp(argv[1],"run")&&strcmp(argv[1],"recover")&&strcmp(argv[1],"preflight")&&strcmp(argv[1],"guardcheck")))return 64;
+    if(argc!=2)return 64;
+    int start=!strcmp(argv[1],"run")||!strcmp(argv[1],"start");
+    int long_guard=!strcmp(argv[1],"guardstart");
+    int dry_run=!strcmp(argv[1],"guardcheck")||long_guard;
+    int fault=0;
+#ifdef CAPRI_RELAY_FAULT_TESTS
+    if(!strcmp(argv[1],"fault_worker")){start=1;fault=1;}
+    if(!strcmp(argv[1],"fault_controller")){start=1;fault=2;}
+    if(!strcmp(argv[1],"guard_fault_worker")){dry_run=1;fault=1;}
+    if(!strcmp(argv[1],"guard_fault_controller")){dry_run=1;fault=2;}
+#endif
+    int recovering=!strcmp(argv[1],"recover");
+    int querying=!strcmp(argv[1],"status"),stopping=!strcmp(argv[1],"stop");
     if(!strcmp(argv[1],"preflight")) {
         struct context c;if(geteuid()!=0||context(&c))return 82;
-        int a=arp_socket(&c),b=receiver(&c);
-        if(a>=0)close(a);if(b>=0)close(b);
+        int a=arp_socket(&c),b=receiver(&c);if(a>=0)close(a);if(b>=0)close(b);
         if(a<0||b<0)return 83;
         printf("{\"scope_valid\":true,\"packet_filter_attached\":true,\"arp_frames_sent\":0,\"packets_read\":0}\n");return 0;
     }
-    int dry_run=!strcmp(argv[1],"guardcheck");
-    int dir=directory();if(dir<0)return 65;
+    if(!start&&!dry_run&&!recovering&&!querying&&!stopping)return 64;
+    int dir=directory(start||dry_run);
+    if(dir<0){
+        if(geteuid()==0&&errno==ENOENT&&(querying||stopping||recovering)){
+            printf("{\"active\":false,\"intent_present\":false,\"recovery_required\":false,\"state\":null}\n");return 0;
+        }
+        return 65;
+    }
+    if(querying||stopping)return status_or_stop(dir,stopping);
     int lock=local_file(dir,"lock",O_RDWR|O_CREAT);if(lock<0||flock(lock,LOCK_EX|LOCK_NB))return 66;
-    struct context c;
-    int recovering=!strcmp(argv[1],"recover");
+    struct context c;struct intent saved;memset(&saved,0,sizeof(saved));
     int journal=local_file(dir,"intent",O_RDONLY);
     if(recovering) {
-        if(journal<0)return 67;
-        unsigned char data[sizeof(c)+1];ssize_t n=read(journal,data,sizeof(data));close(journal);
-        if(n!=sizeof(c))return 68;memcpy(&c,data,sizeof(c));
-        if(memcmp(c.magic,"CPRPAIR1",8)||!matching(&c))return 69;
-    } else {
-        if(journal>=0){close(journal);return 70;}
-        if(context(&c))return 71;
-        int out=local_file(dir,"intent",O_WRONLY|O_CREAT|O_EXCL);if(out<0)return 72;
-        int good=write(out,&c,sizeof(c))==(ssize_t)sizeof(c)&&fsync(out)==0;close(out);
-        if(!good||fsync(dir))return 73;
+        if(journal<0){if(present(dir,"intent"))return 68;unlinkat(dir,"stop.request",0);close(lock);return status_or_stop(dir,0);}
+        unsigned char data[sizeof(saved)+1];ssize_t n=read(journal,data,sizeof(data));close(journal);
+        if(n!=sizeof(saved))return 68;memcpy(&saved,data,sizeof(saved));c=saved.c;dry_run=(int)saved.dry_run;
+        if(saved.dry_run>1||memcmp(c.magic,"CPRPAIR1",8)||(!dry_run&&!matching(&c)))return 69;
+        int result=0;
+        if(!dry_run){int fd=arp_socket(&c);if(fd<0)return 74;result=restore_neighbor(fd,&c);close(fd);}
+        if(!result){if(unlinkat(dir,"intent",0))return 75;unlinkat(dir,"stop.request",0);phase(dir,"recovered",dry_run,!dry_run);fsync(dir);}
+        if(result)return 75;close(lock);return status_or_stop(dir,0);
     }
+    if(journal>=0){close(journal);return 70;}
+    if(present(dir,"stop.request"))return 87;
+    if(context(&c))return 71;
+    saved.c=c;saved.dry_run=(uint32_t)dry_run;
+    int out=local_file(dir,"intent",O_WRONLY|O_CREAT|O_EXCL);if(out<0)return 72;
+    int good=write(out,&saved,sizeof(saved))==(ssize_t)sizeof(saved)&&fsync(out)==0;close(out);
+    if(!good||fsync(dir)||phase(dir,"starting",dry_run,0))return 73;
     int control=arp_socket(&c);if(control<0)return 74;
-    if(recovering){int result=restore_neighbor(control,&c);if(!result)unlinkat(dir,"intent",0);close(control);return result?75:0;}
     int data=receiver(&c);if(data<0){unlinkat(dir,"intent",0);return 76;}
     struct counters *s=mmap(NULL,sizeof(*s),PROT_READ|PROT_WRITE,MAP_SHARED|MAP_ANONYMOUS,-1,0);if(s==MAP_FAILED){unlinkat(dir,"intent",0);return 77;}
-    atomic_init(&s->forwarded,0);atomic_init(&s->fixture_tcp,0);atomic_init(&s->fixture_get,0);atomic_init(&s->errors,0);
+    atomic_init(&s->forwarded,0);atomic_init(&s->fixture_tcp,0);atomic_init(&s->fixture_get,0);atomic_init(&s->errors,0);current_counters=s;
     signal(SIGTERM,stopped);signal(SIGINT,stopped);signal(SIGHUP,SIG_IGN);signal(SIGPIPE,SIG_IGN);signal(SIGCHLD,SIG_DFL);
     int ready[2];if(pipe2(ready,O_CLOEXEC)){unlinkat(dir,"intent",0);return 78;}
     pid_t owner=getpid(),child=fork();if(child<0){close(ready[0]);close(ready[1]);unlinkat(dir,"intent",0);return 78;}
@@ -181,15 +233,25 @@ int main(int argc,char **argv) {
     }
     close(ready[1]);struct pollfd readiness={ready[0],POLLIN,0};char value=0;
     int armed=poll(&readiness,1,2000)>0&&read(ready[0],&value,1)==1&&value=='1';close(ready[0]);
-    if(!armed){kill(child,SIGTERM);reap(child);unlinkat(dir,"intent",0);return 84;}
-    long long deadline=now_ms()+(dry_run?1000:8000),next=0;int fail=0;
+    if(!armed){kill(child,SIGTERM);reap(child);unlinkat(dir,"intent",0);phase(dir,"failed_before_start",dry_run,0);return 84;}
+    if(phase(dir,"running",dry_run,0)){kill(child,SIGTERM);reap(child);unlinkat(dir,"intent",0);return 88;}
+    long long started=now_ms(),deadline=started+(dry_run&&!fault&&!long_guard?1000:8000),next=0;int fail=0;
+    const char *reason="deadline";int injected=0;
     while(!stop_now&&now_ms()<deadline) {
-        if(!dry_run&&now_ms()>=next){if(!matching(&c)||announce(control,&c,0)){fail=1;break;}next=now_ms()+1000;}
+        if(present(dir,"stop.request")){reason="stop_requested";break;}
+        if(!dry_run&&now_ms()>=next){if(!matching(&c)||announce(control,&c,0)){fail=1;reason="context_or_send_failure";break;}next=now_ms()+1000;}
+        if(fault&&!injected&&now_ms()-started>=(dry_run?250:2000)) {
+            injected=1;
+            if(fault==1)kill(child,SIGKILL);
+            else {phase(dir,"controller_exit_injected",dry_run,0);_exit(91);}
+        }
         int status;pid_t ended=waitpid(child,&status,WNOHANG);
-        if(ended==child){child=0;fail=1;break;}
-        if(ended<0&&errno!=EINTR){child=0;fail=1;break;}
+        if(ended==child){child=0;fail=1;reason="worker_exit";break;}
+        if(ended<0&&errno!=EINTR){child=0;fail=1;reason="worker_wait_error";break;}
         delay(20);
     }
+    if(stop_now)reason="signal";
+    phase(dir,"stopping",dry_run,0);
     int restored=dry_run?0:restore_neighbor(control,&c);
     if(child>0){kill(child,SIGTERM);reap(child);}
     unsigned long before=atomic_load(&s->forwarded);
@@ -198,8 +260,10 @@ int main(int argc,char **argv) {
         struct pollfd p={data,POLLIN,0};if(poll(&p,1,50)>0 && relay_one(data,&c,s)>0)restore_neighbor(control,&c);
     }
     unsigned long late=atomic_load(&s->forwarded)-before;
-    if(!restored&&!late)unlinkat(dir,"intent",0);
+    if(!restored&&!late){if(unlinkat(dir,"intent",0))restored=-1;}
+    unlinkat(dir,"stop.request",0);
+    phase(dir,restored||late?"needs_recovery":"stopped",dry_run,!dry_run&&!restored);
     fsync(dir);
-    printf("{\"dry_run\":%s,\"active_limit_seconds\":%d,\"target\":\"%s\",\"fixture_server\":\"%s\",\"forwarded_frames\":%lu,\"fixture_tcp_frames\":%lu,\"fixture_get_requests\":%lu,\"send_errors\":%lu,\"restoration_frames_sent\":%s,\"post_restore_frames\":%lu,\"recovery_required\":%s,\"failed\":%s,\"gateway_modified\":false,\"host_network_configuration_writes\":0}\n",dry_run?"true":"false",dry_run?1:8,TARGET,SERVER,atomic_load(&s->forwarded),atomic_load(&s->fixture_tcp),atomic_load(&s->fixture_get),atomic_load(&s->errors),dry_run||restored?"false":"true",late,restored||late?"true":"false",fail?"true":"false");
+    printf("{\"dry_run\":%s,\"reason\":\"%s\",\"fault_injected\":%s,\"active_limit_seconds\":%d,\"target\":\"%s\",\"fixture_server\":\"%s\",\"forwarded_frames\":%lu,\"fixture_tcp_frames\":%lu,\"fixture_get_requests\":%lu,\"send_errors\":%lu,\"restoration_frames_sent\":%s,\"post_restore_frames\":%lu,\"recovery_required\":%s,\"failed\":%s,\"gateway_modified\":false,\"host_network_configuration_writes\":0}\n",dry_run?"true":"false",reason,injected?"true":"false",dry_run&&!fault&&!long_guard?1:8,TARGET,SERVER,atomic_load(&s->forwarded),atomic_load(&s->fixture_tcp),atomic_load(&s->fixture_get),atomic_load(&s->errors),dry_run||restored?"false":"true",late,restored||late?"true":"false",fail?"true":"false");
     close(data);close(control);close(lock);close(dir);return restored||late||fail?81:0;
 }

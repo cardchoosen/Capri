@@ -116,7 +116,7 @@ def main():
                     if recovery.returncode:
                         raise RuntimeError('Recovery failed; retaining helper and intent for investigation')
                 if exists(STATE):
-                    shell('rm ' + STATE + '/lock; rmdir ' + STATE)
+                    shell('rm -f ' + ' '.join(STATE + '/' + name for name in ('lock', 'status.json', 'status.tmp', 'stop.request')) + '; rmdir ' + STATE)
                 shell('rm ' + REMOTE, root=False)
                 report['device_artifacts_removed'] = True
             except Exception as exc:
