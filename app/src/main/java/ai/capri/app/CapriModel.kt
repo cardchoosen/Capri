@@ -22,6 +22,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
     val store = Store(app)
     internal val knowledge = ai.capri.app.knowledge.KnowledgeStore(File(app.filesDir, "knowledge"), store.workspace)
     internal val contextHistory = ai.capri.app.knowledge.ContextHistory(File(app.filesDir, "context-history"))
+    private val certificateTool = ai.capri.app.security.CertificateTool(store.workspace, JSONObject(app.assets.open("security/emudhra-2026.json").bufferedReader().use { it.readText() }))
     private val knowledgeTool = ai.capri.app.knowledge.KnowledgeTool(knowledge)
     internal val enhancements = ai.capri.app.retrieval.Enhancements(app)
     private val taskModels = ConcurrentHashMap<String, ModelConfig>()
@@ -182,6 +183,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
             .put(tool("write_file", "写入当前工作区文本文件", props("path", "content"), listOf("path", "content")))
             .put(tool("send_file", "把当前会话工作区已有文件发送到聊天。PNG/JPEG/GIF/WebP内联显示（GIF可播放）；其他文件可分享导出。最大20MB，不发送私钥或凭据。path为相对路径或/workspace/路径，caption可选。", props("path", "caption"), listOf("path")))
             .put(ai.capri.app.model.ModelInfoTool.specification())
+            .put(ai.capri.app.security.CertificateTool.specification())
             .put(ai.capri.app.knowledge.KnowledgeTool.specification())
             .put(ai.capri.app.knowledge.KnowledgeTool.historySpecification())
             .put(ShortTaskContract.specification())
@@ -350,6 +352,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                             }
                             "web_search" -> retrieval.search(session.id, args)
                             "web_read" -> retrieval.read(session.id, args)
+                            "certificate" -> certificateTool.execute(session.id, args)
                             "knowledge" -> knowledgeTool.execute(session.id, session.messages.toList(), args)
                             "model_info" -> ai.capri.app.model.ModelInfoTool.execute(config, store.config(session.id), store.models.all(), args, contextBudget)
                             "context_history" -> contextHistory.query(session.id, session.messages.toList(), args)
