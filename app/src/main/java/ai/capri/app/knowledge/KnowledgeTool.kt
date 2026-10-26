@@ -54,7 +54,7 @@ internal class KnowledgeTool(private val store: KnowledgeStore) {
             长期记忆不会自动塞入上下文，需要时先knowledge.search；引用返回的citation、source、行号/快照版本，未命中明确说明。
             文档索引仅解析UTF-8文本（txt/md/csv/json/jsonl/log/yaml/xml/html），2MB/份，PDF/Office/图片不支持。HTML/XML作为原始文本，不运行脚本。
             context_history 可按query检索当前会话历史，或reference=e编号/c归档ID、offset分页读取。摘要为有来源的摘录，省略的历史必须查原文。
-            禁止因摘要省略旧结果而重做已记录的有副作用操作；先查归档并核验。对话及工具输入预算96KB（UTF-8字节估算，不是精确token计数），输出预留4096 tokens。
+            禁止因摘要省略旧结果而重做已记录的有副作用操作；先查归档并核验。对话及工具输入预算按当前模型上下文窗口自动适配，输出和安全空间由客户端预留；接近预算时归档历史，原文可查询。
         """.trimIndent()
         fun specification(): JSONObject = spec("knowledge", "有来源的记忆和文档检索/管理。action: search/list/remember/index/enable/disable/delete。只在用户要求时写记忆，共享必须明确授权。", JSONObject()
             .put("action", JSONObject().put("type", "string").put("enum", JSONArray(listOf("search", "list", "remember", "index", "enable", "disable", "delete"))))

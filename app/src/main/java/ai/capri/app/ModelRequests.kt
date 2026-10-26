@@ -26,6 +26,7 @@ internal class ModelRequests(
             used++
             try { return block() }
             catch (cancel: CancellationException) { throw cancel }
+            catch (context: ai.capri.app.model.ModelContextRejected) { throw context }
             catch (error: Exception) {
                 val category = when (error) {
                     is ModelHttpError -> "模型接口 HTTP ${error.code}"

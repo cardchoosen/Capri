@@ -45,7 +45,7 @@ import org.json.JSONObject
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Spacer(Modifier.height(4.dp))
                 if (tab == 0) {
-                    Text("输入预算96KB（含工具说明的UTF-8字节估算，非精确token数），输出上限4096 tokens。超预算归档完整工具组，不截断系统规则；单组过大将停止并保留检查点。")
+                    Text("按模型能力自动计算上下文预算，预留输出和安全余量；token为估算并由实际用量校准。超预算归档完整工具组，不截断系统规则；单组过大将停止并保留检查点。")
                     Text(budget, style = MaterialTheme.typography.bodySmall)
                     Text("历史摘录摘要", style = MaterialTheme.typography.titleMedium); Text(summary)
                     OutlinedTextField(query, { query = it }, label = { Text("搜索当前会话历史") }, modifier = Modifier.fillMaxWidth())

@@ -53,7 +53,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
     internal val activeTools = ConcurrentHashMap<String, ToolActivity>()
     val notices = ConcurrentHashMap<String, String>()
     private val recovery = AgentRecovery(File(app.filesDir, "agent-recovery"))
-    private val http = OkHttpClient.Builder().retryOnConnectionFailure(false)
+    private val http = OkHttpClient.Builder().followRedirects(false).followSslRedirects(false).retryOnConnectionFailure(false)
         .connectTimeout(15, TimeUnit.SECONDS).readTimeout(120, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS).callTimeout(120, TimeUnit.SECONDS).build()
     var runtimeBusy = false
@@ -189,6 +189,8 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
             .put(ai.capri.app.retrieval.WebContract.search())
             .put(ai.capri.app.retrieval.WebContract.read())
 
+    private val modelContexts = ai.capri.app.model.ModelContexts(File(app.filesDir, "model-contexts"))
+
     private suspend fun respond(session: Session, config: ModelConfig) {
         val trace = PerformanceTrace(File(store.workspace.root(session.id), "metrics/${java.util.UUID.randomUUID()}.jsonl"))
         var outcome = PerformanceTrace.Status.ERROR
@@ -213,13 +215,16 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
         withContext(Dispatchers.IO) { extensions.restore(session.id) }
         val baseTools = builtinTools()
         val requests = ModelRequests(MAX_MODEL_CALLS)
+        var contextBudget = withContext(Dispatchers.IO) { modelContexts.resolve(config) }
+        var contextAdjustments = 0
         while (requests.used < MAX_MODEL_CALLS) {
             currentCoroutineContext().ensureActive()
             val tools = withContext(Dispatchers.IO) { JSONArray(baseTools.toString()).apply { extensions.specifications(session.id).forEach { put(it) } } }
-            messages = withContext(Dispatchers.IO) { knowledgeTool.refreshResults(session.id, messages); contextHistory.fit(session.id, messages, tools) }
+            messages = withContext(Dispatchers.IO) { knowledgeTool.refreshResults(session.id, messages); contextHistory.fit(session.id, messages, tools, contextBudget) }
             checkpoint()
             notices[session.id] = "思考中"; refresh()
-            val response = requests.execute(onRetry = { attempt, category ->
+            val rawEstimate = ai.capri.app.model.ContextTokens.estimate(messages, tools)
+            val response = try { requests.execute(onRetry = { attempt, category ->
                 notices[session.id] = "模型连接重试 $attempt/2"; refresh()
                 Log.w("CapriModelRequest", "retry=$attempt used=${requests.used} category=$category")
             }, onBackoff = { elapsed -> trace.event(PerformanceTrace.Stage.MODEL_BACKOFF, elapsed, PerformanceTrace.Status.RETURNED) }) {
@@ -229,7 +234,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                 try { withContext(Dispatchers.IO) {
                 val url = config.endpoint.trimEnd('/') + "/chat/completions"
                 require(url.startsWith("https://")) { "模型接口须使用 HTTPS" }
-                val body = JSONObject().put("model", config.model).put("messages", messages).put("tools", tools).put("stream", false).put("max_tokens", ai.capri.app.knowledge.ContextHistory.OUTPUT_TOKENS)
+                val body = JSONObject().put("model", config.model).put("messages", messages).put("tools", tools).put("stream", false).put("max_tokens", contextBudget.output)
                 val startedAt = android.os.SystemClock.elapsedRealtime()
                 val call = http.newCall(Request.Builder().url(url).header("Authorization", "Bearer ${config.key}").post(body.toString().toRequestBody("application/json".toMediaType())).build())
                 suspendCancellableCoroutine<JSONObject> { continuation ->
@@ -246,8 +251,11 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                                 Log.i("CapriModelRequest", "phase=response attempt=${requests.used} http=${r.code} elapsed_ms=${android.os.SystemClock.elapsedRealtime() - startedAt}")
                                 trace.event(PerformanceTrace.Stage.MODEL_HEADERS, PerformanceTrace.elapsed(attemptStarted), PerformanceTrace.Status.RETURNED, attempt = attempt, http = r.code)
                                 val result = runCatching {
-                                    if (!r.isSuccessful) throw ModelHttpError(r.code,
-                                        r.header("Retry-After")?.toLongOrNull()?.coerceIn(0, 600)?.times(1000))
+                                    if (!r.isSuccessful) {
+                                        val errorText = r.peekBody(16384).string()
+                                        ai.capri.app.model.ModelContextRejected.parse(r.code, errorText)?.let { throw it }
+                                        throw ModelHttpError(r.code, r.header("Retry-After")?.toLongOrNull()?.coerceIn(0, 600)?.times(1000))
+                                    }
                                     val bodyStarted = PerformanceTrace.now()
                                     var bodyStatus = PerformanceTrace.Status.ERROR
                                     val raw = try { (r.body?.string() ?: error("空响应")).also { bodyStatus = PerformanceTrace.Status.OK } }
@@ -271,9 +279,19 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                 } catch (cancel: CancellationException) { requestStatus = PerformanceTrace.Status.CANCELLED; throw cancel }
                 finally { trace.event(PerformanceTrace.Stage.MODEL_REQUEST, PerformanceTrace.elapsed(attemptStarted), requestStatus, attempt = attempt) }
             }
+            } catch (rejected: ai.capri.app.model.ModelContextRejected) {
+                if (contextAdjustments++ >= 2) throw ai.capri.app.knowledge.ContextBudgetFailure("模型仍拒绝上下文长度，已停止自动重试；已有工具结果和检查点已保留。")
+                contextBudget = withContext(Dispatchers.IO) { modelContexts.rejected(config, contextBudget, rawEstimate, rejected) }
+                notices[session.id] = "正在适配模型上下文"; refresh()
+                continue
+            }
+            withContext(Dispatchers.IO) {
+                modelContexts.observe(config, rawEstimate, response.optJSONObject("usage")?.optInt("prompt_tokens", 0) ?: 0)
+                contextBudget = modelContexts.resolve(config)
+            }
             val choice = response.getJSONArray("choices").getJSONObject(0)
             if (choice.optString("finish_reason") == "length") {
-                session.messages.add(Entry("status", "模型输出达到4096 token上限，截断的回复或工具参数未执行。已有结果和检查点已保留，请要求分段输出或发送“继续”。"))
+                session.messages.add(Entry("status", "模型输出达到本次 ${contextBudget.output} token上限，截断的回复或工具参数未执行。已有结果和检查点已保留，请要求分段输出或发送“继续”。"))
                 outcome = PerformanceTrace.Status.BUDGET
                 return
             }
