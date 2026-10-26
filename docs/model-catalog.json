@@ -1,0 +1,9 @@
+{
+  "source": "https://models.dev",
+  "package": "@opencode-ai/models",
+  "version": "0.0.115",
+  "generated_at": "2026-10-25T05:30:44.317Z",
+  "sha256": "c4d988acb734ea29a60b54102b2556648d0e93c6ce1e77e0530ed8fac4af948e",
+  "models": 556,
+  "note": "Only context/output metadata of text tool-capable models; API response wins; reference fallback only at matching preset endpoint."
+}

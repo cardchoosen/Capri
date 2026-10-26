@@ -9,7 +9,7 @@ import java.util.concurrent.ConcurrentHashMap
 internal class WebRetrieval(
     private val store: RetrievalStore,
     private val http: RetrievalHttp,
-    private val config: () -> ModelConfig,
+    private val config: (String) -> ModelConfig,
     private val enhanced: () -> Boolean,
     private val enhancementStatus: (String) -> Unit,
     private val network: () -> String,
@@ -29,7 +29,7 @@ internal class WebRetrieval(
         require(args.opt("query") is String); val query = args.getString("query").trim(); require(query.length in 1..300) { "query须为1–300字符" }
         val count = integer(args, "count", 5, 1..10)
         require(count in 1..10); require(!args.has("refresh") || args.opt("refresh") is Boolean)
-        val settings = config(); val useEnhanced = enhanced() && ProviderCapabilities.deepSeek(settings)
+        val settings = config(chat); val useEnhanced = enhanced() && ProviderCapabilities.deepSeek(settings)
         val fingerprint = network() + ":" + useEnhanced + ":" + count
         if (!args.optBoolean("refresh")) store.cachedSearch(chat, query, fingerprint)?.let { return it.toString() }
         val attempts = JSONArray()
@@ -120,7 +120,7 @@ internal class WebRetrieval(
         if (existing?.optString("kind") == "web_page") return slice(existing, offset).toString()
         val url = PublicUrls.parse(existing?.getString("url") ?: args.getString("url")).toString()
         require(offset == 0) { "首次抓取offset须为0；后续用返回的source_id分页" }
-        val settings = config(); val attempts = JSONArray()
+        val settings = config(chat); val attempts = JSONArray()
         val result = withTimeoutOrNull(18000) {
             if (enhanced() && ProviderCapabilities.deepSeek(settings) && available(settings)) {
                 try {

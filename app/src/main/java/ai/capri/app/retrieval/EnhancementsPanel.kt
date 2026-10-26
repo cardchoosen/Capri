@@ -10,7 +10,7 @@ import androidx.compose.ui.unit.dp
 
 @Composable internal fun EnhancementsPanel(vm: CapriModel, onDismiss: () -> Unit) {
     val updates by vm.updates.collectAsState()
-    val config = remember(updates) { vm.store.config() }
+    val config = remember(updates) { vm.store.config(vm.selected) }
     val supported = ProviderCapabilities.deepSeek(config)
     var enabled by remember { mutableStateOf(vm.enhancements.enabled(ProviderCapabilities.DEEPSEEK_WEB)) }
     AlertDialog(onDismissRequest = onDismiss, title = { Text("增强能力") }, text = {

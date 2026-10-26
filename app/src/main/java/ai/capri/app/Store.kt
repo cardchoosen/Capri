@@ -17,7 +17,7 @@ import javax.crypto.spec.GCMParameterSpec
 
 data class Entry(val role: String, val text: String, internal val reveal: FinalReplyReveal? = null, internal val finalReply: Boolean = reveal != null)
 data class Session(val id: String = UUID.randomUUID().toString(), var title: String = "新会话", val messages: MutableList<Entry> = mutableListOf())
-data class ModelConfig(val endpoint: String = "https://api.openai.com/v1", val model: String = "", val key: String = "")
+data class ModelConfig(val endpoint: String = "https://api.openai.com/v1", val model: String = "", val key: String = "", val protocol: String = "CHAT", val accountId: String = "", val contextWindow: Int? = null, val maxOutput: Int? = null, val contextSource: String = "models_api")
 
 class Workspace(private val base: File) {
     fun root(id: String): File {
@@ -70,7 +70,7 @@ class Store(val context: Context) {
             init(KeyGenParameterSpec.Builder("capri-model", KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT).setBlockModes(KeyProperties.BLOCK_MODE_GCM).setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE).build()); generateKey()
         }
     }
-    fun config(): ModelConfig {
+    private fun legacyConfig(): ModelConfig {
         val token = runCatching {
             val raw = prefs.getString("token", null) ?: return@runCatching ""
             val parts = raw.split(":")
@@ -81,10 +81,31 @@ class Store(val context: Context) {
         }.getOrDefault("")
         return ModelConfig(prefs.getString("endpoint", "https://api.openai.com/v1")!!, prefs.getString("model", "")!!, token)
     }
+    private val modelCatalog by lazy { ai.capri.app.model.ModelCatalog(context.assets.open("model_catalog.json").bufferedReader().use { it.readText() }) }
+    internal val models = ai.capri.app.model.ModelAccounts(
+        read = { prefs.getString("model_accounts", null)?.let(::decrypt) },
+        write = { raw -> check(prefs.edit().putString("model_accounts", encrypt(raw)).remove("token").remove("endpoint").remove("model").commit()) { "模型配置保存失败" } },
+        legacy = ::legacyConfig,
+        decorate = { account -> account.copy(models = modelCatalog.enrich(account, account.models)) }
+    )
+    fun config(chat: String? = null): ModelConfig = models.config(chat)
     fun configure(config: ModelConfig) {
+        val provider = ai.capri.app.model.Providers.detect(config.endpoint)
+        val previous = models.selected()?.first
+        models.save(ai.capri.app.model.ModelAccount(id = previous?.id ?: UUID.randomUUID().toString(), provider = provider.id,
+            name = provider.name, endpoint = config.endpoint, key = config.key, protocol = ai.capri.app.model.ModelProtocol.valueOf(config.protocol),
+            models = listOf(ai.capri.app.model.ModelOption(config.model, manual = true))))
+    }
+    private fun encrypt(raw: String): String {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key()) }
-        val token = Base64.encodeToString(cipher.iv, Base64.NO_WRAP) + ":" + Base64.encodeToString(cipher.doFinal(config.key.toByteArray()), Base64.NO_WRAP)
-        prefs.edit().putString("endpoint", config.endpoint.trimEnd('/')).putString("model", config.model).putString("token", token).apply()
+        return Base64.encodeToString(cipher.iv, Base64.NO_WRAP) + ":" + Base64.encodeToString(cipher.doFinal(raw.toByteArray()), Base64.NO_WRAP)
+    }
+    private fun decrypt(raw: String): String {
+        val parts = raw.split(":")
+        return Cipher.getInstance("AES/GCM/NoPadding").run {
+            init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, Base64.decode(parts[0], Base64.NO_WRAP)))
+            String(doFinal(Base64.decode(parts[1], Base64.NO_WRAP)))
+        }
     }
     fun profile(query: String): String {
         val archive = JSONArray(context.assets.open("persona/archive.json").bufferedReader().use { it.readText() })

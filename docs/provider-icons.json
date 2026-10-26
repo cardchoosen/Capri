@@ -1,0 +1,18 @@
+{
+  "package": "@lobehub/icons-static-png",
+  "version": "2.5.0",
+  "source": "https://github.com/lobehub/lobe-icons",
+  "files": {
+    "provider_claude.png": "4dbf0aa77200058e8cb152e990597a95a99963db85632bf8abd8343a249e898e",
+    "provider_deepseek.png": "2cb107c96e3edfc128b04cb8368929c9b9157ecf392b5addf9ae5bc81d8290f1",
+    "provider_gemini.png": "9c6558b792c7eadc1e9f20920b20d83ed7c836d1de6f0d3524f700968090ed33",
+    "provider_grok.png": "dbd7bf8431752d3a1ad00f7b3b28df4ef5bd508cdb8583c3bd9f579936545fa0",
+    "provider_kimi.png": "373db4703eb8b6e5a2e165c49708bb567ef29bb210f63ee8216f5c9ee1cb66ba",
+    "provider_minimax.png": "2cd40985a2ab1390556651e8d389aedbcc5b6fb7054312018461056ccde02699",
+    "provider_openai.png": "375016542ebe78b63c7f36b8f6aee3058f2b706d861e5153fd74f9c27f63b8b7",
+    "provider_openrouter.png": "de7c51476f81c54f0caa5f872d94bbf4f670084363dac70572a87fc60625b096",
+    "provider_qwen.png": "9928978ef7f170aec69aa43798d2bd0ab83cddda2a25fcfbea1c37520f940190",
+    "provider_siliconcloud.png": "672f30e4068d8fb6d25ff12a7be28064810c0be8c59faacd2e18a84d960ac499",
+    "provider_zhipu.png": "35664b374114f485847616930a9fc7d401a41b62828a69278c759994ce414dcb"
+  }
+}

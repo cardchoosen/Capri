@@ -24,9 +24,10 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
     internal val contextHistory = ai.capri.app.knowledge.ContextHistory(File(app.filesDir, "context-history"))
     private val knowledgeTool = ai.capri.app.knowledge.KnowledgeTool(knowledge)
     internal val enhancements = ai.capri.app.retrieval.Enhancements(app)
+    private val taskModels = ConcurrentHashMap<String, ModelConfig>()
     internal val retrieval = ai.capri.app.retrieval.WebRetrieval(
         ai.capri.app.retrieval.RetrievalStore(File(app.filesDir, "web-retrieval")), ai.capri.app.retrieval.PublicHttp(),
-        { store.config() }, { enhancements.enabled(ai.capri.app.retrieval.ProviderCapabilities.DEEPSEEK_WEB) },
+        { chat -> taskModels[chat] ?: store.config(chat) }, { enhancements.enabled(ai.capri.app.retrieval.ProviderCapabilities.DEEPSEEK_WEB) },
         { enhancements.record(it) }, {
             val cm = app.getSystemService(android.net.ConnectivityManager::class.java)
             val net = cm.activeNetwork; val link = net?.let(cm::getLinkProperties); val caps = cm.getNetworkCapabilities(net)
@@ -151,13 +152,15 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
             persist()
             return true
         }
-        val config = store.config()
-        if (config.model.isBlank() || config.key.isBlank()) { notices[session.id] = "请先在设置中配置模型与 API Key"; refresh(); return false }
+        val config = store.config(chat)
+        if (config.model.isBlank() || config.key.isBlank()) { notices[session.id] = "请先添加 API 并选择模型"; refresh(); return false }
+        store.models.selected(chat)?.let { store.models.select(chat, it.first.id, it.second.id) }
         session.messages.forEach { it.reveal?.finish() }
         session.messages.add(Entry("user", text.trim()))
         if (session.title == "新会话") session.title = text.take(20)
         persist()
         val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
+            taskModels[chat] = config
             try { respond(session, config) }
             catch (e: CancellationException) { session.messages.add(Entry("status", "执行已停止")); throw e }
             catch (e: ai.capri.app.knowledge.ContextBudgetFailure) { session.messages.add(Entry("status", e.message.orEmpty())) }
@@ -166,7 +169,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                 session.messages.add(Entry("status", "${e.category}，模型回复未完成。已记录的工具结果保留，持续终端不会因此自动停止。发送“继续”可接续；结果未确认的操作会先核验，不直接重跑。"))
             }
             catch (e: Exception) { session.messages.add(Entry("status", "客户端处理未完成。已有工具操作不会回滚，请查看执行记录；发送“继续”可从检查点核验。")); Log.w("CapriModelRequest", "client_failure type=${e.javaClass.simpleName}") }
-            finally { activeTools.remove(session.id); jobs.remove(session.id); notices.remove(session.id); persist() }
+            finally { taskModels.remove(chat); activeTools.remove(session.id); jobs.remove(session.id); notices.remove(session.id); persist() }
         }
         jobs[session.id] = job; notices[session.id] = "思考中"; refresh(); job.start()
         return true
@@ -195,7 +198,13 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
         val trace = PerformanceTrace(File(store.workspace.root(session.id), "metrics/${java.util.UUID.randomUUID()}.jsonl"))
         var outcome = PerformanceTrace.Status.ERROR
         try {
-        val saved = withContext(Dispatchers.IO) { recovery.load(session.id) }
+        val saved = withContext(Dispatchers.IO) { recovery.load(session.id) }?.let { checkpoint ->
+            val signedHistoryMissing = config.protocol != "CHAT" && (0 until checkpoint.length()).any {
+                val m = checkpoint.getJSONObject(it); m.has("tool_calls") && !m.has("_capri_wire")
+            }
+            if (!signedHistoryMissing && checkpoint.optJSONObject(0)?.optString("_capri_scope") == ai.capri.app.model.ModelWire.scope(config)) checkpoint
+            else ai.capri.app.model.ModelWire.portable(checkpoint)
+        }
         val continuing = saved != null && RecoveryMessages.isContinuation(session.messages.last().text)
         var messages = if (saved != null) RecoveryMessages.forResume(saved) else JSONArray()
         val rules = getApplication<Application>().assets.open("persona/core.txt").bufferedReader().use { it.readText() } + "\n" +
@@ -209,6 +218,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
         } else {
             messages = withContext(Dispatchers.IO) { contextHistory.fresh(session.id, session.messages.toList(), rules) }
         }
+        messages.getJSONObject(0).put("_capri_scope", ai.capri.app.model.ModelWire.scope(config))
         suspend fun checkpoint() = withContext(Dispatchers.IO) { recovery.save(session.id, messages) }
         checkpoint()
 
@@ -232,11 +242,11 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                 val attempt = requests.used
                 var requestStatus = PerformanceTrace.Status.ERROR
                 try { withContext(Dispatchers.IO) {
-                val url = config.endpoint.trimEnd('/') + "/chat/completions"
+                val url = ai.capri.app.model.ModelWire.url(config).toString()
                 require(url.startsWith("https://")) { "模型接口须使用 HTTPS" }
-                val body = JSONObject().put("model", config.model).put("messages", messages).put("tools", tools).put("stream", false).put("max_tokens", contextBudget.output)
+                val body = ai.capri.app.model.ModelWire.request(config, messages, tools, contextBudget.output)
                 val startedAt = android.os.SystemClock.elapsedRealtime()
-                val call = http.newCall(Request.Builder().url(url).header("Authorization", "Bearer ${config.key}").post(body.toString().toRequestBody("application/json".toMediaType())).build())
+                val call = http.newCall(ai.capri.app.model.ModelApi.headers(config, Request.Builder().url(url)).post(body.toString().toRequestBody("application/json".toMediaType())).build())
                 suspendCancellableCoroutine<JSONObject> { continuation ->
                     continuation.invokeOnCancellation { call.cancel() }
                     call.enqueue(object : Callback {
@@ -264,7 +274,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                                     var parseStatus = PerformanceTrace.Status.ERROR
                                     var usage: JSONObject? = null
                                     try {
-                                        JSONObject(raw).also {
+                                        ai.capri.app.model.ModelWire.response(config, JSONObject(raw)).also {
                                             it.getJSONArray("choices").getJSONObject(0).getJSONObject("message")
                                             usage = it.optJSONObject("usage"); parseStatus = PerformanceTrace.Status.OK
                                         }

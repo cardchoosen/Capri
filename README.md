@@ -3,6 +3,7 @@
 Android 原生个人 AI Agent，在手机上执行任务。
 
 - 多会话与独立工作区
+- 多模型 API、会话内模型切换、厂商 Logo 与上下文容量显示
 - Python、Node.js、C/C++ 与持续终端
 - Android 原生工具与浏览器操作
 - 全局 Git / SSH 配置

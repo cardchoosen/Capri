@@ -48,3 +48,10 @@ Markdown使用Markwon 4.6.2（core/tables/strikethrough），源码及许可：h
 - Readability4J 1.0.8：正文提取回退，Apache-2.0；https://github.com/dankito/Readability4J 。其README说明源自Mozilla Readability；上游及各文件许可按对应源码保留，https://github.com/mozilla/readability 。
 - desugar_jdk_libs 2.1.5：Android旧版本Java API兼容，Apache-2.0及随源码第三方声明；https://github.com/google/desugar_jdk_libs 。
 - 多源适配/统一结果参考SearXNG及Open WebUI的架构思路，没有复制其实现代码；搜索请求由原生OkHttp完成，不使用WebView或浏览器登录态。
+
+
+## 模型厂商 Logo（V2-07）
+
+内置11项厂商/平台PNG来自LobeHub Lobe Icons，`@lobehub/icons-static-png` 2.5.0、dark变体；MIT，原许可证随APK保存于assets/licenses/lobe-icons.txt。仅作为品牌识别，来源https://github.com/lobehub/lobe-icons ，文件摘要见provider-icons.json；界面不从远端加载图标。
+
+模型容量参考数据来自Models.dev官方`@opencode-ai/models` 0.0.115离线快照（2026-10-25），仅提取已纳入厂商的556条文本/工具模型context/output字段，约32KB；MIT，许可证assets/licenses/models-dev.txt，摘要见model-catalog.json。https://github.com/anomalyco/models.dev 。接口数据优先，资料回退界面带≈，不作为账号实际额度或中转服务窗口保证。

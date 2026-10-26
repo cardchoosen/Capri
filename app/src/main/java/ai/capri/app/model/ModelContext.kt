@@ -28,7 +28,11 @@ internal object ContextTokens {
         } }
         return ceil(units).toLong()
     }
-    fun message(message: JSONObject): Long = text(message.toString()) + 12
+    fun message(message: JSONObject): Long {
+        message.optJSONObject("_capri_wire")?.optJSONArray("payload")?.let { return text(it.toString()) + 12 }
+        val public = JSONObject(message.toString()); public.remove("_capri_scope")
+        return text(public.toString()) + 12
+    }
     fun estimate(messages: JSONArray, tools: JSONArray): Long = 16 + text(tools.toString()) +
         (0 until messages.length()).sumOf { message(messages.getJSONObject(it)) }
 }
@@ -63,11 +67,15 @@ internal class ModelContextRejected(val windowHint: Int?) : Exception("模型拒
             val explicit = code in setOf("context_length_exceeded", "context_window_exceeded", "max_context_length_exceeded") ||
                 (Regex("(maximum context length|context window|context length limit)").containsMatchIn(message) &&
                     Regex("(exceed|too long|maximum context length)").containsMatchIn(message))
-            if (!explicit) return null
+            val anthropicOverflow = message.startsWith("prompt is too long")
+            val geminiOverflow = message.contains("input token count") && message.contains("exceeds the maximum number of tokens")
+            if (!explicit && !anthropicOverflow && !geminiOverflow) return null
             val hint = Regex("(?:maximum context length is|context (?:window|length limit)(?: is|:| of)?)\\s*([0-9][0-9,]*)", RegexOption.IGNORE_CASE)
                 .find(message)?.groupValues?.get(1)?.replace(",", "")?.toLongOrNull()
                 ?.takeIf { it in 1024..16_777_216 }?.toInt()
-            return ModelContextRejected(hint)
+            val nativeHint = (Regex("([0-9][0-9,]*) maximum").find(message)?.groupValues?.get(1)
+                ?: Regex("maximum number of tokens allowed \\(([0-9][0-9,]*)\\)").find(message)?.groupValues?.get(1))
+            return ModelContextRejected(hint ?: nativeHint?.replace(",", "")?.toLongOrNull()?.takeIf { it in 1024..16_777_216 }?.toInt())
         }
     }
 }
@@ -84,7 +92,7 @@ internal class ModelContexts(
         .retryOnConnectionFailure(false).connectTimeout(4, TimeUnit.SECONDS).readTimeout(4, TimeUnit.SECONDS)
         .callTimeout(5, TimeUnit.SECONDS).build()
     private fun identity(config: ModelConfig): String = MessageDigest.getInstance("SHA-256")
-        .digest((config.endpoint.trimEnd('/') + "\u0000" + config.model + "\u0000" + config.key).toByteArray())
+        .digest((config.endpoint.trimEnd('/') + "\u0000" + config.model + "\u0000" + config.protocol + "\u0000" + config.key).toByteArray())
         .joinToString("") { "%02x".format(it) }
     private fun read(config: ModelConfig): JSONObject = runCatching {
         JSONObject(File(root, identity(config) + ".json").readText())
@@ -100,8 +108,17 @@ internal class ModelContexts(
     }
     suspend fun resolve(config: ModelConfig): ContextBudget = mutex.withLock {
         val record = read(config)
+        if (config.contextWindow != null && record.optString("source") != "server_feedback" &&
+            (record.optInt("window") != config.contextWindow || record.optInt("max_output") != (config.maxOutput ?: 0) || record.optString("source") != config.contextSource)) {
+            record.put("window", config.contextWindow).put("max_output", config.maxOutput ?: JSONObject.NULL)
+                .put("source", config.contextSource).put("expires", now() + 86_400_000)
+            save(config, record)
+        }
         if (record.optLong("expires") <= now()) {
-            val capacity = try { discover?.invoke(config) ?: if (discover == null) metadata(config) else null }
+            val capacity = try { discover?.invoke(config) ?: if (discover == null) {
+                if (config.contextWindow != null) ModelCapacity(config.contextWindow, config.maxOutput, config.contextSource)
+                else if (config.protocol == "CHAT" || config.protocol == "RESPONSES") metadata(config) else null
+            } else null }
                 catch (cancel: CancellationException) { throw cancel }
                 catch (_: Exception) { null }
             val selected = capacity ?: official(config) ?: ModelCapacity(32768, null, "conservative_fallback")

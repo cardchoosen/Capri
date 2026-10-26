@@ -196,6 +196,7 @@ class MainActivity : ComponentActivity() {
                                 modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp))
                         }
                         notice?.takeUnless { vm.activeTools.containsKey(session.id) }?.let { Text(it, color = Green, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp)) }
+                        ai.capri.app.model.ModelPicker(vm, session.id) { settings = true }
                         Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp).border(1.dp, if (busy) Red else Line, RoundedCornerShape(2.dp)).background(Panel, RoundedCornerShape(2.dp)).padding(2.dp), verticalAlignment = Alignment.Bottom) {
                             IconButton(enabled = !vm.migrating, onClick = { importer.launch(arrayOf("*/*")) }) { Icon(Icons.Outlined.Add, "导入文件", tint = Muted) }
                             TextField(value = input, onValueChange = { input = it }, modifier = Modifier.weight(1f), placeholder = { Text("下达你的指令…", fontSize = 14.sp) }, maxLines = 5, colors = TextFieldDefaults.colors(focusedContainerColor = Panel, unfocusedContainerColor = Panel, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent))
@@ -223,6 +224,8 @@ class MainActivity : ComponentActivity() {
                     }
                     2 -> {
                         Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp)) {
+                            OutlinedButton(onClick = { settings = true }) { Text("模型 API") }
+                            ai.capri.app.model.ModelBalances(vm)
                             Text("执行环境", fontSize = 22.sp); Spacer(Modifier.height(12.dp))
                             OutlinedButton(onClick = { nativeCapabilities = true }) { Icon(Icons.Outlined.PhonelinkSetup, null, Modifier.size(16.dp)); Spacer(Modifier.width(8.dp)); Text("Android 原生能力") }
                             OutlinedButton(onClick = { terminalPanel = true }) { Icon(Icons.Outlined.Terminal, null, Modifier.size(16.dp)); Spacer(Modifier.width(8.dp)); Text("持续终端") }
@@ -250,32 +253,12 @@ class MainActivity : ComponentActivity() {
     if(extensionsPanel) ai.capri.app.extensions.ExtensionsPanel(vm) { extensionsPanel = false }
     if(sshPanel) SshPanel(vm.runtime, session.id, onDismiss = { sshPanel = false })
     if(gitAccounts) ai.capri.app.git.GitAccountsDialog(vm.gitAccounts, onDismiss = { gitAccounts = false })
-    if(settings) Settings(vm, onDismiss = { settings = false })
+    if(settings) ai.capri.app.model.ModelsPanel(vm, onDismiss = { settings = false })
     if(nativeCapabilities) NativeCapabilities(vm, onDismiss = { nativeCapabilities = false })
     if(terminalPanel) ai.capri.app.terminal.TerminalPanel(vm.terminals, session.id, onDismiss = { terminalPanel = false })
 }
 
 @Composable private fun Empty(title: String, subtitle: String) { Column(Modifier.fillMaxWidth().padding(36.dp)) { Text(title, color = White); Spacer(Modifier.height(8.dp)); Text(subtitle, color = Muted, fontSize = 13.sp) } }
-
-@Composable private fun Settings(vm: CapriModel, onDismiss: () -> Unit) {
-    val saved = remember { vm.store.config() }
-    var endpoint by remember { mutableStateOf(saved.endpoint) }
-    var model by remember { mutableStateOf(saved.model) }
-    var key by remember { mutableStateOf(saved.key) }
-    var error by remember { mutableStateOf("") }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("连接模型") }, text = {
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Agent 和文件运行在手机上，推理通过你配置的兼容 Chat Completions 接口完成。", color = Muted, fontSize = 12.sp)
-            OutlinedTextField(endpoint, { endpoint = it }, label = { Text("API Base URL") }, singleLine = true)
-            OutlinedTextField(model, { model = it }, label = { Text("模型 ID") }, singleLine = true)
-            OutlinedTextField(key, { key = it }, label = { Text("API Key") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
-            Text("密钥由 Android Keystore 加密。核心人格随应用内置，Agent 无档案编辑工具。", color = Muted, fontSize = 11.sp)
-            if(error.isNotEmpty()) Text(error, color = Red)
-        }
-    }, confirmButton = { TextButton(onClick = {
-        if(!endpoint.startsWith("https://") || model.isBlank() || key.isBlank()) error = "请填写 HTTPS 地址、模型和密钥" else { vm.store.configure(ModelConfig(endpoint.trim(), model.trim(), key.trim())); vm.refresh(); onDismiss() }
-    }) { Text("保存") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } })
-}
 
 @Composable private fun NativeCapabilities(vm: CapriModel, onDismiss: () -> Unit) {
     val capabilities = vm.androidTools.capabilities()
