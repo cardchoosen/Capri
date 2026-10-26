@@ -29,12 +29,15 @@
 #define TARGET "192.168.1.10"
 #define SERVER "192.168.1.16"
 struct context { unsigned char magic[8];int index;uint32_t self,target,server;unsigned char own[6],client[6],backend[6]; };
-struct counters { atomic_ulong forwarded,fixture_tcp,fixture_get,errors; };
+struct counters { atomic_ulong forwarded,fixture_tcp,fixture_get,errors,proxy_admitted; };
 static struct counters *current_counters;
 static volatile sig_atomic_t stop_now;
 static void stopped(int value) { (void)value;stop_now=1; }
 static long long now_ms(void) { struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return (long long)t.tv_sec*1000+t.tv_nsec/1000000; }
 static void delay(int ms) { struct timespec t={ms/1000,(ms%1000)*1000000};nanosleep(&t,NULL); }
+#ifdef CAPRI_HTTP_PROXY_TEST
+#include "fixed_proxy_nat.h"
+#endif
 static int directory(int create) {
     if(geteuid()!=0)return -1;
     if(create && mkdir(DIR,0700) && errno!=EEXIST)return -1;
@@ -125,6 +128,11 @@ static int relay_one(int fd,const struct context *c,struct counters *s) {
             atomic_fetch_add(&s->fixture_tcp,1);
             unsigned data=(tcp[12]>>4)*4u;
             if(data>=20 && length>=(ssize_t)(14+header+data+4) && !memcmp(tcp+data,"GET ",4))atomic_fetch_add(&s->fixture_get,1);
+#ifdef CAPRI_HTTP_PROXY_TEST
+            /* AF_PACKET receives a clone; leave fixture TCP to kernel PREROUTING/local delivery.
+               Raw-forwarding it too would create a duplicate path bypassing the proxy. */
+            atomic_fetch_add(&s->proxy_admitted,1);return 1;
+#endif
         }
     }
     memcpy(frame,c->backend,6);memcpy(frame+6,c->own,6);
@@ -137,7 +145,11 @@ static int reap(pid_t pid) {
     while(now_ms()<deadline){pid_t r=waitpid(pid,&status,WNOHANG);if(r==pid)return 0;if(r<0&&errno!=EINTR)return -1;delay(20);}
     kill(pid,SIGKILL);while(waitpid(pid,&status,0)<0&&errno==EINTR){}return 0;
 }
-struct intent { struct context c;uint32_t dry_run; };
+struct intent { struct context c;uint32_t dry_run;
+#ifdef CAPRI_HTTP_PROXY_TEST
+    char nat_chain[25];
+#endif
+};
 static int present(int dir,const char *name) { struct stat s;return fstatat(dir,name,&s,AT_SYMLINK_NOFOLLOW)==0; }
 static int phase(int dir,const char *name,int dry,int restored) {
     unlinkat(dir,"status.tmp",0);
@@ -201,7 +213,13 @@ int main(int argc,char **argv) {
         if(n!=sizeof(saved))return 68;memcpy(&saved,data,sizeof(saved));c=saved.c;dry_run=(int)saved.dry_run;
         if(saved.dry_run>1||memcmp(c.magic,"CPRPAIR1",8)||(!dry_run&&!matching(&c)))return 69;
         int result=0;
+#ifdef CAPRI_HTTP_PROXY_TEST
+        if(!nat_valid(saved.nat_chain))return 69;
+#endif
         if(!dry_run){int fd=arp_socket(&c);if(fd<0)return 74;result=restore_neighbor(fd,&c);close(fd);}
+#ifdef CAPRI_HTTP_PROXY_TEST
+        if(nat_cleanup(saved.nat_chain))result=-1;
+#endif
         if(!result){if(unlinkat(dir,"intent",0))return 75;unlinkat(dir,"stop.request",0);phase(dir,"recovered",dry_run,!dry_run);fsync(dir);}
         if(result)return 75;close(lock);return status_or_stop(dir,0);
     }
@@ -209,13 +227,16 @@ int main(int argc,char **argv) {
     if(present(dir,"stop.request"))return 87;
     if(context(&c))return 71;
     saved.c=c;saved.dry_run=(uint32_t)dry_run;
+#ifdef CAPRI_HTTP_PROXY_TEST
+    if(!proxy_ready()||nat_name(saved.nat_chain))return 89;
+#endif
     int out=local_file(dir,"intent",O_WRONLY|O_CREAT|O_EXCL);if(out<0)return 72;
     int good=write(out,&saved,sizeof(saved))==(ssize_t)sizeof(saved)&&fsync(out)==0;close(out);
     if(!good||fsync(dir)||phase(dir,"starting",dry_run,0))return 73;
     int control=arp_socket(&c);if(control<0)return 74;
     int data=receiver(&c);if(data<0){unlinkat(dir,"intent",0);return 76;}
     struct counters *s=mmap(NULL,sizeof(*s),PROT_READ|PROT_WRITE,MAP_SHARED|MAP_ANONYMOUS,-1,0);if(s==MAP_FAILED){unlinkat(dir,"intent",0);return 77;}
-    atomic_init(&s->forwarded,0);atomic_init(&s->fixture_tcp,0);atomic_init(&s->fixture_get,0);atomic_init(&s->errors,0);current_counters=s;
+    atomic_init(&s->forwarded,0);atomic_init(&s->fixture_tcp,0);atomic_init(&s->fixture_get,0);atomic_init(&s->errors,0);atomic_init(&s->proxy_admitted,0);current_counters=s;
     signal(SIGTERM,stopped);signal(SIGINT,stopped);signal(SIGHUP,SIG_IGN);signal(SIGPIPE,SIG_IGN);signal(SIGCHLD,SIG_DFL);
     int ready[2];if(pipe2(ready,O_CLOEXEC)){unlinkat(dir,"intent",0);return 78;}
     pid_t owner=getpid(),child=fork();if(child<0){close(ready[0]);close(ready[1]);unlinkat(dir,"intent",0);return 78;}
@@ -229,16 +250,36 @@ int main(int argc,char **argv) {
             struct pollfd p={data,POLLIN,0};int ready=poll(&p,1,50);
             if(ready>0&&relay_one(data,&c,s)<0)break;
         }
-        int restored=dry_run?0:restore_neighbor(control,&c);_exit(restored?80:0);
+        int restored=dry_run?0:restore_neighbor(control,&c);
+#ifdef CAPRI_HTTP_PROXY_TEST
+        if(getppid()!=owner&&nat_cleanup(saved.nat_chain))restored=-1;
+#endif
+        _exit(restored?80:0);
     }
     close(ready[1]);struct pollfd readiness={ready[0],POLLIN,0};char value=0;
     int armed=poll(&readiness,1,2000)>0&&read(ready[0],&value,1)==1&&value=='1';close(ready[0]);
     if(!armed){kill(child,SIGTERM);reap(child);unlinkat(dir,"intent",0);phase(dir,"failed_before_start",dry_run,0);return 84;}
-    if(phase(dir,"running",dry_run,0)){kill(child,SIGTERM);reap(child);unlinkat(dir,"intent",0);return 88;}
+#ifdef CAPRI_HTTP_PROXY_TEST
+    if(nat_apply(saved.nat_chain)) {
+        kill(child,SIGTERM);reap(child);
+        if(!nat_cleanup(saved.nat_chain))unlinkat(dir,"intent",0);
+        phase(dir,"nat_setup_failed",dry_run,0);return 90;
+    }
+#endif
+    if(phase(dir,"running",dry_run,0)){kill(child,SIGTERM);reap(child);
+#ifdef CAPRI_HTTP_PROXY_TEST
+        if(!nat_cleanup(saved.nat_chain))unlinkat(dir,"intent",0);
+#else
+        unlinkat(dir,"intent",0);
+#endif
+        return 88;}
     long long started=now_ms(),deadline=started+(dry_run&&!fault&&!long_guard?1000:8000),next=0;int fail=0;
     const char *reason="deadline";int injected=0;
     while(!stop_now&&now_ms()<deadline) {
         if(present(dir,"stop.request")){reason="stop_requested";break;}
+        #ifdef CAPRI_HTTP_PROXY_TEST
+        if(!dry_run&&now_ms()>=next&&!proxy_ready()){fail=1;reason="proxy_unavailable";break;}
+#endif
         if(!dry_run&&now_ms()>=next){if(!matching(&c)||announce(control,&c,0)){fail=1;reason="context_or_send_failure";break;}next=now_ms()+1000;}
         if(fault&&!injected&&now_ms()-started>=(dry_run?250:2000)) {
             injected=1;
@@ -254,16 +295,27 @@ int main(int argc,char **argv) {
     phase(dir,"stopping",dry_run,0);
     int restored=dry_run?0:restore_neighbor(control,&c);
     if(child>0){kill(child,SIGTERM);reap(child);}
-    unsigned long before=atomic_load(&s->forwarded);
+    unsigned long before=atomic_load(&s->forwarded)+atomic_load(&s->proxy_admitted);
     long long observe=now_ms()+(dry_run?0:2500);
     while(now_ms()<observe) {
         struct pollfd p={data,POLLIN,0};if(poll(&p,1,50)>0 && relay_one(data,&c,s)>0)restore_neighbor(control,&c);
     }
-    unsigned long late=atomic_load(&s->forwarded)-before;
+    unsigned long late=atomic_load(&s->forwarded)+atomic_load(&s->proxy_admitted)-before;
+#ifdef CAPRI_HTTP_PROXY_TEST
+    /* Stop announcements and finish neighbor restoration while engine and NAT still live. */
+    if(nat_cleanup(saved.nat_chain))restored=-1;
+    printf("{\"proxy_admitted_frames\":%lu,\"nat_cleanup_succeeded\":%s}\n",atomic_load(&s->proxy_admitted),restored?"false":"true");
+#endif
     if(!restored&&!late){if(unlinkat(dir,"intent",0))restored=-1;}
     unlinkat(dir,"stop.request",0);
     phase(dir,restored||late?"needs_recovery":"stopped",dry_run,!dry_run&&!restored);
     fsync(dir);
-    printf("{\"dry_run\":%s,\"reason\":\"%s\",\"fault_injected\":%s,\"active_limit_seconds\":%d,\"target\":\"%s\",\"fixture_server\":\"%s\",\"forwarded_frames\":%lu,\"fixture_tcp_frames\":%lu,\"fixture_get_requests\":%lu,\"send_errors\":%lu,\"restoration_frames_sent\":%s,\"post_restore_frames\":%lu,\"recovery_required\":%s,\"failed\":%s,\"gateway_modified\":false,\"host_network_configuration_writes\":0}\n",dry_run?"true":"false",reason,injected?"true":"false",dry_run&&!fault&&!long_guard?1:8,TARGET,SERVER,atomic_load(&s->forwarded),atomic_load(&s->fixture_tcp),atomic_load(&s->fixture_get),atomic_load(&s->errors),dry_run||restored?"false":"true",late,restored||late?"true":"false",fail?"true":"false");
+    printf("{\"dry_run\":%s,\"reason\":\"%s\",\"fault_injected\":%s,\"active_limit_seconds\":%d,\"target\":\"%s\",\"fixture_server\":\"%s\",\"forwarded_frames\":%lu,\"fixture_tcp_frames\":%lu,\"fixture_get_requests\":%lu,\"send_errors\":%lu,\"restoration_frames_sent\":%s,\"post_restore_frames\":%lu,\"recovery_required\":%s,\"failed\":%s,\"gateway_modified\":false,\"host_network_configuration_modified\":%s}\n",dry_run?"true":"false",reason,injected?"true":"false",dry_run&&!fault&&!long_guard?1:8,TARGET,SERVER,atomic_load(&s->forwarded),atomic_load(&s->fixture_tcp),atomic_load(&s->fixture_get),atomic_load(&s->errors),dry_run||restored?"false":"true",late,restored||late?"true":"false",fail?"true":"false",
+#ifdef CAPRI_HTTP_PROXY_TEST
+    "true"
+#else
+    "false"
+#endif
+    );
     close(data);close(control);close(lock);close(dir);return restored||late||fail?81:0;
 }

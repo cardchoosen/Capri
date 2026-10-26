@@ -93,3 +93,24 @@ python3 tools/hacker/verify_http_proxy.py --adb /path/to/adb --serial DEVICE_SER
 ```
 
 The vivo entry is the Pixel URL printed by the runner. Accessing it directly verifies the proxy engine; it does **not** prove transparent interception of the original Mac URL. Root L2 relay and ordinary-UID proxy remain separate until a separately designed scoped bridge and its recovery are verified. Opening Capri to the foreground correlated with successful ordinary-UID LAN access in this trial; the earlier DNS/TCP failures have not been conclusively attributed. App lifecycle/network policy needs explicit treatment before app integration.
+
+## Fixed original-URL HTTP proxy bridge
+
+The explicit `CAPRI_HTTP_PROXY_TEST` build of `pair_relay.c` includes `fixed_proxy_nat.h`. The normal relay build has no NAT behavior. The proxy build checks the existing engine's fixed health endpoint before creating intent, writes a random owner chain into its durable intent, then creates only one NAT chain, its tagged REDIRECT rule and an exact wlan0/vivo-source/Mac-destination/TCP-18765 PREROUTING jump. It does not change global forwarding, routes, policies or trust stores. The engine's Pixel-source upstream is outside the jump, preventing loops.
+
+The packet receiver leaves selected, unfragmented fixture TCP frames to kernel local delivery instead of also raw-forwarding them. Other admitted pair traffic retains the existing L2 relay behavior. Scope remains the fixed developer fixture, IPv4 and small ordinary HTTP requests; it is not a general transparent proxy or fragmented-traffic guarantee.
+
+The worker is ready before installing the hook and announcing the temporary path. Engine health is rechecked before each periodic announcement; failure ends the active phase. Normal shutdown restores the target's direct neighbor path while engine/NAT remain available, observes late selected frames, stops the worker and removes only its exact tagged rules/empty chain. Extra rules or references cause cleanup failure and journal retention; no flush/global restore is used. The worker attempts NAT cleanup if its parent disappears; new-process recovery also handles the recorded chain. These NAT fault paths are implemented but have **not** been fault-injected in active traffic. Changed network identity can prevent recovery and requires investigation with the journal retained. Previous plain-relay fault evidence is not proxy-fault evidence.
+
+The proxy and normal builds share the same task lock/state directory to prevent overlap. Their intent sizes differ: do not replace binaries while a task or journal exists; the original owning build must recover first. The proxy build emits an extra JSON metrics line (admitted frames/NAT cleanup); the new verifier merges both lines. It reports network configuration mutation even in its no-ARP guard mode, because that mode really creates/removes the scoped NAT rules.
+
+```sh
+# Start the bounded Mac fixture and ordinary-UID proxy engine separately first.
+python3 tools/hacker/verify_fixed_proxy.py --adb /path/to/adb --serial DEVICE_SERIAL --ndk /path/to/ndk --output work/hacker-prototype/UNIQUE_GUARD
+# Only with fresh, visible vivo requests to the original Mac fixture URL:
+python3 tools/hacker/verify_fixed_proxy.py --adb /path/to/adb --serial DEVICE_SERIAL --ndk /path/to/ndk --active --fixture work/hacker-prototype/FIXTURE --output work/hacker-prototype/UNIQUE_ACTIVE
+```
+
+2026-10-26 observations: no-ARP NAT lifecycle passed; one eight-second original-URL vivo trial passed with 45 admitted fixture TCP frames / 7 GET frames, 7 marked backend probes, zero send errors/client timeout increase, maximum request gap 1.257492s, three direct probes after stopping and zero late selected frames during restoration observation. NAT/filter/routing/policy/selected sysctl/SELinux baselines matched; helper artifacts were removed. Engine-unavailable guard exited 89 without intent or baseline changes. Three normal-build no-ARP recovery regressions passed. Root helper access is still through ADB authorization, not Capri app Root integration; no APK or Skill has been shipped.
+
+The companion engine run was deliberately stopped by the operator before its hold deadline; its runner therefore recorded `Engine exited during hold` and exit 1, while engine exit was 0 and `engine_stopped` was true. Preserve that diagnostic separately from the passing bridge report. Both engine and Mac service were stopped after the bridge test. A successful normal-stop trial does not prove recovery after all helpers disappear, Wi-Fi changes, arbitrary-target operation, HTTPS, or the eMudhra case.
