@@ -154,9 +154,9 @@ static int present(int dir,const char *name) { struct stat s;return fstatat(dir,
 static int phase(int dir,const char *name,int dry,int restored) {
     unlinkat(dir,"status.tmp",0);
     int fd=local_file(dir,"status.tmp",O_WRONLY|O_CREAT|O_EXCL);if(fd<0)return -1;
-    char metrics[192]="null";
-    if(current_counters)snprintf(metrics,sizeof(metrics),"{\"forwarded_frames\":%lu,\"fixture_get_requests\":%lu,\"send_errors\":%lu}",atomic_load(&current_counters->forwarded),atomic_load(&current_counters->fixture_get),atomic_load(&current_counters->errors));
-    char json[512];int n=snprintf(json,sizeof(json),"{\"phase\":\"%s\",\"dry_run\":%s,\"restoration_frames_sent\":%s,\"metrics\":%s}",name,dry?"true":"false",restored?"true":"false",metrics);
+    char metrics[256]="null";
+    if(current_counters)snprintf(metrics,sizeof(metrics),"{\"forwarded_frames\":%lu,\"fixture_get_requests\":%lu,\"send_errors\":%lu,\"proxy_admitted_frames\":%lu}",atomic_load(&current_counters->forwarded),atomic_load(&current_counters->fixture_get),atomic_load(&current_counters->errors),atomic_load(&current_counters->proxy_admitted));
+    char json[640];int n=snprintf(json,sizeof(json),"{\"phase\":\"%s\",\"dry_run\":%s,\"restoration_frames_sent\":%s,\"metrics\":%s}",name,dry?"true":"false",restored?"true":"false",metrics);
     int good=write(fd,json,(size_t)n)==n&&fsync(fd)==0;close(fd);
     return !good||renameat(dir,"status.tmp",dir,"status.json")||fsync(dir)?-1:0;
 }
@@ -169,7 +169,7 @@ static int status_or_stop(int dir,int stop) {
         if(fd<0 && errno!=EEXIST){close(lock);return 86;}
         if(fd>=0){fsync(fd);close(fd);fsync(dir);}
     }
-    char value[512]="null";int fd=local_file(dir,"status.json",O_RDONLY);
+    char value[640]="null";int fd=local_file(dir,"status.json",O_RDONLY);
     if(fd>=0){ssize_t n=read(fd,value,sizeof(value)-1);close(fd);if(n>0)value[n]=0;}
     int pending=present(dir,"intent");
     printf("{\"active\":%s,\"intent_present\":%s,\"recovery_required\":%s,\"stop_requested\":%s,\"state\":%s}\n",active?"true":"false",pending?"true":"false",!active&&pending?"true":"false",active&&stop?"true":"false",value);
@@ -211,12 +211,18 @@ int main(int argc,char **argv) {
         if(journal<0){if(present(dir,"intent"))return 68;unlinkat(dir,"stop.request",0);close(lock);return status_or_stop(dir,0);}
         unsigned char data[sizeof(saved)+1];ssize_t n=read(journal,data,sizeof(data));close(journal);
         if(n!=sizeof(saved))return 68;memcpy(&saved,data,sizeof(saved));c=saved.c;dry_run=(int)saved.dry_run;
-        if(saved.dry_run>1||memcmp(c.magic,"CPRPAIR1",8)||(!dry_run&&!matching(&c)))return 69;
+        if(saved.dry_run>1||memcmp(c.magic,"CPRPAIR1",8))return 69;
+#ifndef CAPRI_HTTP_PROXY_TEST
+        if(!dry_run&&!matching(&c))return 69;
+#endif
         int result=0;
 #ifdef CAPRI_HTTP_PROXY_TEST
         if(!nat_valid(saved.nat_chain))return 69;
 #endif
-        if(!dry_run){int fd=arp_socket(&c);if(fd<0)return 74;result=restore_neighbor(fd,&c);close(fd);}
+        if(!dry_run){
+            if(!matching(&c))result=-1;
+            else {int fd=arp_socket(&c);if(fd<0)result=-1;else {result=restore_neighbor(fd,&c);close(fd);}}
+        }
 #ifdef CAPRI_HTTP_PROXY_TEST
         if(nat_cleanup(saved.nat_chain))result=-1;
 #endif
@@ -277,7 +283,7 @@ int main(int argc,char **argv) {
     const char *reason="deadline";int injected=0;
     while(!stop_now&&now_ms()<deadline) {
         if(present(dir,"stop.request")){reason="stop_requested";break;}
-        #ifdef CAPRI_HTTP_PROXY_TEST
+#ifdef CAPRI_HTTP_PROXY_TEST
         if(!dry_run&&now_ms()>=next&&!proxy_ready()){fail=1;reason="proxy_unavailable";break;}
 #endif
         if(!dry_run&&now_ms()>=next){if(!matching(&c)||announce(control,&c,0)){fail=1;reason="context_or_send_failure";break;}next=now_ms()+1000;}

@@ -40,9 +40,12 @@ def main():
     parser.add_argument('--serial', required=True)
     parser.add_argument('--seconds', type=int, default=30)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--stop-file', type=Path, help='Owned host marker for deliberate early shutdown')
     args = parser.parse_args()
     if not 5 <= args.seconds <= 300:
         parser.error('Hold time must be 5..300 seconds')
+    if args.stop_file and args.stop_file.exists():
+        parser.error('Stop marker already exists; use a fresh path')
     args.output.mkdir(parents=True, exist_ok=True)
     report = {'ordinary_uid': True, 'network_changes': False, 'client_verified': False}
     engine = None
@@ -83,6 +86,9 @@ def main():
             print(json.dumps({'event': 'ready', 'vivo_url': HOST + PREFIX, 'hold_seconds': args.seconds}), flush=True)
             deadline = time.monotonic() + args.seconds
             while time.monotonic() < deadline:
+                if args.stop_file and args.stop_file.exists():
+                    report['stop_reason'] = 'owner_request'
+                    break
                 if engine.poll() is not None:
                     raise RuntimeError('Engine exited during hold')
                 time.sleep(.5)

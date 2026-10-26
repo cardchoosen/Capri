@@ -23,20 +23,27 @@ def main():
     parser.add_argument('--ndk', required=True, type=Path)
     parser.add_argument('--fixture', type=Path)
     parser.add_argument('--active', action='store_true')
+    parser.add_argument('--case', choices=['deadline','stop','worker','controller','engine'], default='deadline')
+    parser.add_argument('--engine-stop-file', type=Path, help='Same owned host stop marker passed to engine runner')
     parser.add_argument('--output', required=True, type=Path)
     args = parser.parse_args()
     if args.active and not args.fixture:
         parser.error('--active requires --fixture')
+    if args.case == 'engine' and (not args.active or not args.engine_stop_file):
+        parser.error('engine case requires --active and --engine-stop-file')
+    if args.engine_stop_file and args.engine_stop_file.exists():
+        parser.error('Engine stop marker must not already exist')
     args.output.mkdir(parents=True, exist_ok=True)
     if (args.output/'report.json').exists():
         raise RuntimeError('Use a new output directory; preserve earlier evidence')
     adb = [args.adb, '-s', args.serial]
     binary = args.output/'helper'
     compiler = args.ndk/'toolchains/llvm/prebuilt/darwin-x86_64/bin/aarch64-linux-android28-clang'
-    subprocess.run([str(compiler), '-DCAPRI_HTTP_PROXY_TEST', '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror', str(ROOT/'tools/hacker/pair_relay.c'), '-o', str(binary)], check=True)
-    report = {'active': args.active, 'fixed_fixture_only': True, 'gateway_modified': False, 'https': False}
+    subprocess.run([str(compiler), '-DCAPRI_HTTP_PROXY_TEST', '-DCAPRI_RELAY_FAULT_TESTS', '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror', str(ROOT/'tools/hacker/pair_relay.c'), '-o', str(binary)], check=True)
+    report = {'case': args.case, 'active': args.active, 'fixed_fixture_only': True, 'gateway_modified': False, 'https': False}
     pushed = False
     before = None
+    running = None
 
     def shell(script, root=True, timeout=10):
         result = subprocess.run(adb+['shell', 'su -c '+shlex.quote(script) if root else script], capture_output=True, text=True, timeout=timeout)
@@ -84,7 +91,39 @@ def main():
         initial=probes()
         started=datetime.now(timezone.utc)
         report['started_at']=started.isoformat()
-        value=helper('start' if args.active else 'guardcheck')
+        if args.case in ('stop','engine'):
+            action='start' if args.active else 'guardstart'
+            running=subprocess.Popen(adb+['shell','su -c '+shlex.quote(REMOTE+' '+action)],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+            deadline=time.monotonic()+5
+            while time.monotonic()<deadline:
+                state=helper('status');state.check_returncode();observed=json.loads(state.stdout)
+                if observed.get('active') and (observed.get('state') or {}).get('phase')=='running':
+                    break
+                time.sleep(.1)
+            else:
+                raise RuntimeError('Did not reach running phase')
+            if args.active:
+                deadline=time.monotonic()+4
+                while time.monotonic()<deadline:
+                    marked=[r for r in probes()[len(initial):] if r.get('request_marked') and r.get('visibility')=='visible']
+                    if len(marked)>=2:
+                        break
+                    time.sleep(.1)
+                else:
+                    raise RuntimeError('No proxy traffic before requested stop')
+            if args.case=='engine':
+                args.engine_stop_file.parent.mkdir(parents=True,exist_ok=True)
+                args.engine_stop_file.touch(exist_ok=False)
+            else:
+                helper('stop').check_returncode()
+            stdout,stderr=running.communicate(timeout=20)
+            value=subprocess.CompletedProcess([],running.returncode,stdout,stderr)
+            running=None
+        else:
+            action={'deadline':('start' if args.active else 'guardcheck'),
+                    'worker':('fault_worker' if args.active else 'guard_fault_worker'),
+                    'controller':('fault_controller' if args.active else 'guard_fault_controller')}[args.case]
+            value=helper(action)
         report['helper_exit']=value.returncode
         (args.output/'native.stdout').write_text(value.stdout)
         (args.output/'native.stderr').write_text(value.stderr)
@@ -92,13 +131,33 @@ def main():
         for line in value.stdout.splitlines():
             metrics.update(json.loads(line))
         report['native']=metrics
+        if args.case=='controller':
+            deadline=time.monotonic()+10
+            while time.monotonic()<deadline:
+                state=helper('status');state.check_returncode();observed=json.loads(state.stdout)
+                if not observed.get('active'):
+                    report['orphan_state']=observed
+                    metrics.update((observed.get('state') or {}).get('metrics') or {})
+                    break
+                time.sleep(.1)
+            else:
+                raise RuntimeError('Orphan worker did not release its lease')
         if exists(STATE+'/intent'):
             recovered=helper('recover')
             report['recovery_exit']=recovered.returncode
             recovered.check_returncode()
-        value.check_returncode()
-        assert metrics.get('nat_cleanup_succeeded'), 'NAT cleanup was not confirmed'
-        assert not metrics.get('failed') and not metrics.get('recovery_required'), 'Native run incomplete'
+        expected={'deadline':0,'stop':0,'worker':81,'controller':91,'engine':81}[args.case]
+        assert value.returncode==expected, 'Unexpected helper exit'
+        if args.case=='controller':
+            assert report.get('orphan_state',{}).get('intent_present') and report.get('recovery_exit')==0, 'Controller recovery journal not verified'
+        else:
+            assert metrics.get('nat_cleanup_succeeded') and not metrics.get('recovery_required'), 'NAT/neighbor cleanup was not confirmed'
+            reason={'deadline':'deadline','stop':'stop_requested','worker':'worker_exit','engine':'proxy_unavailable'}[args.case]
+            assert metrics.get('reason')==reason, 'Wrong termination reason'
+        settled=helper('recover');settled.check_returncode()
+        final_state=json.loads(settled.stdout)
+        assert not final_state.get('active') and not final_state.get('intent_present'), 'Task not settled'
+        report['final_state']=final_state
         after=baseline()
         for key,text in after.items():
             (args.output/(key+'-after.txt')).write_text(text)
@@ -120,11 +179,14 @@ def main():
             report['client_timeout_delta']=max(0,measured[-1].get('failures',0)-initial[-1].get('failures',0)) if measured and initial else None
             timeline=initial[-1:]+measured
             report['max_gap_seconds']=max(((datetime.fromisoformat(b['time'])-datetime.fromisoformat(a['time'])).total_seconds() for a,b in zip(timeline,timeline[1:])),default=0)
-            assert metrics.get('proxy_admitted_frames',0)>0 and len(marked)>=3, 'No target proxy evidence'
-            assert len(later)>=3 and metrics.get('post_restore_frames')==0 and metrics.get('restoration_frames_sent'), 'Direct recovery not verified'
-            assert report['visibility_states']==['visible'] and report['client_timeout_delta']==0, 'Continuity inconclusive or failed'
+            assert metrics.get('proxy_admitted_frames',0)>0 and len(marked)>=(3 if args.case=='deadline' else 1), 'No target proxy evidence'
+            assert len(later)>=3, 'Direct recovery not verified'
+            if args.case!='controller':
+                assert metrics.get('post_restore_frames')==0 and metrics.get('restoration_frames_sent'), 'Native restoration not verified'
+            assert report['visibility_states']==['visible'], 'Page left foreground'
+            assert report['client_timeout_delta']<=(1 if args.case=='engine' else 0) and report['max_gap_seconds']<=5, 'Recovery interruption exceeded bound'
         else:
-            assert metrics.get('dry_run') and metrics.get('proxy_admitted_frames')==0 and not metrics.get('restoration_frames_sent'), 'Guard unexpectedly handled target traffic'
+            assert metrics.get('proxy_admitted_frames',0)==0 and not metrics.get('restoration_frames_sent'), 'Guard unexpectedly handled target traffic'
         report['passed']=True
     except BaseException as error:
         report['passed']=False
@@ -133,6 +195,9 @@ def main():
         raise
     finally:
         try:
+            if running is not None:
+                helper('stop').check_returncode()
+                running.communicate(timeout=20)
             if pushed:
                 if exists(STATE+'/intent'):
                     helper('recover').check_returncode()

@@ -38,7 +38,10 @@ static int nat_apply(const char *name) {
 }
 static int nat_cleanup(const char *name) {
     if(!nat_valid(name))return -1;
-    int r=nat_command("-C",name,1);
+    /* A vanished chain cannot still be a jump target. Check it before -C:
+       iptables may return 2 for a missing jump target, not 1 for an absent rule. */
+    int r=nat_command("-S",name,0);if(r==1)return 0;if(r)return -1;
+    r=nat_command("-C",name,1);
     if(r==0){if(nat_command("-D",name,1))return -1;}
     else if(r!=1)return -1;
     r=nat_command("-S",name,0);if(r==1)return 0;if(r)return -1;
