@@ -17,6 +17,7 @@ def main():
     parser.add_argument('--bind', required=True, type=ipaddress.IPv4Address)
     parser.add_argument('--target', required=True, type=ipaddress.IPv4Address)
     parser.add_argument('--port', type=int, default=18765)
+    parser.add_argument('--relay', type=ipaddress.IPv4Address, help='Explicit ordinary-UID proxy source allowed for this fixture')
     parser.add_argument('--seconds', type=int, default=600)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--token', help='Reuse a public fixture path when restarting the same experiment')
@@ -67,12 +68,13 @@ def main():
             self.reply(403, head=True)
 
         def do_GET(self):
-            if self.client_address[0] != str(args.target):
+            allowed = {str(args.target)} | ({str(args.relay)} if args.relay else set())
+            if self.client_address[0] not in allowed:
                 return self.reply(403, b'Not the selected test device.')
             parsed = urlsplit(self.path)
             if parsed.path == route and not parsed.query:
                 counters['page'] += 1
-                event('page', source=str(args.target), count=counters['page'])
+                event('page', source=self.client_address[0], count=counters['page'])
                 page = '''<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Capri 网络测试</title>
 <h2>Capri 局域网测试页</h2><p>已连接 Mac 的临时 HTTP 服务。</p><p>这是测试数据，不读取手机信息。</p>
 <p id="state">正在检查连接…</p><p>请保持此页前台。页面每秒发送一次小型测试请求。</p>
@@ -80,7 +82,7 @@ def main():
 let n=0,failures=0;const label=document.getElementById('state');
 async function probe(){const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),1800);
 try{const q=new URLSearchParams({visibility:document.visibilityState,failures:String(failures),seq:String(++n)});
-const r=await fetch(location.pathname+'/probe?'+q,{cache:'no-store',signal:controller.signal});if(!r.ok)throw Error();const v=await r.json();label.textContent='连接正常 · 已完成 '+v.count+' 次请求 · '+(document.hidden?'后台':'前台');}
+const r=await fetch(location.pathname+'/probe?'+q,{cache:'no-store',signal:controller.signal});if(!r.ok)throw Error();const v=await r.json();label.textContent='连接正常 · 已完成 '+v.count+' 次请求 · '+(document.hidden?'后台':'前台')+(v.proxy?' · Pixel代理':' · 直连');}
 catch(e){failures++;label.textContent='连接暂时中断 · 重试次数 '+failures;}
 finally{clearTimeout(timer);if(n<600)setTimeout(probe,1000);}}
 document.addEventListener('visibilitychange',()=>fetch(location.pathname+'/event?state='+document.visibilityState,{cache:'no-store',keepalive:true}).catch(()=>{}));
@@ -91,7 +93,7 @@ probe();
             if parsed.path == route + '/event':
                 visibility = query.get('state', ['unknown'])[0]
                 if visibility in ('visible', 'hidden'):
-                    event('browser_state', source=str(args.target), visibility=visibility)
+                    event('browser_state', source=self.client_address[0], visibility=visibility)
                 return self.reply(200, b'OK')
             if parsed.path == route + '/probe':
                 visibility = query.get('visibility', ['unknown'])[0]
@@ -101,7 +103,7 @@ probe();
                     value = query.get(name, ['0'])[0]
                     return int(value) if value.isascii() and value.isdecimal() and len(value) <= 6 else 0
                 counters['probe'] += 1
-                event('probe', source=str(args.target), count=counters['probe'], visibility=visibility, failures=counter('failures'), sequence=counter('seq'))
+                event('probe', source=self.client_address[0], count=counters['probe'], visibility=visibility, failures=counter('failures'), sequence=counter('seq'), request_marked=self.headers.get('X-Capri-Lab-Request') == 'Pixel-prototype')
                 return self.reply(200, json.dumps({'count': counters['probe']}).encode(), 'application/json')
             self.reply(404, b'No fixture at this path.')
 
