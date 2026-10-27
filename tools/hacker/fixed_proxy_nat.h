@@ -11,7 +11,14 @@ static int nat_command(const char *op,const char *chain,int rule) {
         if(prctl(PR_SET_PDEATHSIG,SIGKILL)||getppid()!=owner)_exit(125);
         int sink=open("/dev/null",O_WRONLY);if(sink<0)_exit(125);
         dup2(sink,1);dup2(sink,2);close(sink);
+#ifdef CAPRI_ORIGINAL_DST_PROBE
+#ifndef CAPRI_PROBE_UID
+#error Explicit ordinary application UID required
+#endif
+        if(rule==1)execl("/system/bin/iptables","iptables","-w","2","-t","nat",op,"OUTPUT","-m","owner","--uid-owner",CAPRI_PROBE_UID,"-d",SERVER"/32","-p","tcp","--sport","19876:19877","--dport","18765","--syn","-m","comment","--comment",chain,"-j",chain,(char*)NULL);
+#else
         if(rule==1)execl("/system/bin/iptables","iptables","-w","2","-t","nat",op,"PREROUTING","-i","wlan0","-s",TARGET"/32","-d",SERVER"/32","-p","tcp","--dport","18765","--syn","-m","comment","--comment",chain,"-j",chain,(char*)NULL);
+#endif
         else if(rule==2)execl("/system/bin/iptables","iptables","-w","2","-t","nat",op,chain,"-p","tcp","-m","comment","--comment",chain,"-j","REDIRECT","--to-ports","18766",(char*)NULL);
         else execl("/system/bin/iptables","iptables","-w","2","-t","nat",op,chain,(char*)NULL);
         _exit(125);

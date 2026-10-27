@@ -27,7 +27,27 @@
 #define DIR "/data/local/tmp/capri-pair-relay"
 #define SELF "192.168.1.6"
 #define TARGET "192.168.1.8"
+#ifdef CAPRI_GATEWAY_RELAY
+#ifdef CAPRI_HTTP_PROXY_TEST
+#error Gateway passthrough must not use the fixed-server proxy build
+#endif
+#define SERVER "192.168.1.1"
+#else
 #define SERVER "192.168.1.3"
+#endif
+#if defined(CAPRI_HTTP_PROXY_TEST) || defined(CAPRI_GATEWAY_RELAY)
+#define CAPRI_PACKET_TIMESTAMPS
+#endif
+#ifdef CAPRI_ORIGINAL_DST_PROBE
+#ifndef CAPRI_HTTP_PROXY_TEST
+#error Original-destination probe requires the NAT build
+#endif
+#define INTENT_MAGIC "CPROD001"
+#elif defined(CAPRI_GATEWAY_RELAY)
+#define INTENT_MAGIC "CPRGW001"
+#else
+#define INTENT_MAGIC "CPRPAIR1"
+#endif
 struct context { unsigned char magic[8];int index;uint32_t self,target,server;unsigned char own[6],client[6],backend[6]; };
 struct counters { atomic_ulong forwarded,fixture_tcp,fixture_get,errors,proxy_admitted;
 #ifdef CAPRI_HTTP_PROXY_TEST
@@ -35,7 +55,7 @@ struct counters { atomic_ulong forwarded,fixture_tcp,fixture_get,errors,proxy_ad
 #endif
 };
 static struct counters *current_counters;
-#ifdef CAPRI_HTTP_PROXY_TEST
+#ifdef CAPRI_PACKET_TIMESTAMPS
 static long long last_packet_ns;
 static long long realtime_ns(void) { struct timespec t;clock_gettime(CLOCK_REALTIME,&t);return (long long)t.tv_sec*1000000000+t.tv_nsec; }
 #endif
@@ -45,6 +65,9 @@ static long long now_ms(void) { struct timespec t;clock_gettime(CLOCK_MONOTONIC,
 static void delay(int ms) { struct timespec t={ms/1000,(ms%1000)*1000000};nanosleep(&t,NULL); }
 #ifdef CAPRI_HTTP_PROXY_TEST
 #include "fixed_proxy_nat.h"
+#endif
+#ifdef CAPRI_GATEWAY_RELAY
+#include "gateway_resource.h"
 #endif
 static int directory(int create) {
     if(geteuid()!=0)return -1;
@@ -67,13 +90,27 @@ static int neighbor(int fd,uint32_t ip,unsigned char mac[6]) {
     if(ioctl(fd,SIOCGARP,&r)||!(r.arp_flags&ATF_COM))return -1;
     memcpy(mac,r.arp_ha.sa_data,6);return 0;
 }
+#ifdef CAPRI_GATEWAY_RELAY
+static int only_known_local_addresses(int fd,uint32_t own) {
+    struct ifreq entries[64];struct ifconf list={.ifc_len=sizeof(entries),.ifc_req=entries};
+    if(ioctl(fd,SIOCGIFCONF,&list)||list.ifc_len>=(int)sizeof(entries))return 0;
+    for(int i=0;i<list.ifc_len/(int)sizeof(struct ifreq);i++) {
+        struct sockaddr_in *a=(struct sockaddr_in*)&entries[i].ifr_addr;
+        if(a->sin_family==AF_INET&&a->sin_addr.s_addr!=own&&(ntohl(a->sin_addr.s_addr)>>24)!=127)return 0;
+    }
+    return 1;
+}
+#endif
 static int context(struct context *c) {
-    memset(c,0,sizeof(*c));memcpy(c->magic,"CPRPAIR1",8);
+    memset(c,0,sizeof(*c));memcpy(c->magic,INTENT_MAGIC,8);
     inet_pton(AF_INET,SELF,&c->self);inet_pton(AF_INET,TARGET,&c->target);inet_pton(AF_INET,SERVER,&c->server);
     c->index=(int)if_nametoindex("wlan0");if(c->index<1)return -1;
     int fd=socket(AF_INET,SOCK_DGRAM|SOCK_CLOEXEC,0);if(fd<0)return -1;
     struct ifreq r;memset(&r,0,sizeof(r));strcpy(r.ifr_name,"wlan0");
     int result=-1;
+#ifdef CAPRI_GATEWAY_RELAY
+    if(!only_known_local_addresses(fd,c->self))goto done;
+#endif
     if(ioctl(fd,SIOCGIFADDR,&r)||((struct sockaddr_in*)&r.ifr_addr)->sin_addr.s_addr!=c->self)goto done;
     if(ioctl(fd,SIOCGIFHWADDR,&r))goto done;
     memcpy(c->own,r.ifr_hwaddr.sa_data,6);
@@ -116,10 +153,15 @@ static int receiver(const struct context *c) {
         BPF_STMT(BPF_LD|BPF_W|BPF_ABS,6),BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,word(c->client),1,0),BPF_STMT(BPF_RET|BPF_K,0),
         BPF_STMT(BPF_LD|BPF_H|BPF_ABS,10),BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,half(c->client+4),1,0),BPF_STMT(BPF_RET|BPF_K,0),
         BPF_STMT(BPF_LD|BPF_W|BPF_ABS,26),BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,ntohl(c->target),1,0),BPF_STMT(BPF_RET|BPF_K,0),
+#ifdef CAPRI_GATEWAY_RELAY
+        BPF_STMT(BPF_LD|BPF_W|BPF_ABS,30),BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,ntohl(c->self),0,1),BPF_STMT(BPF_RET|BPF_K,0),
+        BPF_STMT(BPF_ALU|BPF_AND|BPF_K,0xff000000),BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,0x7f000000,0,1),BPF_STMT(BPF_RET|BPF_K,0),
+#else
         BPF_STMT(BPF_LD|BPF_W|BPF_ABS,30),BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,ntohl(c->server),1,0),BPF_STMT(BPF_RET|BPF_K,0),
+#endif
         BPF_STMT(BPF_RET|BPF_K,65550)
     };
-#ifdef CAPRI_HTTP_PROXY_TEST
+#ifdef CAPRI_PACKET_TIMESTAMPS
     int enabled=1;
     if(setsockopt(fd,SOL_SOCKET,SO_TIMESTAMPNS,&enabled,sizeof(enabled))){close(fd);return -1;}
 #endif
@@ -130,7 +172,7 @@ static int receiver(const struct context *c) {
 }
 static int relay_one(int fd,const struct context *c,struct counters *s) {
     unsigned char frame[65550];struct sockaddr_ll from;socklen_t size=sizeof(from);
-#ifdef CAPRI_HTTP_PROXY_TEST
+#ifdef CAPRI_PACKET_TIMESTAMPS
     struct iovec iov={frame,sizeof(frame)};
     union { struct cmsghdr align;unsigned char data[CMSG_SPACE(sizeof(struct timespec))]; } ancillary;
     struct msghdr msg={.msg_name=&from,.msg_namelen=size,.msg_iov=&iov,.msg_iovlen=1,.msg_control=ancillary.data,.msg_controllen=sizeof(ancillary.data)};
@@ -144,14 +186,25 @@ static int relay_one(int fd,const struct context *c,struct counters *s) {
     ssize_t length=recvfrom(fd,frame,sizeof(frame),0,(struct sockaddr*)&from,&size);
 #endif
     if(length<0)return errno==EAGAIN||errno==EINTR?0:-1;
-    if(from.sll_pkttype==PACKET_OUTGOING||length<34||memcmp(frame,c->own,6)||memcmp(frame+6,c->client,6)||memcmp(frame+26,&c->target,4)||memcmp(frame+30,&c->server,4))return 0;
+    if(from.sll_pkttype==PACKET_OUTGOING||length<34||memcmp(frame,c->own,6)||memcmp(frame+6,c->client,6)||memcmp(frame+26,&c->target,4))return 0;
+#ifdef CAPRI_GATEWAY_RELAY
+    if(!memcmp(frame+30,&c->self,4)||(word(frame+30)>>24)==127)return 0;
+#else
+    if(memcmp(frame+30,&c->server,4))return 0;
+#endif
     unsigned header=(frame[14]&15u)*4u;
     if(frame[23]==6 && header>=20 && length>=(ssize_t)(14+header+20) && !(frame[20]&0x3f) && !frame[21]) {
         unsigned char *tcp=frame+14+header;
+#ifdef CAPRI_GATEWAY_RELAY
+        if(half(tcp+2)==80&&word(frame+30)==0x7cdc33cbu) { /* Approved external server 124.220.51.203 */
+#else
         if(half(tcp+2)==18765) {
+#endif
             atomic_fetch_add(&s->fixture_tcp,1);
+#ifndef CAPRI_GATEWAY_RELAY
             unsigned data=(tcp[12]>>4)*4u;
             if(data>=20 && length>=(ssize_t)(14+header+data+4) && !memcmp(tcp+data,"GET ",4))atomic_fetch_add(&s->fixture_get,1);
+#endif
 #ifdef CAPRI_HTTP_PROXY_TEST
             unsigned port=half(tcp),slot=port>>3,bit=1u<<(port&7);
             if((tcp[13]&0x16)==0x02)atomic_fetch_or(&s->proxy_ports[slot],(unsigned char)bit);
@@ -183,6 +236,9 @@ static int reap(pid_t pid) {
 struct intent { struct context c;uint32_t dry_run;
 #ifdef CAPRI_HTTP_PROXY_TEST
     char nat_chain[25];
+#endif
+#ifdef CAPRI_GATEWAY_RELAY
+    char gateway_chain[25];
 #endif
 };
 static int present(int dir,const char *name) { struct stat s;return fstatat(dir,name,&s,AT_SYMLINK_NOFOLLOW)==0; }
@@ -222,6 +278,9 @@ int main(int argc,char **argv) {
     if(!strcmp(argv[1],"guard_fault_worker")){dry_run=1;fault=1;}
     if(!strcmp(argv[1],"guard_fault_controller")){dry_run=1;fault=2;}
 #endif
+#ifdef CAPRI_ORIGINAL_DST_PROBE
+    if(start)return 64; /* Also reject active fault actions if a developer combines build flags. */
+#endif
     int recovering=!strcmp(argv[1],"recover");
     int querying=!strcmp(argv[1],"status"),stopping=!strcmp(argv[1],"stop");
     if(!strcmp(argv[1],"preflight")) {
@@ -246,13 +305,16 @@ int main(int argc,char **argv) {
         if(journal<0){if(present(dir,"intent"))return 68;unlinkat(dir,"stop.request",0);close(lock);return status_or_stop(dir,0);}
         unsigned char data[sizeof(saved)+1];ssize_t n=read(journal,data,sizeof(data));close(journal);
         if(n!=sizeof(saved))return 68;memcpy(&saved,data,sizeof(saved));c=saved.c;dry_run=(int)saved.dry_run;
-        if(saved.dry_run>1||memcmp(c.magic,"CPRPAIR1",8))return 69;
-#ifndef CAPRI_HTTP_PROXY_TEST
+        if(saved.dry_run>1||memcmp(c.magic,INTENT_MAGIC,8))return 69;
+#if !defined(CAPRI_HTTP_PROXY_TEST) && !defined(CAPRI_GATEWAY_RELAY)
         if(!dry_run&&!matching(&c))return 69;
 #endif
         int result=0;
 #ifdef CAPRI_HTTP_PROXY_TEST
         if(!nat_valid(saved.nat_chain))return 69;
+#endif
+#ifdef CAPRI_GATEWAY_RELAY
+        if(!gateway_valid(saved.gateway_chain))return 69;
 #endif
         if(!dry_run){
             if(!matching(&c))result=-1;
@@ -260,6 +322,9 @@ int main(int argc,char **argv) {
         }
 #ifdef CAPRI_HTTP_PROXY_TEST
         if(nat_cleanup(saved.nat_chain))result=-1;
+#endif
+#ifdef CAPRI_GATEWAY_RELAY
+        if(gateway_cleanup(saved.gateway_chain))result=-1;
 #endif
         if(!result){if(unlinkat(dir,"intent",0))return 75;unlinkat(dir,"stop.request",0);phase(dir,"recovered",dry_run,!dry_run);fsync(dir);}
         if(result)return 75;close(lock);return status_or_stop(dir,0);
@@ -270,6 +335,9 @@ int main(int argc,char **argv) {
     saved.c=c;saved.dry_run=(uint32_t)dry_run;
 #ifdef CAPRI_HTTP_PROXY_TEST
     if(!proxy_ready()||nat_name(saved.nat_chain))return 89;
+#endif
+#ifdef CAPRI_GATEWAY_RELAY
+    if(gateway_name(saved.gateway_chain))return 89;
 #endif
     int out=local_file(dir,"intent",O_WRONLY|O_CREAT|O_EXCL);if(out<0)return 72;
     int good=write(out,&saved,sizeof(saved))==(ssize_t)sizeof(saved)&&fsync(out)==0;close(out);
@@ -301,6 +369,9 @@ int main(int argc,char **argv) {
 #ifdef CAPRI_HTTP_PROXY_TEST
         if(getppid()!=owner&&nat_cleanup(saved.nat_chain))restored=-1;
 #endif
+#ifdef CAPRI_GATEWAY_RELAY
+        if(getppid()!=owner&&gateway_cleanup(saved.gateway_chain))restored=-1;
+#endif
         _exit(restored?80:0);
     }
     close(ready[1]);struct pollfd readiness={ready[0],POLLIN,0};char value=0;
@@ -313,9 +384,18 @@ int main(int argc,char **argv) {
         phase(dir,"nat_setup_failed",dry_run,0);return 90;
     }
 #endif
+#ifdef CAPRI_GATEWAY_RELAY
+    if(gateway_apply(saved.gateway_chain)) {
+        kill(child,SIGTERM);reap(child);
+        if(!gateway_cleanup(saved.gateway_chain))unlinkat(dir,"intent",0);
+        phase(dir,"gateway_setup_failed",dry_run,0);return 90;
+    }
+#endif
     if(phase(dir,"running",dry_run,0)){kill(child,SIGTERM);reap(child);
 #ifdef CAPRI_HTTP_PROXY_TEST
         if(!nat_cleanup(saved.nat_chain))unlinkat(dir,"intent",0);
+#elif defined(CAPRI_GATEWAY_RELAY)
+        if(!gateway_cleanup(saved.gateway_chain))unlinkat(dir,"intent",0);
 #else
         unlinkat(dir,"intent",0);
 #endif
@@ -345,7 +425,7 @@ int main(int argc,char **argv) {
 #endif
     int restored=dry_run?0:restore_neighbor(control,&c);
     if(child>0){kill(child,SIGTERM);reap(child);}
-#ifdef CAPRI_HTTP_PROXY_TEST
+#ifdef CAPRI_PACKET_TIMESTAMPS
     long long restored_at=realtime_ns();unsigned long late=0,queued=0;
 #else
     unsigned long before=atomic_load(&s->forwarded)+atomic_load(&s->proxy_admitted);
@@ -353,7 +433,7 @@ int main(int argc,char **argv) {
     long long observe=now_ms()+(dry_run?0:2500);
     while(now_ms()<observe) {
         struct pollfd p={data,POLLIN,0};if(poll(&p,1,50)>0 && relay_one(data,&c,s)>0) {
-#ifdef CAPRI_HTTP_PROXY_TEST
+#ifdef CAPRI_PACKET_TIMESTAMPS
             if(last_packet_ns>0&&last_packet_ns<=restored_at)queued++;
             else {late++;restore_neighbor(control,&c);}
 #else
@@ -361,7 +441,7 @@ int main(int argc,char **argv) {
 #endif
         }
     }
-#ifndef CAPRI_HTTP_PROXY_TEST
+#ifndef CAPRI_PACKET_TIMESTAMPS
     unsigned long late=atomic_load(&s->forwarded)+atomic_load(&s->proxy_admitted)-before;
 #endif
 #ifdef CAPRI_HTTP_PROXY_TEST
@@ -369,12 +449,16 @@ int main(int argc,char **argv) {
     if(nat_cleanup(saved.nat_chain))restored=-1;
     printf("{\"proxy_admitted_frames\":%lu,\"pre_restore_queued_frames\":%lu,\"nat_cleanup_succeeded\":%s}\n",atomic_load(&s->proxy_admitted),queued,restored?"false":"true");
 #endif
+#ifdef CAPRI_GATEWAY_RELAY
+    if(gateway_cleanup(saved.gateway_chain))restored=-1;
+    printf("{\"gateway_direction\":true,\"target_gateway_mapping_changed\":%s,\"router_modified\":false,\"kernel_transit_suppression_cleaned\":%s,\"pre_restore_queued_frames\":%lu,\"selected_external_tcp_frames\":%lu}\n",dry_run?"false":"true",restored?"false":"true",queued,atomic_load(&s->fixture_tcp));
+#endif
     if(!restored&&!late){if(unlinkat(dir,"intent",0))restored=-1;}
     unlinkat(dir,"stop.request",0);
     phase(dir,restored||late?"needs_recovery":"stopped",dry_run,!dry_run&&!restored);
     fsync(dir);
     printf("{\"dry_run\":%s,\"reason\":\"%s\",\"fault_injected\":%s,\"active_limit_seconds\":%d,\"target\":\"%s\",\"fixture_server\":\"%s\",\"forwarded_frames\":%lu,\"fixture_tcp_frames\":%lu,\"fixture_get_requests\":%lu,\"send_errors\":%lu,\"restoration_frames_sent\":%s,\"post_restore_frames\":%lu,\"recovery_required\":%s,\"failed\":%s,\"gateway_modified\":false,\"host_network_configuration_modified\":%s}\n",dry_run?"true":"false",reason,injected?"true":"false",dry_run&&!fault&&!long_guard?1:8,TARGET,SERVER,atomic_load(&s->forwarded),atomic_load(&s->fixture_tcp),atomic_load(&s->fixture_get),atomic_load(&s->errors),dry_run||restored?"false":"true",late,restored||late?"true":"false",fail?"true":"false",
-#ifdef CAPRI_HTTP_PROXY_TEST
+#if defined(CAPRI_HTTP_PROXY_TEST) || defined(CAPRI_GATEWAY_RELAY)
     "true"
 #else
     "false"
