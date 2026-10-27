@@ -5,6 +5,9 @@
 #include <linux/filter.h>
 #include <linux/if_ether.h>
 #include <linux/if_packet.h>
+#ifdef CAPRI_GATEWAY_RELAY
+#include <linux/virtio_net.h>
+#endif
 #include <net/if.h>
 #include <net/if_arp.h>
 #include <poll.h>
@@ -50,6 +53,8 @@
 #endif
 struct context { unsigned char magic[8];int index;uint32_t self,target,server;unsigned char own[6],client[6],backend[6]; };
 struct counters { atomic_ulong forwarded,fixture_tcp,fixture_get,errors,proxy_admitted;
+    atomic_int send_errno;atomic_ulong send_length;atomic_uint send_protocol;
+    atomic_ulong gso_frames,checksum_frames;atomic_uint send_gso_type,send_vnet_flags;
 #ifdef CAPRI_HTTP_PROXY_TEST
     atomic_uchar proxy_ports[8192]; /* Fixed peer pair + destination port: client source-port bitmap. */
 #endif
@@ -165,6 +170,10 @@ static int receiver(const struct context *c) {
     int enabled=1;
     if(setsockopt(fd,SOL_SOCKET,SO_TIMESTAMPNS,&enabled,sizeof(enabled))){close(fd);return -1;}
 #endif
+#ifdef CAPRI_GATEWAY_RELAY
+    int use_vnet=1;
+    if(setsockopt(fd,SOL_PACKET,PACKET_VNET_HDR,&use_vnet,sizeof(use_vnet))){close(fd);return -1;}
+#endif
     struct sock_fprog p={(unsigned short)(sizeof(f)/sizeof(f[0])),f};
     struct sockaddr_ll a;memset(&a,0,sizeof(a));a.sll_family=AF_PACKET;a.sll_ifindex=c->index;a.sll_protocol=htons(ETH_P_IP);
     if(setsockopt(fd,SOL_SOCKET,SO_ATTACH_FILTER,&p,sizeof(p))||bind(fd,(struct sockaddr*)&a,sizeof(a))){close(fd);return -1;}
@@ -173,10 +182,21 @@ static int receiver(const struct context *c) {
 static int relay_one(int fd,const struct context *c,struct counters *s) {
     unsigned char frame[65550];struct sockaddr_ll from;socklen_t size=sizeof(from);
 #ifdef CAPRI_PACKET_TIMESTAMPS
-    struct iovec iov={frame,sizeof(frame)};
+#ifdef CAPRI_GATEWAY_RELAY
+    struct virtio_net_hdr offload={0};
+    struct iovec iov[]={{&offload,sizeof(offload)},{frame,sizeof(frame)}};
+#else
+    struct iovec iov[]={{frame,sizeof(frame)}};
+#endif
     union { struct cmsghdr align;unsigned char data[CMSG_SPACE(sizeof(struct timespec))]; } ancillary;
-    struct msghdr msg={.msg_name=&from,.msg_namelen=size,.msg_iov=&iov,.msg_iovlen=1,.msg_control=ancillary.data,.msg_controllen=sizeof(ancillary.data)};
+    struct msghdr msg={.msg_name=&from,.msg_namelen=size,.msg_iov=iov,.msg_iovlen=sizeof(iov)/sizeof(iov[0]),.msg_control=ancillary.data,.msg_controllen=sizeof(ancillary.data)};
     ssize_t length=recvmsg(fd,&msg,0);last_packet_ns=0;
+#ifdef CAPRI_GATEWAY_RELAY
+    if(length>=0){
+        if(length<(ssize_t)sizeof(offload)||(msg.msg_flags&MSG_TRUNC)){errno=EPROTO;return -1;}
+        length-=(ssize_t)sizeof(offload);
+    }
+#endif
     for(struct cmsghdr *h=CMSG_FIRSTHDR(&msg);length>=0&&h;h=CMSG_NXTHDR(&msg,h)) {
         if(h->cmsg_level==SOL_SOCKET&&h->cmsg_type==SCM_TIMESTAMPNS&&h->cmsg_len>=CMSG_LEN(sizeof(struct timespec))) {
             struct timespec t;memcpy(&t,CMSG_DATA(h),sizeof(t));last_packet_ns=(long long)t.tv_sec*1000000000+t.tv_nsec;
@@ -216,7 +236,22 @@ static int relay_one(int fd,const struct context *c,struct counters *s) {
     }
     memcpy(frame,c->backend,6);memcpy(frame+6,c->own,6);
     struct sockaddr_ll a;memset(&a,0,sizeof(a));a.sll_family=AF_PACKET;a.sll_ifindex=c->index;a.sll_protocol=htons(ETH_P_IP);a.sll_halen=6;memcpy(a.sll_addr,c->backend,6);
-    if(sendto(fd,frame,(size_t)length,0,(struct sockaddr*)&a,sizeof(a))!=length){atomic_fetch_add(&s->errors,1);return -1;}
+#ifdef CAPRI_GATEWAY_RELAY
+    struct iovec outgoing[]={{&offload,sizeof(offload)},{frame,(size_t)length}};
+    struct msghdr delivery={.msg_name=&a,.msg_namelen=sizeof(a),.msg_iov=outgoing,.msg_iovlen=2};
+    ssize_t expected=length+(ssize_t)sizeof(offload),sent=sendmsg(fd,&delivery,0);
+#else
+    ssize_t expected=length,sent=sendto(fd,frame,(size_t)length,0,(struct sockaddr*)&a,sizeof(a));
+#endif
+    if(sent!=expected){int failure=sent<0?errno:EIO;
+#ifdef CAPRI_GATEWAY_RELAY
+        atomic_store(&s->send_gso_type,offload.gso_type);atomic_store(&s->send_vnet_flags,offload.flags);
+#endif
+        atomic_store(&s->send_errno,failure);atomic_store(&s->send_length,(unsigned long)length);atomic_store(&s->send_protocol,frame[23]);atomic_fetch_add(&s->errors,1);return -1;}
+#ifdef CAPRI_GATEWAY_RELAY
+    if(offload.gso_type!=VIRTIO_NET_HDR_GSO_NONE)atomic_fetch_add(&s->gso_frames,1);
+    if(offload.flags&VIRTIO_NET_HDR_F_NEEDS_CSUM)atomic_fetch_add(&s->checksum_frames,1);
+#endif
     atomic_fetch_add(&s->forwarded,1);return 1;
 }
 #ifdef CAPRI_HTTP_PROXY_TEST
@@ -345,7 +380,7 @@ int main(int argc,char **argv) {
     int control=arp_socket(&c);if(control<0)return 74;
     int data=receiver(&c);if(data<0){unlinkat(dir,"intent",0);return 76;}
     struct counters *s=mmap(NULL,sizeof(*s),PROT_READ|PROT_WRITE,MAP_SHARED|MAP_ANONYMOUS,-1,0);if(s==MAP_FAILED){unlinkat(dir,"intent",0);return 77;}
-    atomic_init(&s->forwarded,0);atomic_init(&s->fixture_tcp,0);atomic_init(&s->fixture_get,0);atomic_init(&s->errors,0);atomic_init(&s->proxy_admitted,0);current_counters=s;
+    atomic_init(&s->forwarded,0);atomic_init(&s->fixture_tcp,0);atomic_init(&s->fixture_get,0);atomic_init(&s->errors,0);atomic_init(&s->proxy_admitted,0);atomic_init(&s->send_errno,0);atomic_init(&s->send_length,0);atomic_init(&s->send_protocol,0);atomic_init(&s->gso_frames,0);atomic_init(&s->checksum_frames,0);atomic_init(&s->send_gso_type,0);atomic_init(&s->send_vnet_flags,0);current_counters=s;
 #ifdef CAPRI_HTTP_PROXY_TEST
     for(unsigned i=0;i<8192;i++)atomic_init(&s->proxy_ports[i],0);
 #endif
@@ -451,6 +486,7 @@ int main(int argc,char **argv) {
 #endif
 #ifdef CAPRI_GATEWAY_RELAY
     if(gateway_cleanup(saved.gateway_chain))restored=-1;
+    printf("{\"send_errno\":%d,\"send_frame_length\":%lu,\"send_ip_protocol\":%u,\"vnet_gso_frames\":%lu,\"vnet_checksum_frames\":%lu,\"failed_gso_type\":%u,\"failed_vnet_flags\":%u}\n",atomic_load(&s->send_errno),atomic_load(&s->send_length),atomic_load(&s->send_protocol),atomic_load(&s->gso_frames),atomic_load(&s->checksum_frames),atomic_load(&s->send_gso_type),atomic_load(&s->send_vnet_flags));
     printf("{\"gateway_direction\":true,\"target_gateway_mapping_changed\":%s,\"router_modified\":false,\"kernel_transit_suppression_cleaned\":%s,\"pre_restore_queued_frames\":%lu,\"selected_external_tcp_frames\":%lu}\n",dry_run?"false":"true",restored?"false":"true",queued,atomic_load(&s->fixture_tcp));
 #endif
     if(!restored&&!late){if(unlinkat(dir,"intent",0))restored=-1;}

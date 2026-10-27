@@ -51,6 +51,7 @@ def main():
         root('chmod 700 '+REMOTE)
         helper('preflight').check_returncode();initial=fresh()
         seq_before=initial[-1]['sequence'];failure_before=initial[-1]['failures']
+        report['sequence_before']=seq_before;report['client_failures_before']=failure_before
         report['started_at']=datetime.now(timezone.utc).isoformat()
         result=helper('start');report['helper_exit']=result.returncode
         (args.output/'native.stdout').write_text(result.stdout);(args.output/'native.stderr').write_text(result.stderr)
@@ -59,8 +60,7 @@ def main():
         report['native']=metrics
         if exists(STATE+'/intent'):
             recovered=helper('recover');report['explicit_recovery_exit']=recovered.returncode;recovered.check_returncode()
-        result.check_returncode()
-        after_native=telemetry();seq_end=after_native[-1]['sequence']
+        after_native=telemetry();seq_end=after_native[-1]['sequence'];report['sequence_end']=seq_end
         deadline=time.monotonic()+5
         while time.monotonic()<deadline:
             later=telemetry()
@@ -71,12 +71,13 @@ def main():
         (args.output/'selected-server-events.json').write_text(json.dumps(external,indent=2)+'\n')
         during=[r for r in external if seq_before<r['sequence']<=seq_end]
         subsequent=[r for r in external if r['sequence']>seq_end]
-        report.update(external_requests_during=len(during),external_requests_after=len(subsequent),response_statuses=sorted({r['status'] for r in during+subsequent}),client_failure_delta=max(0,final[-1]['failures']-failure_before),visibility_states=sorted({r['visibility'] for r in measured}))
+        report.update(external_requests_during=len({r['sequence'] for r in during}),external_requests_after=len({r['sequence'] for r in subsequent}),external_request_rows_during=len(during),external_request_rows_after=len(subsequent),response_statuses=sorted({r['status'] for r in during+subsequent}),client_failure_delta=max(0,final[-1]['failures']-failure_before),visibility_states=sorted({r['visibility'] for r in measured}))
         timeline=initial[-1:]+measured
         report['max_request_gap_seconds']=max(((datetime.fromisoformat(b['time'])-datetime.fromisoformat(a['time'])).total_seconds() for a,b in zip(timeline,timeline[1:])),default=0)
+        result.check_returncode()
         assert metrics.get('forwarded_frames',0)>0 and metrics.get('selected_external_tcp_frames',0)>0 and metrics['send_errors']==0, 'No selected external path evidence'
         assert metrics['kernel_transit_suppression_cleaned'] and not metrics['recovery_required'] and metrics['post_restore_frames']==0 and metrics['restoration_frames_sent'], 'Restoration not confirmed'
-        assert len(during)>=4 and len(subsequent)>=3 and report['client_failure_delta']==0 and report['visibility_states']==['visible'] and report['max_request_gap_seconds']<3, 'External continuity failed/inconclusive'
+        assert report['external_requests_during']>=4 and report['external_requests_after']>=3 and report['client_failure_delta']==0 and report['visibility_states']==['visible'] and report['max_request_gap_seconds']<3, 'External continuity failed/inconclusive'
         assert before==baseline(), 'Network baseline changed'
         report['passed']=True
     except BaseException as error:report['passed']=False;report['error']=str(error)[:500];raise
