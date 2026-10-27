@@ -26,19 +26,32 @@ def main():
     class Handler(BaseHTTPRequestHandler):
         def setup(self):super().setup();self.connection.settimeout(2)
         def log_message(self,*args):pass
-        def reply(self,status,body,ctype='text/plain; charset=utf-8'):
+        def reply(self,status,body,ctype='text/plain; charset=utf-8',head=False):
             self.send_response(status);self.send_header('Content-Type',ctype);self.send_header('Content-Length',str(len(body)))
             self.send_header('Cache-Control','no-store');self.send_header('Connection','close');self.send_header('Referrer-Policy','no-referrer')
             self.send_header('Content-Security-Policy',"default-src 'none'; script-src 'unsafe-inline'; connect-src 'self' http://124.220.51.203")
-            self.end_headers();self.wfile.write(body)
+            self.end_headers()
+            if not head:self.wfile.write(body)
+        def do_HEAD(self):
+            if self.client_address[0] in {'192.168.1.3','192.168.1.6'} and urlsplit(self.path).path=='/_driver_health':
+                return self.reply(200,b'',head=True)
+            self.reply(403,b'',head=True)
         def do_GET(self):
-            if self.client_address[0]!='192.168.1.8':return self.reply(403,b'Not selected test device.')
             parsed=urlsplit(self.path)
+            if self.client_address[0] in {'192.168.1.3','192.168.1.6'} and parsed.path=='/_driver_health':
+                return self.reply(200,json.dumps({'ready':True,'entry':'/start','route':route}).encode(),'application/json')
+            if self.client_address[0]!='192.168.1.8':return self.reply(403,b'Not selected test device.')
+            if parsed.path in {'/','/start','/start/',route+'/'}:
+                self.send_response(302);self.send_header('Location',route);self.send_header('Content-Length','0');self.send_header('Cache-Control','no-store');self.send_header('Connection','close');self.end_headers()
+                event('entry_redirect',category='canonical_slash' if parsed.path==route+'/' else 'short_entry')
+                return
             if parsed.path==route:
                 page='''<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Capri 外网路径验证</title><h2>外网路径验证</h2><p>每秒访问你指定的服务器，不读取账号信息。请保持前台。</p><p id="s">检查中…</p><script>
 let seq=0,failures=0;async function tick(){let a=new AbortController(),t=setTimeout(()=>a.abort(),1800);try{await fetch(REMOTE+'?seq='+ ++seq,{mode:'no-cors',credentials:'omit',referrerPolicy:'no-referrer',cache:'no-store',signal:a.signal});document.getElementById('s').textContent='外网请求完成 · '+seq+' 次 · '+(document.hidden?'后台':'前台');}catch(e){failures++;document.getElementById('s').textContent='重试 · '+failures;}finally{clearTimeout(t);let q=new URLSearchParams({seq:String(seq),failures:String(failures),visibility:document.visibilityState});await fetch(location.pathname+'/telemetry?'+q,{cache:'no-store'}).catch(()=>{});if(seq<600)setTimeout(tick,1000);}}tick();</script>'''.replace('REMOTE',json.dumps(remote))
                 event('page');return self.reply(200,page.encode(),'text/html; charset=utf-8')
-            if parsed.path!=route+'/telemetry':return self.reply(404,b'No driver at this path.')
+            if parsed.path!=route+'/telemetry':
+                event('entry_mismatch',category='old_driver_path' if parsed.path.startswith('/capri-gateway-driver/') else 'other')
+                return self.reply(404,('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><p>测试入口已更新。</p><p><a href="'+route+'">点此进入当前外网测试页</a></p>').encode(),'text/html; charset=utf-8')
             query=parse_qs(parsed.query,max_num_fields=3)
             def counter(name):
                 value=query.get(name,['0'])[0];return int(value) if value.isascii() and value.isdecimal() and len(value)<=6 else 0
