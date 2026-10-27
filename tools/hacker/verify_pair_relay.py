@@ -28,7 +28,7 @@ def main():
     subprocess.run([str(compiler), '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror',
                     str(ROOT / 'tools/hacker/pair_relay.c'), '-o', str(binary)], check=True)
     adb = [args.adb, '-s', args.serial]
-    report = {'prototype_only': True, 'single_direction': True, 'target': '192.168.1.10', 'fixture_server': '192.168.1.16',
+    report = {'prototype_only': True, 'single_direction': True, 'target': '192.168.1.8', 'fixture_server': '192.168.1.3',
               'gateway_modified': False, 'https_tested': False}
     pushed = started = False
 
@@ -54,7 +54,7 @@ def main():
 
     def probes():
         rows = [json.loads(line) for line in (args.fixture / 'events.jsonl').read_text().splitlines()]
-        return [row for row in rows if row['event'] == 'probe' and row['source'] == '192.168.1.10']
+        return [row for row in rows if row['event'] == 'probe' and row['source'] == '192.168.1.8']
 
     try:
         recent = probes()
@@ -63,7 +63,7 @@ def main():
         if exists(REMOTE) or exists(STATE):
             raise RuntimeError('Existing prototype artifact; investigate before starting')
         before = baseline()
-        shell('ping -c 1 -W 1 192.168.1.10 >/dev/null; ping -c 1 -W 1 192.168.1.16 >/dev/null')
+        shell('ping -c 1 -W 1 192.168.1.8 >/dev/null; ping -c 1 -W 1 192.168.1.3 >/dev/null')
         subprocess.run(adb + ['push', str(binary), REMOTE], check=True, capture_output=True, text=True)
         pushed = True
         shell('chmod 700 ' + REMOTE, root=False)

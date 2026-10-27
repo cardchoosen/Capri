@@ -25,12 +25,20 @@
 
 /* Fixed, developer-only fixture scope. No gateway changes, capture files, or HTTPS processing. */
 #define DIR "/data/local/tmp/capri-pair-relay"
-#define SELF "192.168.1.8"
-#define TARGET "192.168.1.10"
-#define SERVER "192.168.1.16"
+#define SELF "192.168.1.6"
+#define TARGET "192.168.1.8"
+#define SERVER "192.168.1.3"
 struct context { unsigned char magic[8];int index;uint32_t self,target,server;unsigned char own[6],client[6],backend[6]; };
-struct counters { atomic_ulong forwarded,fixture_tcp,fixture_get,errors,proxy_admitted; };
+struct counters { atomic_ulong forwarded,fixture_tcp,fixture_get,errors,proxy_admitted;
+#ifdef CAPRI_HTTP_PROXY_TEST
+    atomic_uchar proxy_ports[8192]; /* Fixed peer pair + destination port: client source-port bitmap. */
+#endif
+};
 static struct counters *current_counters;
+#ifdef CAPRI_HTTP_PROXY_TEST
+static long long last_packet_ns;
+static long long realtime_ns(void) { struct timespec t;clock_gettime(CLOCK_REALTIME,&t);return (long long)t.tv_sec*1000000000+t.tv_nsec; }
+#endif
 static volatile sig_atomic_t stop_now;
 static void stopped(int value) { (void)value;stop_now=1; }
 static long long now_ms(void) { struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return (long long)t.tv_sec*1000+t.tv_nsec/1000000; }
@@ -111,6 +119,10 @@ static int receiver(const struct context *c) {
         BPF_STMT(BPF_LD|BPF_W|BPF_ABS,30),BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,ntohl(c->server),1,0),BPF_STMT(BPF_RET|BPF_K,0),
         BPF_STMT(BPF_RET|BPF_K,65550)
     };
+#ifdef CAPRI_HTTP_PROXY_TEST
+    int enabled=1;
+    if(setsockopt(fd,SOL_SOCKET,SO_TIMESTAMPNS,&enabled,sizeof(enabled))){close(fd);return -1;}
+#endif
     struct sock_fprog p={(unsigned short)(sizeof(f)/sizeof(f[0])),f};
     struct sockaddr_ll a;memset(&a,0,sizeof(a));a.sll_family=AF_PACKET;a.sll_ifindex=c->index;a.sll_protocol=htons(ETH_P_IP);
     if(setsockopt(fd,SOL_SOCKET,SO_ATTACH_FILTER,&p,sizeof(p))||bind(fd,(struct sockaddr*)&a,sizeof(a))){close(fd);return -1;}
@@ -118,7 +130,19 @@ static int receiver(const struct context *c) {
 }
 static int relay_one(int fd,const struct context *c,struct counters *s) {
     unsigned char frame[65550];struct sockaddr_ll from;socklen_t size=sizeof(from);
+#ifdef CAPRI_HTTP_PROXY_TEST
+    struct iovec iov={frame,sizeof(frame)};
+    union { struct cmsghdr align;unsigned char data[CMSG_SPACE(sizeof(struct timespec))]; } ancillary;
+    struct msghdr msg={.msg_name=&from,.msg_namelen=size,.msg_iov=&iov,.msg_iovlen=1,.msg_control=ancillary.data,.msg_controllen=sizeof(ancillary.data)};
+    ssize_t length=recvmsg(fd,&msg,0);last_packet_ns=0;
+    for(struct cmsghdr *h=CMSG_FIRSTHDR(&msg);length>=0&&h;h=CMSG_NXTHDR(&msg,h)) {
+        if(h->cmsg_level==SOL_SOCKET&&h->cmsg_type==SCM_TIMESTAMPNS&&h->cmsg_len>=CMSG_LEN(sizeof(struct timespec))) {
+            struct timespec t;memcpy(&t,CMSG_DATA(h),sizeof(t));last_packet_ns=(long long)t.tv_sec*1000000000+t.tv_nsec;
+        }
+    }
+#else
     ssize_t length=recvfrom(fd,frame,sizeof(frame),0,(struct sockaddr*)&from,&size);
+#endif
     if(length<0)return errno==EAGAIN||errno==EINTR?0:-1;
     if(from.sll_pkttype==PACKET_OUTGOING||length<34||memcmp(frame,c->own,6)||memcmp(frame+6,c->client,6)||memcmp(frame+26,&c->target,4)||memcmp(frame+30,&c->server,4))return 0;
     unsigned header=(frame[14]&15u)*4u;
@@ -129,9 +153,11 @@ static int relay_one(int fd,const struct context *c,struct counters *s) {
             unsigned data=(tcp[12]>>4)*4u;
             if(data>=20 && length>=(ssize_t)(14+header+data+4) && !memcmp(tcp+data,"GET ",4))atomic_fetch_add(&s->fixture_get,1);
 #ifdef CAPRI_HTTP_PROXY_TEST
-            /* AF_PACKET receives a clone; leave fixture TCP to kernel PREROUTING/local delivery.
-               Raw-forwarding it too would create a duplicate path bypassing the proxy. */
-            atomic_fetch_add(&s->proxy_admitted,1);return 1;
+            unsigned port=half(tcp),slot=port>>3,bit=1u<<(port&7);
+            if((tcp[13]&0x16)==0x02)atomic_fetch_or(&s->proxy_ports[slot],(unsigned char)bit);
+            /* Only flows whose opening SYN was observed belong to this proxy run.
+               Existing direct TCP must retain its original peer and raw forwarding path. */
+            if(atomic_load(&s->proxy_ports[slot])&bit){atomic_fetch_add(&s->proxy_admitted,1);return 1;}
 #endif
         }
     }
@@ -140,6 +166,15 @@ static int relay_one(int fd,const struct context *c,struct counters *s) {
     if(sendto(fd,frame,(size_t)length,0,(struct sockaddr*)&a,sizeof(a))!=length){atomic_fetch_add(&s->errors,1);return -1;}
     atomic_fetch_add(&s->forwarded,1);return 1;
 }
+#ifdef CAPRI_HTTP_PROXY_TEST
+static void drain_proxy(int data,const struct context *c,struct counters *s) {
+    long long end=now_ms()+800;
+    while(now_ms()<end&&proxy_ready()&&!proxy_idle()) {
+        struct pollfd p={data,POLLIN,0};
+        if(poll(&p,1,30)>0)relay_one(data,c,s);
+    }
+}
+#endif
 static int reap(pid_t pid) {
     int status;long long deadline=now_ms()+1000;
     while(now_ms()<deadline){pid_t r=waitpid(pid,&status,WNOHANG);if(r==pid)return 0;if(r<0&&errno!=EINTR)return -1;delay(20);}
@@ -243,6 +278,9 @@ int main(int argc,char **argv) {
     int data=receiver(&c);if(data<0){unlinkat(dir,"intent",0);return 76;}
     struct counters *s=mmap(NULL,sizeof(*s),PROT_READ|PROT_WRITE,MAP_SHARED|MAP_ANONYMOUS,-1,0);if(s==MAP_FAILED){unlinkat(dir,"intent",0);return 77;}
     atomic_init(&s->forwarded,0);atomic_init(&s->fixture_tcp,0);atomic_init(&s->fixture_get,0);atomic_init(&s->errors,0);atomic_init(&s->proxy_admitted,0);current_counters=s;
+#ifdef CAPRI_HTTP_PROXY_TEST
+    for(unsigned i=0;i<8192;i++)atomic_init(&s->proxy_ports[i],0);
+#endif
     signal(SIGTERM,stopped);signal(SIGINT,stopped);signal(SIGHUP,SIG_IGN);signal(SIGPIPE,SIG_IGN);signal(SIGCHLD,SIG_DFL);
     int ready[2];if(pipe2(ready,O_CLOEXEC)){unlinkat(dir,"intent",0);return 78;}
     pid_t owner=getpid(),child=fork();if(child<0){close(ready[0]);close(ready[1]);unlinkat(dir,"intent",0);return 78;}
@@ -256,6 +294,9 @@ int main(int argc,char **argv) {
             struct pollfd p={data,POLLIN,0};int ready=poll(&p,1,50);
             if(ready>0&&relay_one(data,&c,s)<0)break;
         }
+#ifdef CAPRI_HTTP_PROXY_TEST
+        if(!dry_run)drain_proxy(data,&c,s);
+#endif
         int restored=dry_run?0:restore_neighbor(control,&c);
 #ifdef CAPRI_HTTP_PROXY_TEST
         if(getppid()!=owner&&nat_cleanup(saved.nat_chain))restored=-1;
@@ -299,18 +340,34 @@ int main(int argc,char **argv) {
     }
     if(stop_now)reason="signal";
     phase(dir,"stopping",dry_run,0);
+#ifdef CAPRI_HTTP_PROXY_TEST
+    if(!dry_run)drain_proxy(data,&c,s);
+#endif
     int restored=dry_run?0:restore_neighbor(control,&c);
     if(child>0){kill(child,SIGTERM);reap(child);}
+#ifdef CAPRI_HTTP_PROXY_TEST
+    long long restored_at=realtime_ns();unsigned long late=0,queued=0;
+#else
     unsigned long before=atomic_load(&s->forwarded)+atomic_load(&s->proxy_admitted);
+#endif
     long long observe=now_ms()+(dry_run?0:2500);
     while(now_ms()<observe) {
-        struct pollfd p={data,POLLIN,0};if(poll(&p,1,50)>0 && relay_one(data,&c,s)>0)restore_neighbor(control,&c);
+        struct pollfd p={data,POLLIN,0};if(poll(&p,1,50)>0 && relay_one(data,&c,s)>0) {
+#ifdef CAPRI_HTTP_PROXY_TEST
+            if(last_packet_ns>0&&last_packet_ns<=restored_at)queued++;
+            else {late++;restore_neighbor(control,&c);}
+#else
+            restore_neighbor(control,&c);
+#endif
+        }
     }
+#ifndef CAPRI_HTTP_PROXY_TEST
     unsigned long late=atomic_load(&s->forwarded)+atomic_load(&s->proxy_admitted)-before;
+#endif
 #ifdef CAPRI_HTTP_PROXY_TEST
     /* Stop announcements and finish neighbor restoration while engine and NAT still live. */
     if(nat_cleanup(saved.nat_chain))restored=-1;
-    printf("{\"proxy_admitted_frames\":%lu,\"nat_cleanup_succeeded\":%s}\n",atomic_load(&s->proxy_admitted),restored?"false":"true");
+    printf("{\"proxy_admitted_frames\":%lu,\"pre_restore_queued_frames\":%lu,\"nat_cleanup_succeeded\":%s}\n",atomic_load(&s->proxy_admitted),queued,restored?"false":"true");
 #endif
     if(!restored&&!late){if(unlinkat(dir,"intent",0))restored=-1;}
     unlinkat(dir,"stop.request",0);

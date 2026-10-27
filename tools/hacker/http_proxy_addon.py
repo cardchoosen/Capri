@@ -7,7 +7,7 @@ from mitmproxy import ctx, http
 
 BASE = Path('/lab')
 PREFIX = '/capri-lab/c82aa79e80e7edb2'
-ALLOWED = {'192.168.1.10', '192.168.1.8'}
+ALLOWED = {'192.168.1.8', '192.168.1.6'}
 
 
 class FixtureProxy:
@@ -15,6 +15,7 @@ class FixtureProxy:
         self.requests = 0
         self.responses = 0
         self.started = time.monotonic()
+        self.client_connections = set()
 
     def log(self, event, **fields):
         with (BASE / 'proxy-events.jsonl').open('a') as stream:
@@ -29,19 +30,32 @@ class FixtureProxy:
             await asyncio.sleep(.25)
         ctx.master.shutdown()
 
+    def client_connected(self, client):
+        if client.peername and client.peername[0] == '192.168.1.8':
+            self.client_connections.add(client.id)
+
+    def client_disconnected(self, client):
+        self.client_connections.discard(client.id)
+
     def request(self, flow: http.HTTPFlow):
         source = flow.client_conn.peername[0] if flow.client_conn.peername else ''
         path = flow.request.path.partition('?')[0]
-        if path == '/_capri_proxy_health' and source in {'192.168.1.8', '192.168.1.16'}:
-            flow.response = http.Response.make(200, b'{"ready":true}', {'Content-Type': 'application/json', 'Connection': 'close'})
+        if path in {'/_capri_proxy_health', '/_capri_proxy_idle'} and source in {'192.168.1.6', '192.168.1.3'}:
+            body = b'{"ready":true}' if path.endswith('health') else (b'{"idle":false}' if self.client_connections else b'{"idle":true}')
+            flow.response = http.Response.make(200, body, {'Content-Type': 'application/json', 'Connection': 'close'})
             return
-        if source not in ALLOWED or flow.request.method != 'GET' or path not in {PREFIX, PREFIX + '/probe', PREFIX + '/event'}:
+        methods = {PREFIX: {'GET'}, PREFIX + '/probe': {'GET'}, PREFIX + '/event': {'GET'}}
+        for case in ('json', 'binary', 'gzip', 'redirect', 'status', 'chunked'):
+            methods[PREFIX + '/protocol/' + case] = {'GET'}
+        methods[PREFIX + '/protocol/head'] = {'HEAD'}
+        methods[PREFIX + '/protocol/echo'] = {'POST'}
+        if source not in ALLOWED or flow.request.method not in methods.get(path, set()):
             flow.response = http.Response.make(403, b'Outside fixed HTTP fixture scope.', {'Connection': 'close'})
             self.log('rejected', source=source)
             return
         # Fixed upstream even if the client supplies an absolute URL or a different Host.
         flow.request.scheme = 'http'
-        flow.request.host = '192.168.1.16'
+        flow.request.host = '192.168.1.3'
         flow.request.port = 18765
         flow.request.headers['X-Capri-Lab-Request'] = 'Pixel-prototype'
         flow.request.headers['Connection'] = 'close'

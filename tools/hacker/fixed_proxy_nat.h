@@ -11,7 +11,7 @@ static int nat_command(const char *op,const char *chain,int rule) {
         if(prctl(PR_SET_PDEATHSIG,SIGKILL)||getppid()!=owner)_exit(125);
         int sink=open("/dev/null",O_WRONLY);if(sink<0)_exit(125);
         dup2(sink,1);dup2(sink,2);close(sink);
-        if(rule==1)execl("/system/bin/iptables","iptables","-w","2","-t","nat",op,"PREROUTING","-i","wlan0","-s",TARGET"/32","-d",SERVER"/32","-p","tcp","--dport","18765","-m","comment","--comment",chain,"-j",chain,(char*)NULL);
+        if(rule==1)execl("/system/bin/iptables","iptables","-w","2","-t","nat",op,"PREROUTING","-i","wlan0","-s",TARGET"/32","-d",SERVER"/32","-p","tcp","--dport","18765","--syn","-m","comment","--comment",chain,"-j",chain,(char*)NULL);
         else if(rule==2)execl("/system/bin/iptables","iptables","-w","2","-t","nat",op,chain,"-p","tcp","-m","comment","--comment",chain,"-j","REDIRECT","--to-ports","18766",(char*)NULL);
         else execl("/system/bin/iptables","iptables","-w","2","-t","nat",op,chain,(char*)NULL);
         _exit(125);
@@ -52,21 +52,24 @@ static int nat_cleanup(const char *name) {
     if(nat_command("-X",name,0))return -1;
     return nat_command("-S",name,0)==1?0:-1;
 }
-static int proxy_ready(void) {
+static int proxy_probe(int idle) {
     int fd=socket(AF_INET,SOCK_STREAM|SOCK_CLOEXEC|SOCK_NONBLOCK,0);if(fd<0)return 0;
     struct sockaddr_in a={.sin_family=AF_INET,.sin_port=htons(18766)};inet_pton(AF_INET,SELF,&a.sin_addr);
     int ok=0;
     if(connect(fd,(struct sockaddr*)&a,sizeof(a))&&errno!=EINPROGRESS)goto done;
     struct pollfd p={fd,POLLOUT,0};int error=0;socklen_t size=sizeof(error);
     if(poll(&p,1,1000)<=0||getsockopt(fd,SOL_SOCKET,SO_ERROR,&error,&size)||error)goto done;
-    const char request[]="GET /_capri_proxy_health HTTP/1.0\r\nHost: "SELF"\r\n\r\n";
-    if(send(fd,request,sizeof(request)-1,MSG_NOSIGNAL)!=(ssize_t)sizeof(request)-1)goto done;
+    char request[160];int request_size=snprintf(request,sizeof(request),"GET /_capri_proxy_%s HTTP/1.0\r\nHost: "SELF"\r\n\r\n",idle?"idle":"health");
+    if(send(fd,request,(size_t)request_size,MSG_NOSIGNAL)!=request_size)goto done;
     char reply[1024];size_t used=0;long long end=now_ms()+1500;
     while(now_ms()<end&&used<sizeof(reply)-1) {
         p.events=POLLIN;if(poll(&p,1,100)<=0)continue;
         ssize_t n=recv(fd,reply+used,sizeof(reply)-1-used,0);
         if(n<=0)break;used+=(size_t)n;reply[used]=0;
-        if(strstr(reply,"200 OK")&&strstr(reply,"{\"ready\":true}")){ok=1;break;}
+        if(strstr(reply,"200 OK")&&strstr(reply,idle?"{\"idle\":true}":"{\"ready\":true}")){ok=1;break;}
     }
 done:close(fd);return ok;
 }
+
+static int proxy_ready(void) { return proxy_probe(0); }
+static int proxy_idle(void) { return proxy_probe(1); }

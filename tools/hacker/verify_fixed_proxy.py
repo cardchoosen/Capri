@@ -71,7 +71,7 @@ def main():
     def fresh():
         if not args.active:
             return
-        rows=[r for r in probes() if r.get('source')=='192.168.1.10']
+        rows=[r for r in probes() if r.get('source')=='192.168.1.8']
         if len(rows)<3 or any(r.get('visibility')!='visible' for r in rows[-3:]) or (datetime.now(timezone.utc)-datetime.fromisoformat(rows[-1]['time'])).total_seconds()>2:
             raise RuntimeError('Need three fresh, visible, direct vivo probes; no interception started')
 
@@ -82,7 +82,7 @@ def main():
         before=baseline()
         for key,value in before.items():
             (args.output/(key+'-before.txt')).write_text(value)
-        shell('ping -c 1 -W 1 192.168.1.10 >/dev/null; ping -c 1 -W 1 192.168.1.16 >/dev/null')
+        shell('ping -c 1 -W 1 192.168.1.8 >/dev/null; ping -c 1 -W 1 192.168.1.3 >/dev/null')
         subprocess.run(adb+['push',str(binary),REMOTE],check=True,capture_output=True)
         pushed=True
         shell('chmod 700 '+REMOTE,root=False)
@@ -167,12 +167,12 @@ def main():
             count=len(probes())
             deadline=time.monotonic()+5
             while time.monotonic()<deadline:
-                later=[r for r in probes()[count:] if r.get('source')=='192.168.1.10' and not r.get('request_marked')]
+                later=[r for r in probes()[count:] if r.get('source')=='192.168.1.8' and not r.get('request_marked')]
                 if len(later)>=3:
                     break
                 time.sleep(.2)
             measured=probes()[len(initial):]
-            marked=[r for r in measured if r.get('source')=='192.168.1.8' and r.get('request_marked')]
+            marked=[r for r in measured if r.get('source')=='192.168.1.6' and r.get('request_marked')]
             report['proxied_backend_probes']=len(marked)
             report['direct_probes_after_stop']=len(later)
             report['visibility_states']=sorted({r.get('visibility') for r in measured})
@@ -205,6 +205,11 @@ def main():
                     shell('rm -f '+' '.join(STATE+'/'+name for name in ('lock','status.json','status.tmp','stop.request'))+'; rmdir '+STATE)
                 shell('rm '+REMOTE,root=False)
                 report['helper_artifacts_removed']=True
+        except Exception as error:
+            report['cleanup_error']=type(error).__name__+': '+str(error)[:200]
+            report['passed']=False
+        # Still capture network state when cleanup fails; never hide a residue behind that failure.
+        try:
             if before is not None:
                 final=baseline()
                 report['final_baseline_unchanged']=before==final
@@ -215,7 +220,7 @@ def main():
                     for key,text in final.items():
                         (args.output/(key+'-final.txt')).write_text(text)
         except Exception as error:
-            report['cleanup_error']=type(error).__name__+': '+str(error)[:200]
+            report['baseline_check_error']=type(error).__name__+': '+str(error)[:200]
             report['passed']=False
         (args.output/'report.json').write_text(json.dumps(report,indent=2)+'\n')
         print(json.dumps(report),flush=True)

@@ -79,7 +79,7 @@ def main():
         if not args.active:
             return []
         return [row for row in (json.loads(line) for line in (args.fixture / 'events.jsonl').read_text().splitlines())
-                if row['event'] == 'probe' and row['source'] == '192.168.1.10']
+                if row['event'] == 'probe' and row['source'] == '192.168.1.8']
 
     def fresh():
         rows = probes()
@@ -91,7 +91,7 @@ def main():
         if exists(REMOTE) or exists(STATE):
             raise RuntimeError('Existing artifacts must be investigated before testing')
         original = baseline()
-        shell('ping -c 1 -W 1 192.168.1.10 >/dev/null; ping -c 1 -W 1 192.168.1.16 >/dev/null')
+        shell('ping -c 1 -W 1 192.168.1.8 >/dev/null; ping -c 1 -W 1 192.168.1.3 >/dev/null')
         subprocess.run(adb + ['push', str(binary), REMOTE], check=True, capture_output=True, text=True)
         pushed = True
         shell('chmod 700 ' + REMOTE, root=False)

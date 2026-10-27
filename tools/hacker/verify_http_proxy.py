@@ -13,7 +13,7 @@ import urllib.request
 
 from proxy_runtime import BASE, ProxyRuntime
 
-HOST = 'http://192.168.1.8:18766'
+HOST = 'http://192.168.1.6:18766'
 PREFIX = '/capri-lab/c82aa79e80e7edb2'
 
 
@@ -54,7 +54,7 @@ def main():
         # Refuse any listener; never stop an unknown process to reuse its port.
         import socket
         try:
-            with socket.create_connection(('192.168.1.8', 18766), timeout=2):
+            with socket.create_connection(('192.168.1.6', 18766), timeout=2):
                 raise RuntimeError('Port already in use; stop its owning experiment first')
         except ConnectionRefusedError:
             pass
@@ -62,8 +62,8 @@ def main():
         upload = runtime.adb + ['shell', '-T', 'run-as ai.capri.app /system/bin/sh -c ' + shlex.quote('cat > ' + BASE + '/addon.py')]
         subprocess.run(upload, input=addon, check=True, timeout=10, capture_output=True)
         runtime.shell(['/system/bin/run-as', 'ai.capri.app', '/system/bin/rm', '-f', BASE + '/stop', BASE + '/proxy-events.jsonl'], timeout=8).check_returncode()
-        command = ['/lab/venv/bin/mitmdump', '-q', '--mode', 'reverse:http://192.168.1.16:18765',
-                   '--listen-host', '192.168.1.8', '--listen-port', '18766', '--set', 'connection_strategy=lazy',
+        command = ['/lab/venv/bin/mitmdump', '-q', '--mode', 'reverse:http://192.168.1.3:18765',
+                   '--listen-host', '192.168.1.6', '--listen-port', '18766', '--set', 'connection_strategy=lazy',
                    '--set', 'http2=false', '--set', 'block_global=false', '--set', 'block_private=false',
                    '--set', 'confdir=/lab/conf', '-s', '/lab/addon.py']
         with (args.output / 'engine.log').open('w') as log:
@@ -108,7 +108,7 @@ def main():
             if result.returncode == 0:
                 (args.output / 'events.jsonl').write_text(result.stdout)
                 events = [json.loads(line) for line in result.stdout.splitlines()]
-                report['client_verified'] = any(row.get('event') == 'request' and row.get('source') == '192.168.1.10' for row in events)
+                report['client_verified'] = any(row.get('event') == 'request' and row.get('source') == '192.168.1.8' for row in events)
                 report['engine_stopped'] = any(row.get('event') == 'stopped' for row in events) and not health()
             report['exit_code'] = engine.returncode
         (args.output / 'report.json').write_text(json.dumps(report, indent=2) + '\n')

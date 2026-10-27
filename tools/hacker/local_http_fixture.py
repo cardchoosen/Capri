@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 import secrets
 import time
+from http_protocol_fixture import protocol
 from urllib.parse import urlsplit, parse_qs
 
 
@@ -43,6 +44,7 @@ def main():
             print(json.dumps(value), flush=True)
 
     class Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
         def setup(self):
             super().setup()
             self.connection.settimeout(2)
@@ -65,13 +67,32 @@ def main():
         def do_HEAD(self):
             if self.client_address[0] == str(args.bind) and self.path == '/health':
                 return self.reply(200, head=True)
+            allowed = {str(args.target)} | ({str(args.relay)} if args.relay else set())
+            if self.client_address[0] in allowed and protocol(self, urlsplit(self.path).path, route, head=True):
+                return
             self.reply(403, head=True)
+
+        def do_POST(self):
+            allowed = {str(args.target)} | ({str(args.relay)} if args.relay else set())
+            if self.client_address[0] not in allowed or self.path != route + '/protocol/echo':
+                return self.reply(403)
+            raw = self.headers.get('Content-Length', '')
+            if self.headers.get('Transfer-Encoding') or not raw.isascii() or not raw.isdecimal() or len(raw) > 5 or int(raw) > 4096:
+                return self.reply(413)
+            payload = self.rfile.read(int(raw))
+            if len(payload) != int(raw):
+                return self.reply(400)
+            event('protocol_post', source=self.client_address[0], bytes=len(payload))
+            self.reply(200, payload, 'application/octet-stream')
 
         def do_GET(self):
             allowed = {str(args.target)} | ({str(args.relay)} if args.relay else set())
             if self.client_address[0] not in allowed:
                 return self.reply(403, b'Not the selected test device.')
             parsed = urlsplit(self.path)
+            if protocol(self, parsed.path, route):
+                event('protocol_get', source=self.client_address[0])
+                return
             if parsed.path == route and not parsed.query:
                 counters['page'] += 1
                 event('page', source=self.client_address[0], count=counters['page'])
