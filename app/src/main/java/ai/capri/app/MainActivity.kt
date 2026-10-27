@@ -77,7 +77,7 @@ class MainActivity : ComponentActivity() {
     val update = vm.updates.collectAsState().value
     val session = vm.current()
     val entries = remember(session.id, update) { session.messages.filter(ToolPresentation::visible) }
-    val chatPositions = remember { mutableMapOf<String, ChatScrollState>() }
+    val chatPositions = remember(vm.memoryRevision) { mutableMapOf<String, ChatScrollState>() }
     val chatPosition = chatPositions.getOrPut(session.id) { ChatScrollState(entries.size) }
     val busy = vm.jobs.containsKey(session.id)
     val notice = vm.notices[session.id]
@@ -101,7 +101,7 @@ class MainActivity : ComponentActivity() {
             vm.androidTools.permissions.take(pending.id)?.let { nativePermissionLauncher.launch(it.toTypedArray()) }
         }
     }
-    var input by remember(session.id) { mutableStateOf("") }
+    var input by remember(session.id, vm.memoryRevision) { mutableStateOf("") }
     var banner by remember { mutableStateOf("") }
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
@@ -137,9 +137,14 @@ class MainActivity : ComponentActivity() {
         ModalDrawerSheet(drawerContainerColor = Ink, drawerShape = RoundedCornerShape(0.dp)) {
             Spacer(Modifier.height(12.dp))
             Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) { Mark(Modifier.size(40.dp)); Text("CAPRI", letterSpacing = 5.sp, fontWeight = FontWeight.Bold) }
-            Button(enabled = !vm.migrating, onClick = { vm.create(); scope.launch { drawer.close() } }, modifier = Modifier.padding(horizontal = 20.dp).fillMaxWidth()) { Icon(Icons.Outlined.Add, null); Text("新会话", Modifier.padding(8.dp)) }
+            val personal = vm.personalSession()
+            NavigationDrawerItem(shape = RoundedCornerShape(2.dp),
+                label = { Column { Text("Capri"); Text("一直在这里", fontSize = 11.sp, color = Muted) } },
+                selected = personal.id == session.id,
+                onClick = { vm.select(personal.id); scope.launch { drawer.close() } }, modifier = Modifier.padding(horizontal = 12.dp))
+            Button(enabled = !vm.migrating && !vm.resettingMemory && !vm.memoryResetRequired, onClick = { vm.create(); scope.launch { drawer.close() } }, modifier = Modifier.padding(horizontal = 20.dp).fillMaxWidth()) { Icon(Icons.Outlined.Add, null); Text("新建任务对话", Modifier.padding(8.dp)) }
             Text("你的任务空间", color = Muted, modifier = Modifier.padding(16.dp), fontSize = 12.sp)
-            LazyColumn { items(vm.sessions.toList(), key = { it.id }) { item ->
+            LazyColumn { items(vm.sessions.filter { it.kind == SessionKind.TASK }, key = { it.id }) { item ->
                 NavigationDrawerItem(shape = RoundedCornerShape(2.dp), label = { Text(item.title, maxLines = 1) }, selected = item.id == session.id, onClick = { vm.select(item.id); scope.launch { drawer.close() } }, modifier = Modifier.padding(horizontal = 12.dp))
             } }
         }
@@ -150,7 +155,7 @@ class MainActivity : ComponentActivity() {
                     IconButton(onClick = { scope.launch { drawer.open() } }) { Icon(Icons.Outlined.Menu, "会话列表", tint = White) }
                     Column(Modifier.weight(1f).padding(start = 8.dp)) {
                         Text("C A P R I", fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, fontSize = 16.sp)
-                        Text(if (busy) "●  ${notice ?: "思考中"}" else "●  随时待命", color = Green, fontSize = 10.sp, letterSpacing = 1.sp)
+                        Text(if (busy) "●  ${notice ?: "思考中"}" else if (session.kind == SessionKind.PERSONAL) "●  在这儿呢" else "●  随时待命", color = Green, fontSize = 10.sp, letterSpacing = 1.sp)
                     }
                     IconButton(onClick = { settings = true }) { Icon(Icons.Outlined.Tune, "设置", tint = Red) }
                 }
@@ -182,9 +187,9 @@ class MainActivity : ComponentActivity() {
                             Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(28.dp), verticalArrangement = Arrangement.Center) {
                                 Text("CAPRI / 摩羯", color = Muted, fontSize = 12.sp, letterSpacing = 2.sp)
                                 Spacer(Modifier.height(20.dp)); Mark(Modifier.size(94.dp)); Spacer(Modifier.height(18.dp))
-                                Text("好了，\n你想改写什么？", color = White, fontSize = 32.sp, lineHeight = 46.sp, fontWeight = FontWeight.SemiBold)
+                                Text(if (session.kind == SessionKind.PERSONAL) "来了？\n说吧，我听着。" else "好了，\n你想改写什么？", color = White, fontSize = 32.sp, lineHeight = 46.sp, fontWeight = FontWeight.SemiBold)
                                 Spacer(Modifier.height(30.dp))
-                                listOf("介绍一下你自己", "帮我整理这个工作区").forEach { label ->
+                                (if (session.kind == SessionKind.PERSONAL) listOf("我回来了", "今天不想干活") else listOf("介绍一下你自己", "帮我整理这个工作区")).forEach { label ->
                                     OutlinedButton(onClick = { input = label }, shape = RoundedCornerShape(2.dp), border = BorderStroke(1.dp, Line), modifier = Modifier.padding(bottom = 8.dp)) { Text(label, color = White, fontSize = 12.sp); Spacer(Modifier.width(20.dp)); Icon(Icons.Outlined.NorthEast, null, Modifier.size(14.dp), tint = Green) }
                                 }
                             }
@@ -199,7 +204,7 @@ class MainActivity : ComponentActivity() {
                         ai.capri.app.model.ModelPicker(vm, session.id) { settings = true }
                         Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp).border(1.dp, if (busy) Red else Line, RoundedCornerShape(2.dp)).background(Panel, RoundedCornerShape(2.dp)).padding(2.dp), verticalAlignment = Alignment.Bottom) {
                             IconButton(enabled = !vm.migrating, onClick = { importer.launch(arrayOf("*/*")) }) { Icon(Icons.Outlined.Add, "导入文件", tint = Muted) }
-                            TextField(value = input, onValueChange = { input = it }, modifier = Modifier.weight(1f), placeholder = { Text("下达你的指令…", fontSize = 14.sp) }, maxLines = 5, colors = TextFieldDefaults.colors(focusedContainerColor = Panel, unfocusedContainerColor = Panel, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent))
+                            TextField(value = input, onValueChange = { input = it }, modifier = Modifier.weight(1f), placeholder = { Text(if (session.kind == SessionKind.PERSONAL) "跟 Capri 说点什么…" else "下达你的指令…", fontSize = 14.sp) }, maxLines = 5, colors = TextFieldDefaults.colors(focusedContainerColor = Panel, unfocusedContainerColor = Panel, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent))
                             FilledIconButton(shape = RoundedCornerShape(2.dp), onClick = { if (busy) vm.stop() else if(input.isNotBlank()) { if(vm.send(input)) { chatPosition.followLatest = true; input = ""; focusManager.clearFocus(force = true); keyboard?.hide() } } }, colors = IconButtonDefaults.filledIconButtonColors(containerColor = if(busy) Red else Green, contentColor = Ink), modifier = Modifier.padding(bottom = 4.dp)) { Icon(if(busy) Icons.Outlined.Stop else Icons.Outlined.ArrowUpward, if(busy) "停止" else "发送") }
                         }
                     }
@@ -237,6 +242,8 @@ class MainActivity : ComponentActivity() {
                             OutlinedButton(onClick = { extensionsPanel = true }) { Text("能力与扩展 · Tools / MCP / Skills") }
                             OutlinedButton(onClick = { knowledgePanel = true }) { Text("上下文 / 记忆 / 文档") }
                             OutlinedButton(onClick = { enhancementsPanel = true }) { Text("增强能力") }
+                            Spacer(Modifier.height(12.dp))
+                            ai.capri.app.nativebridge.RootPanel(vm)
                             EnvironmentPanel(vm)
                             Spacer(Modifier.height(24.dp)); Text("会话独立目录", color = Green); Text("workspace / 任务文件\nhome / 用户目录\ntmp / 临时文件\nruns / 脚本与执行日志", color = Muted, lineHeight = 28.sp, modifier = Modifier.padding(vertical = 12.dp), fontFamily = FontFamily.Monospace)
                             Text("运行模型：单 APK · Android 原生调度 · PRoot/Ubuntu。PRoot 与 Android 共用内核，各会话属于同一应用 UID；目录分离不构成恶意代码安全隔离。", color = Muted, lineHeight = 24.sp, fontSize = 13.sp)
@@ -249,7 +256,7 @@ class MainActivity : ComponentActivity() {
         }
     }
     if(enhancementsPanel) ai.capri.app.retrieval.EnhancementsPanel(vm) { enhancementsPanel = false }
-    if(knowledgePanel) ai.capri.app.knowledge.KnowledgePanel(vm) { knowledgePanel = false }
+    if(knowledgePanel) key(vm.memoryRevision) { ai.capri.app.knowledge.KnowledgePanel(vm) { knowledgePanel = false } }
     if(extensionsPanel) ai.capri.app.extensions.ExtensionsPanel(vm) { extensionsPanel = false }
     if(sshPanel) SshPanel(vm.runtime, session.id, onDismiss = { sshPanel = false })
     if(gitAccounts) ai.capri.app.git.GitAccountsDialog(vm.gitAccounts, onDismiss = { gitAccounts = false })
@@ -265,14 +272,14 @@ class MainActivity : ComponentActivity() {
     val actions = capabilities.getJSONArray("actions")
     AlertDialog(onDismissRequest = onDismiss, title = { Text("Android 原生能力") }, text = {
         Column {
-            Text("${actions.length()} 项已接入动作 · 无 root / ADB / Shizuku。授权按任务需要申请，系统开关和厂商限制仍可能影响结果。", color = Muted, fontSize = 12.sp)
+            Text("${actions.length()} 项已接入动作 · 可选宿主Root后端；不依赖ADB / Shizuku。授权按任务需要申请，系统开关和厂商限制仍可能影响结果。", color = Muted, fontSize = 12.sp)
             Spacer(Modifier.height(12.dp))
             LazyColumn(Modifier.heightIn(max = 400.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 items(actions.length()) { index ->
                     val action = actions.getJSONObject(index)
                     Column {
                         Text(action.getString("title"), fontSize = 14.sp)
-                        Text(when(action.getString("status")) { "available" -> "已接入"; "permission_required" -> "需要授权"; else -> "设备不支持" }, color = if(action.getString("status") == "available") Green else Muted, fontSize = 11.sp)
+                        Text(when(action.getString("status")) { "available" -> "已接入"; "permission_required" -> "需要授权"; "root_authorization_required" -> "需要Root授权"; else -> "设备不支持" }, color = if(action.getString("status") == "available") Green else Muted, fontSize = 11.sp)
                     }
                 }
             }

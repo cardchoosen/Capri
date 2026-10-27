@@ -31,4 +31,17 @@ class RecoveryMessagesTest {
         assertTrue(RecoveryMessages.isContinuation("？"))
         assertFalse(RecoveryMessages.isContinuation("继续创建另一个项目"))
     }
+    @Test fun personalMemoryAndCrossChatLookupResultsCannotLeakThroughRecovery() {
+        val memoryCall = call("remember", "personal_memory").apply {
+            getJSONObject("function").put("arguments", "{\"action\":\"remember\",\"text\":\"private preference\"}")
+        }
+        val messages = JSONArray().put(JSONObject().put("role", "system").put("content", "persona"))
+            .put(JSONObject().put("role", "assistant").put("tool_calls", JSONArray().put(memoryCall).put(call("history", "conversation_history"))))
+            .put(JSONObject().put("role", "tool").put("tool_call_id", "remember").put("content", "private stored note"))
+            .put(JSONObject().put("role", "tool").put("tool_call_id", "history").put("content", "another chat secret"))
+        val saved = RecoveryMessages.sanitized(messages).toString()
+        listOf("private preference", "private stored note", "another chat secret").forEach { assertFalse(saved.contains(it)) }
+        assertTrue(ToolPresentation.isInternal("personal_memory"))
+        assertTrue(ToolPresentation.isInternal("conversation_history"))
+    }
 }

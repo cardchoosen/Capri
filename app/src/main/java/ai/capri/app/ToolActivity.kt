@@ -9,7 +9,8 @@ internal fun toolLabel(name: String, args: JSONObject?): String = when (name) {
     "web_search" -> "搜索网页"
     "web_read" -> "读取网页正文"
     "knowledge" -> "检索与管理知识"
-    "context_history" -> "查阅会话历史"
+    "context_history", "conversation_history" -> "查阅会话历史"
+    "personal_memory" -> "回想共同经历"
     "android" -> args?.optString("action")?.let { ai.capri.app.nativebridge.NativeCatalog.find(it)?.title } ?: "Android 原生工具"
     "terminal" -> when (args?.optString("action")) {
         "open" -> "创建终端"; "list", "attach" -> "查看终端"; "run" -> "执行命令"; "read" -> "读取终端输出"

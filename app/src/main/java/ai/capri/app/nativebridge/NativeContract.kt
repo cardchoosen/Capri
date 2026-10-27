@@ -7,12 +7,15 @@ internal class NativeFailure(val status: String, override val message: String, v
 
 internal data class NativeAction(val name: String, val title: String, val parameters: String, val effect: String = "read")
 
-/** Closed action catalog: native calls never resolve arbitrary classes, methods or shell commands. */
+/** Closed action catalog. Only explicit root_exec dispatches host commands after su identity verification. */
 internal object NativeCatalog {
     val actions = listOf(
         NativeAction("capabilities", "原生能力清单与权限状态", "无"),
         NativeAction("permissions", "查看已授权权限", "无"),
         NativeAction("request_permissions", "请求与任务相关的系统授权", "group: location/camera/bluetooth/contacts/calendar/notifications", "permission"),
+        NativeAction("root_status", "检测设备root线索与Capri授权记录", "无；不弹授权，不把su缺失或PRoot失败当作整机未root"),
+        NativeAction("root_request", "请求并实测Capri的root授权", "无；通过手机Root管理器授权，最多等待30秒；仅运行id等只读验证", "permission"),
+        NativeAction("root_exec", "在Android宿主以真实root执行短命令", "command:Android shell脚本；timeout_seconds:1..120，默认30；output_limit:1000..64000字节，默认16000；先root_request；不是Ubuntu/PRoot；不用于脱离托管的后台进程", "root_execute"),
         NativeAction("device_info", "设备、系统、语言和运行信息", "无"),
         NativeAction("battery_info", "电量、充电与省电状态", "无"),
         NativeAction("storage_info", "应用存储空间与内存", "无"),
@@ -49,7 +52,7 @@ internal object NativeCatalog {
     fun find(name: String) = actions.firstOrNull { it.name == name }
     fun spec(): JSONObject = JSONObject().put("type", "function").put("function", JSONObject()
         .put("name", "android")
-        .put("description", "手机原生Android能力统一入口，无root/ADB/Shizuku。网络任务不确定或失败时用network_check，可传目标url；network_info只说明系统联网，不证明外网站点可达。先用capabilities了解能力。Wi-Fi、设备状态、应用、定位等应优先使用此工具而非PRoot。缺少授权时按结果调用request_permissions并重试；不能把Python失败说成手机无法实现。params填写对应action的参数，未知参数不执行。launch类仅打开系统页面，不代表用户完成了操作。")
+        .put("description", "手机原生Android能力统一入口，包含可选su root宿主后端，不依赖ADB/Shizuku。root_status只读探测，root_request请求并验证本应用授权，root_exec在Android宿主执行有超时的root命令；普通PRoot终端仍是应用UID。网络任务不确定或失败时用network_check，可传目标url；network_info只说明系统联网，不证明外网站点可达。先用capabilities了解能力。Wi-Fi、设备状态、应用、定位等应优先使用此工具而非PRoot。缺少授权时按结果调用request_permissions并重试；不能把Python失败说成手机无法实现。params填写对应action的参数，未知参数不执行。launch类仅打开系统页面，不代表用户完成了操作。")
         .put("parameters", JSONObject().put("type", "object").put("required", JSONArray(listOf("action")))
             .put("properties", JSONObject()
                 .put("action", JSONObject().put("type", "string").put("enum", JSONArray(actions.map { it.name })))

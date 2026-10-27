@@ -20,13 +20,13 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Locale
 
-internal class NativeDeviceTools(private val app: Application, private val permissions: NativePermissions) {
+internal class NativeDeviceTools(private val app: Application, private val permissions: NativePermissions, private val rootStatus: () -> JSONObject) {
     fun device() = JSONObject().put("manufacturer", Build.MANUFACTURER).put("brand", Build.BRAND).put("model", Build.MODEL)
         .put("android_version", Build.VERSION.RELEASE).put("sdk", Build.VERSION.SDK_INT).put("security_patch", Build.VERSION.SECURITY_PATCH)
         .put("abis", JSONArray(Build.SUPPORTED_ABIS.toList())).put("locale", Locale.getDefault().toLanguageTag())
         .put("timezone", java.util.TimeZone.getDefault().id).put("time_ms", System.currentTimeMillis())
         .put("uptime_ms", SystemClock.elapsedRealtime()).put("app_package", app.packageName).put("app_uid", android.os.Process.myUid())
-        .put("root_backend", false).put("adb_backend", false).put("shizuku_backend", false)
+        .put("root_backend", true).put("root", rootStatus()).put("adb_backend", false).put("shizuku_backend", false)
     fun battery(): JSONObject {
         val intent = app.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
         val level = intent?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1

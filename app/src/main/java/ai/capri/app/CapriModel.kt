@@ -23,6 +23,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
     internal val knowledge = ai.capri.app.knowledge.KnowledgeStore(File(app.filesDir, "knowledge"), store.workspace)
     internal val contextHistory = ai.capri.app.knowledge.ContextHistory(File(app.filesDir, "context-history"))
     private val knowledgeTool = ai.capri.app.knowledge.KnowledgeTool(knowledge)
+    private val personalMemory = ai.capri.app.knowledge.PersonalMemory(knowledge)
     internal val enhancements = ai.capri.app.retrieval.Enhancements(app)
     private val taskModels = ConcurrentHashMap<String, ModelConfig>()
     internal val retrieval = ai.capri.app.retrieval.WebRetrieval(
@@ -40,9 +41,9 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
     internal val pythonEnvironment = ai.capri.app.pythonenv.PythonEnvironmentTool(terminals)
     internal val extensions = ai.capri.app.extensions.ExtensionManager(app, runtime, store.workspace)
     val androidTools = ai.capri.app.nativebridge.AndroidTool(app)
-    val sessions = store.load()
+    val sessions = run { SharedMemoryReset.resume(app, store); store.load() }
     init { store.save(sessions) }
-    var selected = sessions.first().id
+    var selected = store.selected(sessions)
     internal val previews = ai.capri.app.preview.PreviewTabs()
     internal val browser = ai.capri.app.browser.BrowserController(app, store.workspace) { selected }.apply {
         pagesChanged = { chat, pages -> previews.syncBrowser(chat, pages.map { it.id to it.title }) }
@@ -58,6 +59,14 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
         .connectTimeout(15, TimeUnit.SECONDS).readTimeout(120, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS).callTimeout(120, TimeUnit.SECONDS).build()
     var runtimeBusy = false
+    var resettingMemory = false
+        private set
+    var memoryResetRequired = false
+        private set
+    var memoryRevision = 0
+        private set
+    var memoryResetStatus = ""
+        private set
     var runtimeResult = ""
     var migrating = !LegacySessionReset.marker(app).isFile
         private set
@@ -77,7 +86,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                 runtime.environment.publish("preparing", "正在清理旧会话环境，保留全局配置")
                 terminals.resetForNewEnvironment()
                 withContext(Dispatchers.IO) { LegacySessionReset.clear(getApplication()) }
-                sessions.clear(); Session().also { sessions.add(it); selected = it.id }
+                sessions.clear(); SessionCatalog.ensurePersonal(sessions); selected = personalSession().id
                 persist()
                 withContext(Dispatchers.IO) { LegacySessionReset.marker(getApplication()).writeText("ubuntu-noble-v1") }
                 migrating = false
@@ -130,20 +139,42 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
     override fun onCleared() { browser.dispose(); extensions.dispose(); super.onCleared() }
     fun refresh() { tick.value++ }
     fun current() = sessions.first { it.id == selected }
+    internal fun personalSession() = sessions.first { it.kind == SessionKind.PERSONAL }
+    private fun snapshot(chat: Session) = chat.copy(messages = chat.messages.toMutableList())
     fun create() {
-        if (migrating || runtimeBusy) return
+        if (migrating || runtimeBusy || resettingMemory || memoryResetRequired) return
         Session().also { sessions.add(0, it); selected = it.id }; browser.selectionChanged(selected); persist(); prepareSession(selected)
     }
-    fun select(id: String) { selected = id; browser.selectionChanged(id); if (!runtime.environment.chats.value.containsKey(id)) prepareSession(id); refresh() }
-    fun persist() { store.save(sessions); refresh() }
+    fun select(id: String) { if (sessions.none { it.id == id }) return; selected = id; store.select(id); browser.selectionChanged(id); if (!runtime.environment.chats.value.containsKey(id)) prepareSession(id); refresh() }
+    fun persist() { if (!resettingMemory && !memoryResetRequired) store.save(sessions); store.select(selected); refresh() }
+    internal fun resetSharedMemory() {
+        if (resettingMemory || migrating || runtimeBusy) return
+        if (jobs.isNotEmpty()) { memoryResetStatus = "请先停止或等待所有对话任务结束"; refresh(); return }
+        resettingMemory = true; memoryResetRequired = true; memoryResetStatus = "正在重置共同经历…"; refresh()
+        viewModelScope.launch {
+            try {
+                // Cancellation cannot leave UI/model writes running across the destructive commit.
+                withContext(Dispatchers.IO + NonCancellable) {
+                    SharedMemoryReset.begin(getApplication())
+                    SharedMemoryReset.resume(getApplication(), store)
+                }
+                sessions.clear(); sessions.addAll(store.load()); selected = personalSession().id
+                notices.clear(); activeTools.clear(); memoryRevision++
+                memoryResetRequired = false; memoryResetStatus = "共同经历已重置"; store.select(selected)
+            } catch (error: Exception) {
+                memoryResetStatus = "重置尚未完成，已暂停新对话；请重试。${error.message?.take(150).orEmpty()}"
+            } finally { resettingMemory = false; refresh() }
+        }
+    }
     fun stop() { jobs[selected]?.cancel(); notices[selected] = "已请求停止"; refresh() }
     fun send(text: String): Boolean = sendTo(selected, text)
     internal fun sendTo(chat: String, text: String): Boolean {
         if (text.isBlank() || jobs.containsKey(chat)) return false
+        if (resettingMemory || memoryResetRequired) { notices[chat] = "记忆重置尚未完成，请先重试重置"; refresh(); return false }
         if (runtimeBusy) { notices[chat] = "环境维护或检查中，请稍后发送"; refresh(); return false }
         if (migrating) { notices[chat] = "正在准备新执行环境，完成后即可开始新会话"; refresh(); return false }
         val session = sessions.firstOrNull { it.id == chat } ?: return false
-        if (IdentityReply.matches(text)) {
+        if (session.kind == SessionKind.TASK && IdentityReply.matches(text)) {
             session.messages.add(Entry("user", text.trim()))
             session.messages.forEach { it.reveal?.finish() }
             session.messages.add(Entry("assistant", IdentityReply.TEXT, FinalReplyReveal()))
@@ -184,6 +215,8 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
             .put(ai.capri.app.model.ModelInfoTool.specification())
             .put(ai.capri.app.knowledge.KnowledgeTool.specification())
             .put(ai.capri.app.knowledge.KnowledgeTool.historySpecification())
+            .put(ai.capri.app.knowledge.PersonalMemory.specification())
+            .put(ai.capri.app.knowledge.ConversationHistory.specification())
             .put(ShortTaskContract.specification())
             .put(CapabilityContract.specification())
             .put(androidTools.specification())
@@ -208,9 +241,16 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
         }
         val continuing = saved != null && RecoveryMessages.isContinuation(session.messages.last().text)
         var messages = if (saved != null) RecoveryMessages.forResume(saved) else JSONArray()
+        var contextBudget = withContext(Dispatchers.IO) { modelContexts.resolve(config) }
+        val recalled = if (session.kind == SessionKind.PERSONAL) withContext(Dispatchers.IO) {
+            personalMemory.recall(session.id, session.messages.last().text, contextBudget.input / 16)
+        } else ""
+        val personaContext = PersonaRuntime.context(session.kind, java.time.ZonedDateTime.now().toString(), recalled)
         val rules = getApplication<Application>().assets.open("persona/core.txt").bufferedReader().use { it.readText() } + "\n" +
             getApplication<Application>().assets.open("runtime/execution_rules.txt").bufferedReader().use { it.readText() } +
-            "\n" + extensions.guidance() + "\n本轮最多 $MAX_MODEL_CALLS 次模型请求（包含网络重试），这是客户端预算；验证任务后及时回复。\n" + ExecutionGuidance.text + "\n" + ai.capri.app.knowledge.KnowledgeTool.guidance + "\n" + ai.capri.app.retrieval.WebContract.guidance + "\n" + ai.capri.app.model.ModelInfoTool.guidance
+            "\n" + extensions.guidance() + "\n本轮最多 $MAX_MODEL_CALLS 次模型请求（包含网络重试），这是客户端预算；验证任务后及时回复。\n" + ExecutionGuidance.text + "\n" + ai.capri.app.knowledge.KnowledgeTool.guidance + "\n" + ai.capri.app.retrieval.WebContract.guidance + "\n" + ai.capri.app.model.ModelInfoTool.guidance +
+            "\n当前Android宿主root能力：" + androidTools.rootStatus().toString() + "\n" + ai.capri.app.nativebridge.RootGuidance.text +
+            "\n" + ai.capri.app.knowledge.PersonalMemory.guidance + "\n" + ai.capri.app.knowledge.ConversationHistory.guidance + personaContext
         if (saved != null) {
             messages.getJSONObject(0).put("content", rules)
             val instruction = if (continuing) "接续检查点，已记录的工具不得因网络重试重复执行。"
@@ -226,7 +266,6 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
         withContext(Dispatchers.IO) { extensions.restore(session.id) }
         val baseTools = builtinTools()
         val requests = ModelRequests(MAX_MODEL_CALLS)
-        var contextBudget = withContext(Dispatchers.IO) { modelContexts.resolve(config) }
         var contextAdjustments = 0
         while (requests.used < MAX_MODEL_CALLS) {
             currentCoroutineContext().ensureActive()
@@ -318,7 +357,11 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                 session.messages.add(Entry("assistant", content, if (finalReply) FinalReplyReveal() else null)); persist()
             }
             if (calls == null || calls.length() == 0) {
-                withContext(Dispatchers.IO) { contextHistory.finish(session.id, messages); recovery.clear(session.id) }
+                val completed = snapshot(session)
+                withContext(Dispatchers.IO) {
+                    personalMemory.recordTurn(completed)
+                    contextHistory.finish(session.id, messages); recovery.clear(session.id)
+                }
                 outcome = PerformanceTrace.Status.OK
                 return
             }
@@ -336,6 +379,9 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                     val args = JSONObject(function.getString("arguments"))
                     if (!ToolPresentation.isInternal(name)) activeTools[session.id] = ToolActivity(call.getString("id"), if (name.startsWith("mcp_")) displayName else toolLabel(name, args))
                     refresh()
+                    val currentSnapshot = snapshot(session)
+                    val personalSnapshot = snapshot(personalSession())
+                    val historySnapshot = if (name == "conversation_history") sessions.map(::snapshot) else emptyList()
                     withContext(Dispatchers.IO) {
                         when (name) {
                             "send_file" -> {
@@ -350,7 +396,9 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                             }
                             "web_search" -> retrieval.search(session.id, args)
                             "web_read" -> retrieval.read(session.id, args)
-                            "knowledge" -> knowledgeTool.execute(session.id, session.messages.toList(), args)
+                            "knowledge" -> knowledgeTool.execute(session.id, currentSnapshot.messages, args, session.kind == SessionKind.PERSONAL)
+                            "personal_memory" -> personalMemory.execute(personalSnapshot, currentSnapshot, args)
+                            "conversation_history" -> ai.capri.app.knowledge.ConversationHistory.execute(historySnapshot, args)
                             "model_info" -> ai.capri.app.model.ModelInfoTool.execute(config, store.config(session.id), store.models.all(), args, contextBudget)
                             "context_history" -> contextHistory.query(session.id, session.messages.toList(), args)
                             "python_env" -> pythonEnvironment.execute(session.id, args)
@@ -358,7 +406,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                             "extensions" -> extensions.execute(session.id, args)
                             "browser" -> browser.execute(session.id, args)
                             "terminal" -> terminals.execute(session.id, args)
-                            "android" -> androidTools.execute(args)
+                            "android" -> androidTools.execute(args, store.workspace.folder(session.id, "workspace"))
                             "profile_search" -> store.profile(args.getString("query"))
                             "list_files" -> store.workspace.list(session.id).joinToString("\n") { it.relativeTo(store.workspace.folder(session.id, "workspace").canonicalFile).path }
                             "read_file" -> store.workspace.file(session.id, args.getString("path")).let { require(it.length() <= 128_000) { "文件超过128KB" }; it.readText() }

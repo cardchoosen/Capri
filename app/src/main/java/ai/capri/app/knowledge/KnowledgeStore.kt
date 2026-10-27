@@ -11,19 +11,43 @@ import java.security.MessageDigest
 import java.util.UUID
 
 /** Explicit, sourced knowledge. A snapshot index, never an editor for persona or workspace files. */
-internal class KnowledgeStore(private val root: File, private val workspace: Workspace) {
-    private val file get() = AtomicFile(File(root.apply { mkdirs() }, "knowledge.json"))
-    @Synchronized private fun load(): JSONArray = try {
-        JSONArray(file.openRead().bufferedReader().use { it.readText() })
-    } catch (_: java.io.FileNotFoundException) { JSONArray() }
-    private fun save(data: JSONArray) {
-        val target = file; val stream = target.startWrite()
-        try { stream.write(data.toString().toByteArray()); target.finishWrite(stream) }
+internal class KnowledgeStore(
+    private val root: File, private val workspace: Workspace,
+    private val readText: (File) -> String = { AtomicFile(it).openRead().bufferedReader().use { reader -> reader.readText() } },
+    private val writeText: (File, String) -> Unit = { path, text ->
+        val target = AtomicFile(path); val stream = target.startWrite()
+        try { stream.write(text.toByteArray()); target.finishWrite(stream) }
         catch (e: Exception) { target.failWrite(stream); throw e }
+    }
+) {
+    private val file get() = File(root.apply { mkdirs() }, "knowledge.json")
+    @Synchronized private fun load(): JSONArray = try {
+        JSONArray(readText(file))
+    } catch (_: java.io.FileNotFoundException) { JSONArray() }
+    private fun save(data: JSONArray) = writeText(file, data.toString())
+    // Personal records share the same atomic store and index but never appear in the generic editing panel.
+    @Synchronized internal fun personalRecords(chat: String): List<JSONObject> = load().let { data ->
+        (0 until data.length()).map { data.getJSONObject(it) }.filter {
+            it.optString("scope") == chat && it.optString("kind") in setOf("personal_note", "episode")
+        }
+    }
+    @Synchronized internal fun savePersonal(record: JSONObject) {
+        require(record.getString("kind") in setOf("personal_note", "episode"))
+        val data = load()
+        val index = (0 until data.length()).firstOrNull { data.getJSONObject(it).getString("id") == record.getString("id") }
+        if (index == null) data.put(record) else {
+            require(data.getJSONObject(index).optString("kind") == record.getString("kind") &&
+                data.getJSONObject(index).optString("scope") == record.getString("scope"))
+            data.put(index, record)
+        }
+        // Bound the recall index; original messages remain searchable through conversation_history.
+        val episodes = (0 until data.length()).filter { data.getJSONObject(it).optString("kind") == "episode" }
+            .sortedByDescending { data.getJSONObject(it).optLong("updated") }.drop(1000).toSet()
+        save(JSONArray((0 until data.length()).filterNot { it in episodes }.map { data.getJSONObject(it) }))
     }
     private fun visible(record: JSONObject, chat: String) = record.getString("scope") == "global" || record.getString("scope") == chat
     @Synchronized fun records(chat: String): List<JSONObject> = load().let { data ->
-        (0 until data.length()).map { data.getJSONObject(it) }.filter { visible(it, chat) }
+        (0 until data.length()).map { data.getJSONObject(it) }.filter { visible(it, chat) && it.optString("kind") in setOf("memory", "document") }
     }
     @Synchronized fun putMemory(chat: String, text: String, source: String, global: Boolean = false, id: String = ""): JSONObject {
         require(text.isNotBlank() && text.length <= 4000) { "记忆须为1–4000字符" }
@@ -35,7 +59,7 @@ internal class KnowledgeStore(private val root: File, private val workspace: Wor
         val record = JSONObject().put("id", existing?.getString("id") ?: UUID.randomUUID().toString()).put("kind", "memory")
             .put("scope", if (global) "global" else chat).put("origin_chat", chat).put("title", text.take(60)).put("text", text)
             .put("source", source).put("enabled", existing?.optBoolean("enabled", true) ?: true).put("updated", System.currentTimeMillis())
-        if (existing == null) { require(data.length() < 300) { "知识条目上限300，请先清理" }; data.put(record) }
+        if (existing == null) { require((0 until data.length()).count { data.getJSONObject(it).optString("kind") in setOf("memory", "document") } < 300) { "知识条目上限300，请先清理" }; data.put(record) }
         else for (i in 0 until data.length()) if (data.getJSONObject(i).getString("id") == id) data.put(i, record)
         save(data); return record
     }
@@ -62,12 +86,12 @@ internal class KnowledgeStore(private val root: File, private val workspace: Wor
             .put("origin_chat", chat).put("title", source.name).put("path", path).put("source", "工作区快照：$path")
             .put("sha256", MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) })
             .put("chunks", JSONArray(chunks)).put("enabled", existing?.optBoolean("enabled", true) ?: true).put("updated", System.currentTimeMillis())
-        if (existing == null) { require(data.length() < 300); data.put(record) }
+        if (existing == null) { require((0 until data.length()).count { data.getJSONObject(it).optString("kind") in setOf("memory", "document") } < 300); data.put(record) }
         else for (i in 0 until data.length()) if (data.getJSONObject(i).getString("id") == record.getString("id")) data.put(i, record)
         save(data); return record
     }
     @Synchronized fun change(chat: String, id: String, enabled: Boolean? = null) {
-        val data = load(); val index = (0 until data.length()).firstOrNull { data.getJSONObject(it).getString("id") == id && visible(data.getJSONObject(it), chat) }
+        val data = load(); val index = (0 until data.length()).firstOrNull { data.getJSONObject(it).getString("id") == id && visible(data.getJSONObject(it), chat) && data.getJSONObject(it).optString("kind") in setOf("memory", "document") }
         require(index != null) { "条目不存在或不属于可管理范围" }
         if (enabled == null) data.remove(index) else data.getJSONObject(index).put("enabled", enabled)
         save(data)

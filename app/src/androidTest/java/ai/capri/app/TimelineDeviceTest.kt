@@ -164,7 +164,7 @@ class TimelineDeviceTest {
         val isolated = object : ContextWrapper(context) { override fun getFilesDir(): File = directory }
         try {
             Store(isolated).save(listOf(Session(messages = mutableListOf(Entry("assistant", "final", FinalReplyReveal())))))
-            val entry = Store(isolated).load().single().messages.single()
+            val entry = Store(isolated).load().first { it.kind == SessionKind.TASK }.messages.single()
             assertTrue(entry.finalReply)
             assertNull(entry.reveal)
         } finally { directory.deleteRecursively() }

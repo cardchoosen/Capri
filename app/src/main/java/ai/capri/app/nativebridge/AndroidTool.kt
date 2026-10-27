@@ -7,32 +7,37 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 
 class AndroidTool(private val app: Application) {
     val permissions = NativePermissions(app)
-    private val device = NativeDeviceTools(app, permissions)
+    private val root = RootRuntime(app)
+    private val device = NativeDeviceTools(app, permissions, root::snapshot)
+    fun rootStatus(): JSONObject = root.snapshot()
     private val network = NativeNetworkTools(app, permissions)
     private val apps = NativeAppTools(app, permissions)
     private val data = NativeDataTools(app, permissions)
     fun specification() = NativeCatalog.spec()
     fun capabilities(): JSONObject {
         val groups = permissions.groups()
+        val rootState = root.snapshot()
         val permissionGroups = mapOf("wifi_scan" to "location", "location_current" to "location", "bluetooth_info" to "bluetooth", "torch_set" to "camera", "contacts_query" to "contacts", "calendar_events" to "calendar", "notification_post" to "notifications")
         val hardware = mapOf("wifi_info" to PackageManager.FEATURE_WIFI, "wifi_scan" to PackageManager.FEATURE_WIFI,
             "bluetooth_info" to PackageManager.FEATURE_BLUETOOTH, "torch_set" to PackageManager.FEATURE_CAMERA_FLASH)
-        return JSONObject().put("backend", "Android native APIs").put("requires_root", false).put("requires_adb", false).put("requires_shizuku", false)
+        return JSONObject().put("backend", "Android native APIs").put("requires_root", false).put("requires_adb", false).put("requires_shizuku", false).put("root_backend", true).put("root", rootState)
             .put("actions", JSONArray(NativeCatalog.actions.map { spec ->
                 val group = permissionGroups[spec.name]
                 val missing = groups[group].orEmpty().filterNot(permissions::granted)
-                val supported = hardware[spec.name]?.let { app.packageManager.hasSystemFeature(it) } ?: true
-                JSONObject().put("action", spec.name).put("title", spec.title).put("params", spec.parameters).put("effect", spec.effect)
-                    .put("status", if (!supported) "unsupported" else if (missing.isNotEmpty()) "permission_required" else "available")
+                val rootAction = spec.name in setOf("root_request", "root_exec")
+                val supported = if (rootAction) rootState.getBoolean("su_detected") else hardware[spec.name]?.let { app.packageManager.hasSystemFeature(it) } ?: true
+                JSONObject().put("action", spec.name).put("title", spec.title).put("params", spec.parameters).put("effect", spec.effect).put("requires_root", spec.name == "root_exec")
+                    .put("status", if (!supported) "unsupported" else if (spec.name == "root_exec" && rootState.optString("app_authorization") != "granted") "root_authorization_required" else if (missing.isNotEmpty()) "permission_required" else "available")
                     .put("missing_permissions", JSONArray(missing))
             })).put("permissions", permissions.snapshot())
-            .put("not_implemented", JSONArray(listOf("accessibility UI automation", "screen capture", "camera capture", "microphone recording", "notification reading", "SMS", "arbitrary system settings writes")))
+            .put("not_implemented", JSONArray(listOf("accessibility UI automation", "screen capture", "camera capture", "microphone recording", "notification reading", "SMS", "dedicated native system settings editor")))
             .put("note", "available表示接口已接入；字段、前台状态、硬件、系统开关及厂商限制仍会影响执行，不能声称拥有全部Android权限。打开设置不会授予无障碍权限或自动化能力。")
     }
-    suspend fun execute(arguments: JSONObject): String = withContext(Dispatchers.IO) {
+    suspend fun execute(arguments: JSONObject, workspace: File? = null): String = withContext(Dispatchers.IO) {
         val action = arguments.optString("action", "")
         try {
             if (NativeCatalog.find(action) == null) throw NativeFailure("unsupported", "未知或未实现的原生action；请查询capabilities")
@@ -43,6 +48,11 @@ class AndroidTool(private val app: Application) {
                 "capabilities" -> capabilities()
                 "permissions" -> permissions.snapshot()
                 "request_permissions" -> permissions.request(params.requiredText("group", 30))
+                "root_status" -> root.snapshot()
+                "root_request", "root_exec" -> {
+                    val response = if (action == "root_request") root.requestAuthorization() else root.execute(params, workspace)
+                    return@withContext result(action, response.getString("status"), response.getJSONObject("data")).toString()
+                }
                 "device_info" -> device.device()
                 "battery_info" -> device.battery()
                 "storage_info" -> device.storage()
@@ -94,6 +104,7 @@ class AndroidTool(private val app: Application) {
 internal fun validateParams(action: String, params: JSONObject) {
     val allowed = when (action) {
         "request_permissions" -> setOf("group")
+        "root_exec" -> setOf("command", "timeout_seconds", "output_limit")
         "location_current" -> setOf("timeout_ms")
         "sensor_read" -> setOf("sensor_type", "timeout_ms")
         "apps_list" -> setOf("query", "limit")

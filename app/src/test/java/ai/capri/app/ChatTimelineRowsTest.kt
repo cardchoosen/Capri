@@ -7,11 +7,12 @@ class ChatTimelineRowsTest {
     private fun process() = listOf(Entry("user", "task"), Entry("assistant", "plan"),
         Entry("tool", "list_files\na"), Entry("assistant", "checking"), Entry("tool", "read_file\nb"))
     @Test fun runningToolsAreFoldedAndRetainAllRecords() {
-        val rows = timelineRows(process(), true)
+        val input = process()
+        val rows = timelineRows(input, true)
         assertEquals(2, rows.size)
         val group = rows[1] as TimelineRow.History
         assertTrue(group.running)
-        assertEquals(process().drop(1), group.entries)
+        assertEquals(input.drop(1), group.entries)
     }
     @Test fun finalReplyImmediatelyFoldsProcessBeforeJobFinishes() {
         val entries = process() + Entry("assistant", "answer", finalReply = true)
@@ -19,7 +20,7 @@ class ChatTimelineRowsTest {
         assertEquals(3, rows.size)
         val group = rows[1] as TimelineRow.History
         assertEquals(2, group.toolCount)
-        assertEquals(process().drop(1), group.entries)
+        assertEquals(entries.drop(1).dropLast(1), group.entries)
         assertEquals("answer", (rows.last() as TimelineRow.Message).entry.text)
         assertEquals(5, rows.last().index)
     }

@@ -1,6 +1,6 @@
 # Android原生工具
 
-模型只看到一个 `android` 工具，通过 `action` 选择原生动作，`params` 传递该动作参数。PRoot仍以普通应用身份运行；没有新增root、ADB、Shizuku依赖。
+模型只看到一个 `android` 工具，通过 `action` 选择原生动作，`params` 传递该动作参数。PRoot仍以普通应用身份运行；另提供可选的Android宿主su Root后端。普通原生查询不需要Root，不依赖ADB或Shizuku。Root命令由Capri应用本身请求管理器授权，不能把电脑ADB的Root授权当作应用授权。
 
 ```json
 {"action":"wifi_info"}
@@ -15,6 +15,9 @@
 | `capabilities` | 原生能力清单与权限状态 | 无 | read |
 | `permissions` | 查看已授权权限 | 无 | read |
 | `request_permissions` | 请求与任务相关的系统授权 | group: location/camera/bluetooth/contacts/calendar/notifications | permission |
+| `root_status` | 检测su和查看本应用的Root验证记录 | 不弹授权；区分su线索、设备已验证Root、本应用上次授权与本次身份 | read |
+| `root_request` | 请求并验证本应用Root授权 | 无参数；最多等待管理器30秒，只读验证id等；不绕过拒绝 | permission |
+| `root_exec` | 在Android宿主执行真实Root短命令 | command；timeout_seconds=1..120（默认30）；output_limit=1000..64000字节（默认16000）；先root_request | root_execute |
 | `device_info` | 设备、系统、语言和运行信息 | 无 | read |
 | `battery_info` | 电量、充电与省电状态 | 无 | read |
 | `storage_info` | 应用存储空间与内存 | 无 | read |
@@ -74,3 +77,23 @@ JVM测试验证工具Schema、动作唯一性、未知参数拒绝、参数类�
 ### 本次真机验收
 
 在 Android 15 / ARM64 的 V2366HA 上：8项JVM测试通过；原生设备测试通过，覆盖11种只读查询及未知动作/参数和前台边界；聊天调用链成功完成wifi_info部分结果 → request_permissions系统定位弹窗 → 授权 → wifi_info返回SSID/BSSID/信号/频率/连接速率，并获取电量。未为了验收擅自查询联系人/日历内容或执行音量、手电筒等控制动作；这些接口已接入，但不声称所有动作均已逐项真机执行。
+
+## 宿主Root后端 · 2026-10-27
+
+root_status仅检查已知su路径与之前的应用验证记录，不为每轮查询弹授权。su存在是线索，`device_root=confirmed`表示此前实测过UID0；`app_authorization=granted`是上次验证记录，不是永不失效的权限。只有当前root_request/root_exec返回`current_command_verified=true`与`effective_uid=0`，才表示此次真实提权。授权被拒、未发现su、核验失败、超时分别返回，不把它们归结为“手机未root”。`device_info`及`capabilities`附带这些状态，模型每个新请求与恢复检查点也重新加载状态和使用规则。
+
+```json
+{"action":"root_status"}
+{"action":"root_request"}
+{"action":"root_exec","params":{"command":"id\npwd","timeout_seconds":5}}
+```
+
+Root命令直接运行在Android宿主`/system/bin/sh`中，默认工作目录是当前会话工作区的宿主路径。不是Ubuntu/PRoot，不会让原来的terminal/python_run自动提权；Ubuntu的glibc程序与Python虚拟环境不能假定在宿主可直接运行。新建文件可能属于root，需要时只处理相应产物的归属。运行页提供“Root · Android宿主”的状态与“请求并验证Root授权”按钮。
+
+实现通过独立`setsid -w`进程组启动监督脚本。用户脚本单独写入应用私有临时文件，不插入su命令或可信监督脚本；核验真实UID0及进程身份后才放行。命令返回、超时、输出上限或协程取消时，通过本次进程组PID/启动时间核验后清理，并检查进程组是否消失，不按模型传入PID杀进程。若清理未确认返回cleanup_unconfirmed，不声称已经完全停止；已有副作用不回滚。取消后的最后清理状态也能通过root_status的last_cleanup回查。应用退出时监督进程自带看门狗，上限为命令超时加40秒授权／收尾余量，不建立永久Root服务。
+
+仅支持受管短命令，不支持通过setsid/nohup/服务逃离管理来做持续Root任务。输出响应有字节上限及JSON转义长度预算，输出超量时停止命令并标记截断，避免通用工具传输截断了身份或清理字段。执行失败保留退出码与stderr。原生工具返回的权限和状态不保证任意内核功能可用，具体功能仍需实测。
+
+设备验证只运行身份、工作目录、临时文件、非零退出码、超时、取消和输出限制测试；未进行ARP操作、抓取流量或修改网络设置。
+
+本轮验证：121项单元测试、Pixel 8a上3项设备测试通过。Capri UID10314获得Magisk授权，实际宿主命令验证effective_uid=0；超时、取消、输出上限均验证受管进程组已清理，普通原生查询回归通过。日志与APK摘要见work/root-verification/2026-10-27/。

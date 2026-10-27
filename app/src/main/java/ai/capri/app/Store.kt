@@ -15,8 +15,9 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-data class Entry(val role: String, val text: String, internal val reveal: FinalReplyReveal? = null, internal val finalReply: Boolean = reveal != null)
-data class Session(val id: String = UUID.randomUUID().toString(), var title: String = "新会话", val messages: MutableList<Entry> = mutableListOf())
+data class Entry(val role: String, val text: String, internal val reveal: FinalReplyReveal? = null, internal val finalReply: Boolean = reveal != null, val timestamp: Long = System.currentTimeMillis())
+enum class SessionKind { TASK, PERSONAL }
+data class Session(val id: String = UUID.randomUUID().toString(), var title: String = "新会话", val messages: MutableList<Entry> = mutableListOf(), val kind: SessionKind = SessionKind.TASK)
 data class ModelConfig(val endpoint: String = "https://api.openai.com/v1", val model: String = "", val key: String = "", val protocol: String = "CHAT", val accountId: String = "", val contextWindow: Int? = null, val maxOutput: Int? = null, val contextSource: String = "models_api", val providerId: String = "", val modelName: String = "")
 
 class Workspace(private val base: File) {
@@ -43,27 +44,17 @@ class Store(val context: Context) {
     val workspace = Workspace(File(context.filesDir, "sessions"))
     private val index = AtomicFile(File(context.filesDir, "sessions.json"))
     private val prefs = context.getSharedPreferences("config", Context.MODE_PRIVATE)
-    fun load(): MutableList<Session> = runCatching {
-        val data = JSONArray(index.openRead().bufferedReader().use { it.readText() })
-        (0 until data.length()).map { i ->
-            val obj = data.getJSONObject(i)
-            val messages = obj.getJSONArray("messages")
-            Session(obj.getString("id"), obj.getString("title"), (0 until messages.length()).map { j ->
-                messages.getJSONObject(j).let { Entry(it.getString("role"), it.getString("text"), finalReply = it.optBoolean("final_reply", false)) }
-            }.toMutableList())
-        }.toMutableList()
-    }.getOrElse { mutableListOf(Session()) }
+    fun load(): MutableList<Session> = try {
+        SessionCatalog.decode(index.openRead().bufferedReader().use { it.readText() })
+    } catch (_: java.io.FileNotFoundException) { SessionCatalog.ensurePersonal(mutableListOf()) }
     fun save(sessions: List<Session>) {
-        val data = JSONArray()
-        sessions.forEach { s ->
-            val messages = JSONArray()
-            s.messages.forEach { messages.put(JSONObject().put("role", it.role).put("text", it.text).put("final_reply", it.finalReply)) }
-            data.put(JSONObject().put("id", s.id).put("title", s.title).put("messages", messages))
-        }
         val stream = index.startWrite()
-        try { stream.write(data.toString().toByteArray()); index.finishWrite(stream) }
+        try { stream.write(SessionCatalog.encode(sessions).toByteArray()); index.finishWrite(stream) }
         catch (e: Exception) { index.failWrite(stream); throw e }
     }
+    fun selected(sessions: List<Session>): String = prefs.getString("selected_chat", null)
+        ?.takeIf { id -> sessions.any { it.id == id } } ?: sessions.first { it.kind == SessionKind.PERSONAL }.id
+    fun select(chat: String) { prefs.edit().putString("selected_chat", chat).apply() }
     private fun key(): SecretKey {
         val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         return (ks.getKey("capri-model", null) as? SecretKey) ?: KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore").run {
