@@ -7,49 +7,49 @@ import org.json.JSONObject
 
 internal object ShortTaskContract {
     fun validate(args: JSONObject): JSONObject {
-        require(args.keys().asSequence().all { it in setOf("code", "steps", "requirements") }) { "未知短任务参数" }
-        require(args.has("code") != args.has("steps")) { "code与steps二选一" }
-        if (args.has("code")) require(args.opt("code") is String && args.getString("code").length in 1..128000) { "code需为1..128000字符" }
+        require(args.keys().asSequence().all { it in setOf("code", "steps", "requirements") }) { "Unknown short-task argument." }
+        require(args.has("code") != args.has("steps")) { "Provide exactly one of code or steps." }
+        if (args.has("code")) require(args.opt("code") is String && args.getString("code").length in 1..128000 && '\u0000' !in args.getString("code")) { "code must contain 1..128000 characters." }
         if (args.has("requirements")) {
-            require(args.opt("requirements") is JSONObject) { "requirements需为对象" }
+            require(args.opt("requirements") is JSONObject) { "requirements must be an object." }
             CapabilityContract.validate(JSONObject().put("action", "prepare").put("requirements", args.getJSONObject("requirements")))
         }
         if (args.has("steps")) {
-            val steps = args.opt("steps") as? JSONArray ?: throw IllegalArgumentException("steps需为数组")
-            require(steps.length() in 1..8) { "steps需含1..8步" }
+            val steps = args.opt("steps") as? JSONArray ?: throw IllegalArgumentException("steps must be an array.")
+            require(steps.length() in 1..8) { "steps must contain 1..8 steps." }
             var length = 0
             for (i in 0 until steps.length()) {
-                val step = steps.opt(i) as? JSONObject ?: throw IllegalArgumentException("步骤需为对象")
-                require(step.keys().asSequence().all { it in setOf("name", "argv") }) { "未知步骤参数" }
-                require(step.opt("name") is String && step.getString("name").matches(Regex("[A-Za-z0-9_-]{1,32}"))) { "步骤name需为简短英文标识" }
-                val argv = step.opt("argv") as? JSONArray ?: throw IllegalArgumentException("步骤需提供argv数组")
-                require(argv.length() in 1..64) { "argv需含1..64项" }
+                val step = steps.opt(i) as? JSONObject ?: throw IllegalArgumentException("Each step must be an object.")
+                require(step.keys().asSequence().all { it in setOf("name", "argv") }) { "Unknown step argument." }
+                require(step.opt("name") is String && step.getString("name").matches(Regex("[A-Za-z0-9_-]{1,32}"))) { "Step name must be a 1..32 character ASCII identifier." }
+                val argv = step.opt("argv") as? JSONArray ?: throw IllegalArgumentException("Each step requires an argv array.")
+                require(argv.length() in 1..64) { "argv must contain 1..64 arguments." }
                 for (j in 0 until argv.length()) {
                     val value = argv.opt(j)
-                    require(value is String && value.length <= 8192 && '\u0000' !in value && (j != 0 || value.isNotBlank())) { "argv参数无效" }
+                    require(value is String && value.length <= 8192 && '\u0000' !in value && (j != 0 || value.isNotBlank())) { "Invalid argv argument." }
                     length += value.length
                 }
             }
-            require(length <= 128000) { "步骤参数总长度超过128000" }
+            require(length <= 128000) { "Combined argv text exceeds 128000 characters." }
         }
         return JSONObject(args.toString())
     }
     fun specification(): JSONObject {
         fun string(max: Int) = JSONObject().put("type", "string").put("maxLength", max)
-        val requirements = CapabilityContract.specification().getJSONObject("function").getJSONObject("parameters")
-            .getJSONObject("properties").getJSONObject("requirements")
+        val requirements = CapabilityContract.requirementsSchema()
         val step = JSONObject().put("type", "object").put("additionalProperties", false).put("required", JSONArray(listOf("name", "argv")))
             .put("properties", JSONObject().put("name", string(32).put("pattern", "^[A-Za-z0-9_-]{1,32}$"))
                 .put("argv", JSONObject().put("type", "array").put("minItems", 1).put("maxItems", 64).put("items", string(8192))))
         return JSONObject().put("type", "function").put("function", JSONObject().put("name", "python_run")
-            .put("description", "手机短任务：一次提交所需requirements和code或steps，客户端先准备依赖并实际验证，再直接执行，无需分开调用environment和执行。依赖失败时不执行代码。requirements与environment通用结构相同，只声明实际需要项；不猜测未声明模块对应的PyPI包。code执行Python编排脚本，可用subprocess调用用户指定语言，最长60秒；subprocess需check=True，外层exit=0不能证明被忽略的子进程成功。已有代码/命令优先用steps参数数组按顺序编译、运行、验证：客户端独立核对每步退出码，失败即停，保留中间文件，不自动重跑，整个执行部分共60秒。步骤间共享工作区和HOME，不共享Shell变量，明确Shell命令用/bin/sh -c。不使用持续终端完成短任务。返回结构化status/phase/exit_code/output/timings_ms；代码成功不等于产物已完整验证，应在脚本或步骤里放实际断言；成功后send_file发送所需产物。")
+            .put("description", "Run a short task in the current chat workspace/venv. Submit exactly one of Python code or ordered argv steps, optionally with known requirements; dependencies are prepared and verified before execution. Unmet requirements block code. Prefer steps for existing compile/run/check commands: each exit code is checked, first failure stops, completed steps are never replayed. All execution shares a 60-second deadline, excluding preparation. Steps share files/HOME, not shell variables; use /bin/sh -c explicitly. Python code may orchestrate other languages; subprocess calls must check failures. Put necessary artifact assertions in the same task, then deliver with send_file. Use terminal for persistent state, interaction or longer work. Returns status/phase, exit_code, bounded output and timings_ms.")
             .put("parameters", JSONObject().put("type", "object").put("additionalProperties", false)
-                .put("properties", JSONObject().put("code", string(128000)).put("requirements", requirements)
+                .put("properties", JSONObject().put("code", string(128000).put("minLength", 1).put("description", "Python orchestration script; at most 60 seconds of execution.")).put("requirements", requirements)
                     .put("steps", JSONObject().put("type", "array").put("minItems", 1).put("maxItems", 8).put("items", step)))
                 .put("oneOf", JSONArray().put(JSONObject().put("required", JSONArray(listOf("code"))))
                     .put(JSONObject().put("required", JSONArray(listOf("steps")))))))
     }
     fun encode(result: JSONObject): String {
+        ExecutionResult.annotate(result)
         var text = result.toString()
         for (limit in listOf(12000, 6000, 2000, 500, 0)) {
             if (text.length <= 36000) break
@@ -63,7 +63,7 @@ internal object ShortTaskContract {
         return text
     }
     fun outcome(raw: String, limit: Int): JSONObject {
-        val exit = raw.substringBefore('\n').removePrefix("exit=").toIntOrNull() ?: error("执行器未返回退出码")
+        val exit = raw.substringBefore('\n').removePrefix("exit=").toIntOrNull() ?: error("Executor did not return an exit code.")
         val output = raw.substringAfter('\n', "")
         return JSONObject().put("exit_code", exit).put("output", output.take(limit)).put("output_truncated", output.length > limit)
     }
@@ -138,7 +138,7 @@ internal class ShortTaskTool(private val runtime: PythonRuntime, private val env
                         JSONObject().put("exit_code", 0)
                     }
                 }
-                if (executed == null) { executionStatus = PerformanceTrace.Status.TIMEOUT; return ShortTaskContract.encode(response("timeout", "执行部分累计超过60秒；已停止，已有中间文件保留，不自动重跑")) }
+                if (executed == null) { executionStatus = PerformanceTrace.Status.TIMEOUT; return ShortTaskContract.encode(response("timeout", "Execution exceeded the shared 60-second deadline and was stopped. Intermediate files remain; no steps were automatically replayed.")) }
                 val success = executed.getInt("exit_code") == 0
                 executionStatus = if (success) PerformanceTrace.Status.OK else PerformanceTrace.Status.ERROR
                 if (success) index = null
@@ -151,7 +151,7 @@ internal class ShortTaskTool(private val runtime: PythonRuntime, private val env
                 trace?.event(PerformanceTrace.Stage.EXECUTE, elapsed, executionStatus, tool = "python_run")
             }
         } catch (cancel: CancellationException) { throw cancel }
-        catch (error: IllegalArgumentException) { return ShortTaskContract.encode(response("invalid_argument", error.message)) }
-        catch (error: Exception) { return ShortTaskContract.encode(response("error", error.message)) }
+        catch (error: IllegalArgumentException) { return ShortTaskContract.encode(response("invalid_argument", ExecutionResult.message(error))) }
+        catch (error: Exception) { return ShortTaskContract.encode(response(if (error is RuntimeBusyException) "busy" else "error", ExecutionResult.message(error))) }
     }
 }

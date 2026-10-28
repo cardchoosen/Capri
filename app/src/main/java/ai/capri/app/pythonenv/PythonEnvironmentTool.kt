@@ -13,30 +13,30 @@ internal object PythonEnvironmentContract {
     private val version = "(?:===|==|!=|~=|<=|>=|<|>)[A-Za-z0-9.*+!_-]+"
     private val requirement = Regex("$name(?:\\[$name(?:,$name)*\\])?(?:$version(?:,$version)*)?")
     fun validate(args: JSONObject): Pair<String, List<String>> {
-        require(args.keys().asSequence().all { it in setOf("action", "packages", "wait_ms") }) { "未知Python环境参数" }
+        require(args.keys().asSequence().all { it in setOf("action", "packages", "wait_ms") }) { "Unknown Python environment argument." }
         val action = args.opt("action")
-        require(action is String && action in actions) { "未知Python环境动作" }
+        require(action is String && action in actions) { "Unknown Python environment action." }
         if (args.has("wait_ms")) {
             val wait = args.opt("wait_ms")
-            require(wait is Number && wait.toDouble() == wait.toInt().toDouble() && wait.toInt() in 0..10000) { "wait_ms必须是0..10000的整数" }
+            require(wait is Number && wait.toDouble() == wait.toInt().toDouble() && wait.toInt() in 0..10000) { "wait_ms must be an integer in 0..10000." }
         }
         val changing = action in setOf("install", "uninstall")
-        require(changing || !args.has("packages")) { "仅install/uninstall接受packages" }
+        require(changing || !args.has("packages")) { "Only install/uninstall accept packages." }
         val values = if (changing) args.opt("packages") as? JSONArray ?: errorArgument() else JSONArray()
-        require(!changing || values.length() in 1..20) { "packages需包含1..20项" }
+        require(!changing || values.length() in 1..20) { "packages must contain 1..20 items." }
         val packages = (0 until values.length()).map { index ->
             val raw = values.opt(index)
-            require(raw is String && raw.length <= 200 && raw.none { it == '\n' || it == '\r' || it == '\u0000' }) { "包规格无效" }
+            require(raw is String && raw.length <= 200 && raw.none { it == '\n' || it == '\r' || it == '\u0000' }) { "Invalid package requirement." }
             val normalized = raw.replace(" ", "")
             require(if (action == "uninstall") normalized.matches(Regex(name)) else normalized.matches(requirement)) {
-                "支持包名、extras和版本条件，例如 requests==2.32.3；卸载只传包名；URL/本地文件等可通过终端手动处理"
+                "Use distribution names, extras and version constraints, such as requests==2.32.3; uninstall accepts names only. URLs/local sources require explicit terminal handling."
             }
-            require(normalized.substringBefore('[').substringBefore('=').substringBefore('>').substringBefore('<').substringBefore('!').substringBefore('~').lowercase() != "pip") { "pip由会话环境引导维护，此入口不替换或卸载pip" }
+            require(normalized.substringBefore('[').substringBefore('=').substringBefore('>').substringBefore('<').substringBefore('!').substringBefore('~').lowercase() != "pip") { "pip is bootstrap-managed; this tool cannot replace or uninstall it." }
             normalized
         }
         return action to packages
     }
-    private fun errorArgument(): Nothing = throw IllegalArgumentException("packages必须是字符串数组")
+    private fun errorArgument(): Nothing = throw IllegalArgumentException("packages must be a string array.")
     private fun quote(text: String) = "'" + text.replace("'", "'\"'\"'") + "'"
     fun command(action: String, packages: List<String>): String {
         val pip = "/root/.venv/bin/python3 -I -m pip --isolated --disable-pip-version-check --no-input --timeout 20 --retries 2 "
@@ -47,20 +47,20 @@ internal object PythonEnvironmentContract {
             "check" -> pip + "check"
             "install" -> pip + "install --prefer-binary --cache-dir /opt/capri/cache/pip " + packages.joinToString(" ", transform = ::quote)
             "uninstall" -> pip + "uninstall --yes " + packages.joinToString(" ", transform = ::quote)
-            else -> throw IllegalArgumentException("未知Python环境动作")
+            else -> throw IllegalArgumentException("Unknown Python environment action.")
         }
     }
     fun specification(): JSONObject = JSONObject().put("type", "function").put("function", JSONObject()
         .put("name", "python_env")
-        .put("description", "兼容入口：管理当前会话venv，使用正常PyPI与共享下载缓存；源码构建需要准备相应系统依赖。新任务优先使用environment工具。")
+        .put("description", "Legacy interface for the chat venv using normal PyPI and shared download caches. Prepare build dependencies for source distributions. Prefer environment for new tasks.")
         .put("parameters", JSONObject().put("type", "object").put("additionalProperties", false)
             .put("required", JSONArray(listOf("action"))).put("properties", JSONObject()
                 .put("action", JSONObject().put("type", "string").put("enum", JSONArray(actions)))
                 .put("packages", JSONObject().put("type", "array").put("minItems", 1).put("maxItems", 20)
                     .put("items", JSONObject().put("type", "string").put("maxLength", 200))
-                    .put("description", "install/uninstall必填；包名及可选extras/版本条件，如requests==2.32.3；uninstall只传包名"))
+                    .put("description", "Required for install/uninstall; names with optional extras/version constraints. Uninstall accepts names only."))
                 .put("wait_ms", JSONObject().put("type", "integer").put("minimum", 0).put("maximum", 10000)
-                    .put("description", "默认5000ms、最大10000，仅影响短等，提前完成立即返回；安装可后台继续，执行最长10分钟")))))
+                    .put("description", "Response wait: default 5000 ms, max 10000; returns early on completion. Installation may continue for up to 10 minutes.")))))
 }
 
 internal class PythonEnvironmentTool(private val terminals: TerminalManager) {
@@ -76,7 +76,7 @@ internal class PythonEnvironmentTool(private val terminals: TerminalManager) {
                     val commands = active.optJSONArray("commands")
                     val latest = if (commands != null && commands.length() > 0) commands.getJSONObject(commands.length() - 1) else null
                     return@withLock JSONObject().put("action", action).put("status", "busy")
-                        .put("message", "当前会话包管理命令仍在运行；请读取或取消已有命令，不重复安装")
+                        .put("message", "A package-management command is running in this chat. Read or cancel it instead of installing again.")
                         .put("data", JSONObject().put("terminal_id", active.getString("terminal_id")).put("command", latest ?: JSONObject.NULL)).toString()
                 }
                 var id = records.lastOrNull { it.optString("state") == "ready" }?.getString("terminal_id")

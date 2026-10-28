@@ -59,12 +59,12 @@ internal class TerminalManager private constructor(private val context: Context)
             if (SessionDeletion(context.filesDir).pending().contains(chat)) continue
             reconcile(record)
             if (record.getString("state") in liveStates) {
-                record.put("state", "interrupted").put("reason", "应用进程已终止；请新建终端，工作区和历史保留")
+                record.put("state", "interrupted").put("reason", "Application process ended. Open a new terminal; workspace and history remain.")
                 record.remove("shell_pid")
                 val commands = record.getJSONArray("commands")
                 for (j in 0 until commands.length()) {
                     val command = commands.getJSONObject(j)
-                    if (command.getString("state") == "running") command.put("state", "interrupted").put("reason", "应用进程已终止")
+                    if (command.getString("state") == "running") command.put("state", "interrupted").put("reason", "Application process ended.")
                 }
             }
             records[id] = record
@@ -84,7 +84,7 @@ internal class TerminalManager private constructor(private val context: Context)
                             process.destroyForcibly()
                             val state = readJson(File(folder(record), "state.json"))
                             endRecord(record, if (service == null) "interrupted" else if (state?.optString("reason") == "shell_exited") "closed" else "error",
-                                if (service == null) "前台终端服务已停止" else if (log.length() > 200_000) "supervisor_output_limit" else state?.optString("reason")?.ifBlank { null } ?: "终端进程异常结束")
+                                if (service == null) "Terminal foreground service stopped." else if (log.length() > 200_000) "supervisor_output_limit" else state?.optString("reason")?.ifBlank { null } ?: "Terminal process ended unexpectedly.")
                             changed = true
                         }
                     }
@@ -116,7 +116,7 @@ internal class TerminalManager private constructor(private val context: Context)
         affected.forEach { (id, process) -> processes.remove(id, process); process.destroyForcibly() }
         if (wakeLock.isHeld) wakeLock.release()
         scope.launch { mutex.withLock {
-            affected.forEach { (id, _) -> records[id]?.let { endRecord(it, "interrupted", "前台终端服务已停止") } }
+            affected.forEach { (id, _) -> records[id]?.let { endRecord(it, "interrupted", "Terminal foreground service stopped.") } }
             if (affected.isNotEmpty()) persist()
         } }
     }
@@ -127,11 +127,11 @@ internal class TerminalManager private constructor(private val context: Context)
 
     private suspend fun ensureService() {
         if (withTimeoutOrNull(10_000) { while (serviceStopping) delay(20); true } != true)
-            throw TerminalProblem("timeout", "上次终端服务尚未停止，请稍后重试")
+            throw TerminalProblem("timeout", "Previous terminal service is still stopping; retry after it ends.")
         if (service != null) return
         serviceFailure = null
         try { ContextCompat.startForegroundService(context, Intent(context, TerminalService::class.java)) }
-        catch (error: Exception) { throw TerminalProblem("foreground_required", "请返回Capri前台后启动终端：${error.message}") }
+        catch (error: Exception) { throw TerminalProblem("foreground_required", "Return Capri to the foreground before starting a terminal.") }
         val attached = withTimeoutOrNull(10_000) {
             while (service == null) {
                 serviceFailure?.let { throw TerminalProblem("unavailable", it) }
@@ -139,7 +139,7 @@ internal class TerminalManager private constructor(private val context: Context)
             }
             true
         }
-        if (attached != true) throw TerminalProblem("timeout", "终端前台服务启动超时")
+        if (attached != true) throw TerminalProblem("timeout", "Terminal foreground service startup timed out.")
     }
     private fun stopServiceIfIdle() {
         if (processes.isEmpty() && !serviceStopping && service != null) {
@@ -168,11 +168,11 @@ internal class TerminalManager private constructor(private val context: Context)
         revision.value++
     }
     private fun owned(chat: String, id: String): JSONObject = records[id]?.takeIf { it.getString("chat_id") == chat }
-        ?: throw TerminalProblem("not_found", "当前会话没有此终端")
+        ?: throw TerminalProblem("not_found", "Terminal not found in the current chat.")
     private fun command(record: JSONObject, id: String): JSONObject {
         val commands = record.getJSONArray("commands")
         return (0 until commands.length()).map { commands.getJSONObject(it) }.firstOrNull { it.getString("command_id") == id }
-            ?: throw TerminalProblem("not_found", "此终端没有该命令")
+            ?: throw TerminalProblem("not_found", "Command not found in this terminal.")
     }
     private fun active(record: JSONObject): JSONObject? {
         val commands = record.getJSONArray("commands")
@@ -180,7 +180,7 @@ internal class TerminalManager private constructor(private val context: Context)
     }
     private fun requireLive(record: JSONObject) {
         if (processes[record.getString("terminal_id")]?.isAlive != true || record.getString("state") !in liveStates)
-            throw TerminalProblem("unavailable", "终端已结束或中断，请新建终端；历史和工作区保留")
+            throw TerminalProblem("unavailable", "Terminal ended or was interrupted. Open a new terminal; history and workspace remain.")
     }
     private fun endRecord(record: JSONObject, state: String, reason: String) {
         reconcile(record)
@@ -232,35 +232,35 @@ internal class TerminalManager private constructor(private val context: Context)
                             "input" -> {
                                 requireLive(record)
                                 val cmd = command(record, params.getString("command_id"))
-                                if (cmd.getString("state") != "running") throw TerminalProblem("not_running", "命令已结束")
+                                if (cmd.getString("state") != "running") throw TerminalProblem("not_running", "Command is no longer running.")
                                 val input = File(folder(record), "input")
-                                if (input.exists()) throw TerminalProblem("busy", "上次输入尚未消费")
+                                if (input.exists()) throw TerminalProblem("busy", "Previous input has not been consumed.")
                                 atomic(input, JSONObject().put("id", cmd.getString("command_id")).put("text", params.getString("text")))
                                 JSONObject().put("state", "input_submitted")
                             }
                             "cancel" -> {
                                 requireLive(record)
                                 val cmd = command(record, params.getString("command_id"))
-                                if (cmd.getString("state") != "running") throw TerminalProblem("not_running", "命令已结束")
+                                if (cmd.getString("state") != "running") throw TerminalProblem("not_running", "Command is no longer running.")
                                 val cancel = File(folder(record), "cancel")
                                 val temp = File(folder(record), "cancel.tmp")
-                                temp.writeText(cmd.getString("command_id")); check(temp.renameTo(cancel)) { "停止请求提交失败" }
+                                temp.writeText(cmd.getString("command_id")); check(temp.renameTo(cancel)) { "Unable to submit cancellation." }
                                 JSONObject().put("state", "cancel_requested").put("command_id", cmd.getString("command_id"))
                             }
                             "close" -> { close(record); persist(); stopServiceIfIdle(); snapshot(record) }
                             "clear_history" -> {
-                                if (active(record) != null) throw TerminalProblem("busy", "运行中的命令不能清理日志")
+                                if (active(record) != null) throw TerminalProblem("busy", "Cannot clear history while a command is running.")
                                 val commands = File(folder(record), "commands")
-                                check(!commands.exists() || commands.deleteRecursively()) { "命令日志清理失败，记录已保留" }
-                                check(commands.mkdirs() || commands.isDirectory) { "无法创建命令目录" }
+                                check(!commands.exists() || commands.deleteRecursively()) { "Failed to clear command logs; records were retained." }
+                                check(commands.mkdirs() || commands.isDirectory) { "Unable to create command directory." }
                                 File(folder(record), "output.bin").writeText("")
                                 record.put("commands", JSONArray()); persist(); snapshot(record)
                             }
                             "delete" -> {
-                                if (record.getString("state") in liveStates) throw TerminalProblem("busy", "请先关闭终端，再删除历史")
+                                if (record.getString("state") in liveStates) throw TerminalProblem("busy", "Close the terminal before deleting its history.")
                                 val root = folder(record)
                                 repeat(5) { if (root.exists() && !root.deleteRecursively()) Thread.sleep(50) }
-                                check(!root.exists()) { "终端历史删除失败" }
+                                check(!root.exists()) { "Failed to delete terminal history." }
                                 records.remove(record.getString("terminal_id")); persist()
                                 JSONObject().put("state", "deleted")
                             }
@@ -305,17 +305,17 @@ internal class TerminalManager private constructor(private val context: Context)
                     }
                 }
             }
-            JSONObject().put("action", action).put("status", "ok").put("data", response).toString()
+            TerminalResult.encode(JSONObject().put("action", action).put("status", "ok").put("data", response))
         } catch (cancel: CancellationException) { throw cancel }
-        catch (problem: TerminalProblem) { JSONObject().put("action", action).put("status", problem.status).put("message", problem.message).toString() }
-        catch (bad: IllegalArgumentException) { JSONObject().put("action", action).put("status", "invalid_argument").put("message", bad.message).toString() }
-        catch (error: Exception) { JSONObject().put("action", action).put("status", "error").put("message", error.message?.take(500)).toString() }
+        catch (problem: TerminalProblem) { ai.capri.app.ExecutionResult.annotate(JSONObject().put("action", action).put("status", problem.status).put("message", ai.capri.app.ExecutionResult.message(problem))).toString() }
+        catch (bad: IllegalArgumentException) { ai.capri.app.ExecutionResult.annotate(JSONObject().put("action", action).put("status", "invalid_argument").put("message", ai.capri.app.ExecutionResult.message(bad))).toString() }
+        catch (error: Exception) { ai.capri.app.ExecutionResult.annotate(JSONObject().put("action", action).put("status", if (error is ai.capri.app.RuntimeBusyException) "busy" else "error").put("message", ai.capri.app.ExecutionResult.message(error))).toString() }
     }
 
     private suspend fun open(chat: String, title: String): JSONObject {
         runtime.ensureSession(chat)
-        if (processes.size >= 8) throw TerminalProblem("busy", "最多同时开启8个终端，请关闭空闲终端")
-        if (records.values.count { it.getString("chat_id") == chat } >= 32) throw TerminalProblem("busy", "会话终端历史已达32个，请先关闭并delete旧终端")
+        if (processes.size >= 8) throw TerminalProblem("busy", "At most 8 live terminals are allowed; close idle terminals.")
+        if (records.values.count { it.getString("chat_id") == chat } >= 32) throw TerminalProblem("busy", "Chat terminal history reached 32 records; close and delete unused terminals.")
         ensureService()
         val id = UUID.randomUUID().toString()
         val record = JSONObject().put("terminal_id", id).put("chat_id", chat).put("title", title)
@@ -331,26 +331,26 @@ internal class TerminalManager private constructor(private val context: Context)
             persist()
             val ready = withTimeoutOrNull(30_000) {
                 while (readJson(File(root, "state.json"))?.optString("state") != "ready") {
-                    check(process.isAlive) { "终端启动失败：" + File(root, "supervisor.log").readText().take(1000) }
+                    check(process.isAlive) { "Terminal startup failed: " + File(root, "supervisor.log").readText().take(1000) }
                     delay(25)
                 }
                 true
             }
-            if (ready != true) throw TerminalProblem("timeout", "会话环境初始化或PTY Shell启动超时")
+            if (ready != true) throw TerminalProblem("timeout", "Session initialization or PTY startup timed out.")
             val state = readJson(File(root, "state.json"))!!
             record.put("state", "ready").put("shell_pid", state.getLong("shell_pid"))
             persist()
             return snapshot(record)
         } catch (error: Exception) {
             processes.remove(id)?.destroyForcibly()
-            endRecord(record, "error", error.message ?: "启动失败"); persist(); stopServiceIfIdle()
+            endRecord(record, "error", error.message ?: "Startup failed."); persist(); stopServiceIfIdle()
             throw error
         }
     }
     private fun submit(record: JSONObject, params: JSONObject): JSONObject {
         requireLive(record)
-        if (active(record) != null) throw TerminalProblem("busy", "终端已有运行命令；请先读取、输入或取消，或另开终端")
-        if (record.getJSONArray("commands").length() >= 200) throw TerminalProblem("busy", "命令历史达到200条，请先clear_history")
+        if (active(record) != null) throw TerminalProblem("busy", "A command is already running. Read, input or cancel it, or use another terminal.")
+        if (record.getJSONArray("commands").length() >= 200) throw TerminalProblem("busy", "Command history reached 200 entries; clear_history while idle.")
         val id = UUID.randomUUID().toString()
         val folder = commandFolder(record, id).apply { mkdirs() }
         File(folder, "main.sh").writeText(params.getString("command") + "\n")
@@ -360,7 +360,7 @@ internal class TerminalManager private constructor(private val context: Context)
         record.getJSONArray("commands").put(cmd); record.put("state", "running"); persist()
         updateWakeLock(renew = true)
         try { atomic(File(this.folder(record), "request.json"), JSONObject().put("id", id).put("timeout_seconds", cmd.getInt("timeout_seconds"))) }
-        catch (error: Exception) { cmd.put("state", "failed").put("reason", "提交失败"); record.put("state", "ready"); persist(); throw error }
+        catch (error: Exception) { cmd.put("state", "failed").put("reason", "Submission failed."); record.put("state", "ready"); persist(); throw error }
         return JSONObject().put("terminal_id", record.getString("terminal_id")).put("command_id", id).put("command", JSONObject(cmd.toString()))
     }
     private fun read(record: JSONObject, params: JSONObject): JSONObject {
@@ -369,12 +369,12 @@ internal class TerminalManager private constructor(private val context: Context)
         val offset = TerminalContract.integer(params, "offset", 0, 0, 2_000_000)
         val limit = TerminalContract.integer(params, "limit", 16_000, 4, 32_000)
         val size = file.length()
-        require(offset <= size) { "offset超出日志长度；清理后请从0读取" }
+        require(offset <= size) { "offset exceeds log length; restart at 0 after clearing logs." }
         val bytes = if (file.exists()) RandomAccessFile(file, "r").use { f ->
             f.seek(offset.toLong()); ByteArray(minOf(limit.toLong(), size - offset).toInt()).also { f.readFully(it) }
         } else ByteArray(0)
         val ended = if (cmd != null) cmd.getString("state") != "running" else record.getString("state") !in liveStates
-        val decoded = TerminalOutput.decode(bytes, ended && offset.toLong() + bytes.size == size)
+        val decoded = TerminalOutput.bounded(bytes, ended && offset.toLong() + bytes.size == size)
         return JSONObject().put("terminal_id", record.getString("terminal_id")).put("terminal_state", record.getString("state"))
             .put("command", cmd?.let { JSONObject(it.toString()) } ?: JSONObject.NULL)
             .put("output", decoded.text).put("offset", offset).put("next_offset", offset + decoded.consumed)
@@ -388,7 +388,7 @@ internal class TerminalManager private constructor(private val context: Context)
         processes.remove(id)?.let { process ->
             if (!process.waitFor(1500, TimeUnit.MILLISECONDS)) { process.destroyForcibly(); process.waitFor(500, TimeUnit.MILLISECONDS) }
         }
-        endRecord(record, "closed", "用户关闭终端")
+        endRecord(record, "closed", "Terminal closed by user.")
         updateWakeLock()
     }
 }

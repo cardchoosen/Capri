@@ -1,14 +1,12 @@
 ---
 name: graphics-animation
-description: 创建或编辑图形、图表、插画、示意图、数据可视化及动画时使用；根据内容、交互需求和交付格式选择绘制、渲染与导出方式。
+description: Create or edit charts, diagrams, illustrations, visualizations, and animations, choosing rendering and export methods for the content and requested format.
 metadata:
   capri/source: builtin
 ---
 
-围绕用户希望表达的内容选择呈现方式：数据关系用合适的图表，结构或过程用示意图，时间变化用动画；保留指定的风格、语言、尺寸、格式和已有素材。需求明确时直接制作，只有缺失信息会影响结果才询问。
+Choose a representation that communicates the content: charts for data, diagrams for structure/processes, animation for change over time. Preserve requested style, language, dimensions, format and supplied assets. Proceed when the goal is clear; clarify only missing details that affect the result.
 
-根据任务选择成熟工具，不固定到某种语言、库或媒体格式。可使用矢量、栅格、程序化绘制、网页或三维渲染；以实际环境和可验证的输出为准，不假定拥有未接入的图像生成、视觉理解或视频编码服务。已有作品优先局部修改；选择满足目标的依赖，避免为简单任务安装整套工具。
+Choose established tools suited to the task and actual environment, without fixing a language, library or media format. Vector, raster, procedural, web and 3D methods are options when available; do not assume image-generation, vision or video-encoding services exist. Prefer focused edits to existing work and the smallest sufficient dependencies. Preserve the user's core implementation language; use auxiliary tools only within the allowed scope.
 
-布局、标注、配色和字体应服务内容；图表保持数据与刻度准确。动画需体现真实变化和适当节奏，静态任务不必增加帧处理。用户指定实现语言时保留核心实现，必要的辅助工具按允许范围使用。
-
-把生成与必要检查合并：按产物核对数据、可解码性、尺寸、文字及动画时序；发现问题再修正，不机械追加所有检查或反复重绘。文件存在不代表内容正确；未实际预览时不要声称已目视确认。用send_file交付真实文件，简要说明重要限制；仅在用户需要或有复用价值时附源码。
+Keep data, scales, labels, fonts and timing faithful to the content. Combine generation with necessary data/decoding/dimension/text/timing checks. Repair demonstrated errors; avoid routine extra checks or repeated cosmetic rendering. File existence is not content correctness, and unpreviewed work is not visually verified. Deliver the actual file through send_file, state material limits, and include source only when requested or useful for reuse.

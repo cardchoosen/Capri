@@ -1,8 +1,12 @@
 ---
 name: task-environment
-description: 任务涉及执行代码、构建项目、安装依赖或排查运行环境时使用；按实际需要准备，不做机械全检。
+description: Prepare dependencies or diagnose runtime gaps for code execution, builds, and installation failures, using task-specific evidence rather than routine full-environment probes.
 metadata:
   capri/source: builtin
 ---
 
-先辨认用户目标、语言约束、已有项目与实际错误。已知缺失依赖直接用environment.prepare合并准备；不为简单任务运行全环境探针。未知依赖按命令、Python实际导入、系统库/头文件声明最小requirements。项目存在依赖清单则优先遵循，已有成功结果复用。安装失败先查看退出码与关键错误，区分网络、版本、包名、系统库缺失；不得把安装失败归结为“必须零依赖手写一切”。小样本验证与实际产物检查合并进行，完成即交付。
+Identify the goal, implementation language, existing project manifests, and actual failure first. Choose the smallest sufficient implementation and dependency set. Reuse applicable valid evidence; one failed installation does not imply a broken environment or permanent inability.
+
+For short tasks, submit known requirements with python_run code/steps so preparation and verification precede execution in one call. Use environment.prepare separately for project or persistent-terminal setup; install shared system packages before opening terminals. Use inspect for uncertain commands/imports/headers/libraries, refresh only for an explicit fresh check, and verify only when a separate sample is needed. Do not install speculative toolchains or confuse cached downloads with installed packages.
+
+On failure, inspect the actual exit code and key output: distinguish network, version constraints, distribution/import names, and missing build libraries. Fix the failed stage and preserve successful intermediate work. Missing dependencies do not justify handwritten codecs or changing the user's language. Combine necessary program/artifact assertions with execution, then deliver the result without redundant probes or repeated rendering.

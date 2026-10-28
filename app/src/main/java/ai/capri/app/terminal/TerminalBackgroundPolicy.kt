@@ -17,7 +17,7 @@ internal object TerminalBackgroundPolicy {
             .put("battery_optimization_exempt", power.isIgnoringBatteryOptimizations(context.packageName))
             .put("power_save_mode", power.isPowerSaveMode)
             .put("vendor_policy_verified", false)
-            .put("note", "系统或厂商仍可能暂停后台任务；请在Capri应用电池设置中允许后台运行。标准API不能确认厂商防冻结设置。")
+            .put("note", "Android/OEM policies may pause background tasks. Allow background activity in Capri battery settings; public APIs cannot verify vendor freeze policies.")
     }
     fun openSettings(context: Context) {
         context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))

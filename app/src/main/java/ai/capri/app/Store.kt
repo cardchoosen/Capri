@@ -21,6 +21,10 @@ data class Session(val id: String = UUID.randomUUID().toString(), var title: Str
 data class ModelConfig(val endpoint: String = "https://api.openai.com/v1", val model: String = "", val key: String = "", val protocol: String = "CHAT", val accountId: String = "", val contextWindow: Int? = null, val maxOutput: Int? = null, val contextSource: String = "models_api", val providerId: String = "", val modelName: String = "")
 
 class Workspace(private val base: File) {
+    internal fun sessionDirectory(id: String): File {
+        require(id.matches(Regex("[a-zA-Z0-9-]+"))) { "Invalid workspace identifier." }
+        return File(base, id)
+    }
     fun root(id: String): File {
         require(id.matches(Regex("[a-zA-Z0-9-]+")))
         return File(base, id).apply { mkdirs() }

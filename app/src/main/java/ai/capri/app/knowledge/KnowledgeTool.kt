@@ -57,12 +57,12 @@ internal class KnowledgeTool(private val store: KnowledgeStore) {
             context_history 可按query检索当前会话历史，或reference=e编号/c归档ID、offset分页读取。摘要为有来源的摘录，省略的历史必须查原文。
             禁止因摘要省略旧结果而重做已记录的有副作用操作；先查归档并核验。对话及工具输入预算按当前模型上下文窗口自动适配，输出和安全空间由客户端预留；接近预算时归档历史，原文可查询。
         """.trimIndent()
-        fun specification(): JSONObject = spec("knowledge", "有来源的记忆和文档检索/管理。action: search/list/remember/index/enable/disable/delete。只在用户要求时写记忆，共享必须明确授权。", JSONObject()
+        fun specification(): JSONObject = spec("knowledge", "Search and manage sourced memories/documents: search/list/remember/index/enable/disable/delete. Write memories only when requested; sharing requires explicit authorization.", JSONObject()
             .put("action", JSONObject().put("type", "string").put("enum", JSONArray(listOf("search", "list", "remember", "index", "enable", "disable", "delete"))))
             .put("query", string()).put("text", string()).put("id", string()).put("path", string())
             .put("scope", JSONObject().put("type", "string").put("enum", JSONArray(listOf("chat", "global"))))
-            .put("source_entry", JSONObject().put("type", "integer").put("description", "remember来源的用户消息e编号（整数）；省略默认当前最新用户消息。指定时必须为真实user消息。")), listOf("action"))
-        fun historySpecification(): JSONObject = spec("context_history", "检索当前会话历史与完整工具归档。query或reference二选一，offset按字符分页，每页8000字符。", JSONObject()
+            .put("source_entry", JSONObject().put("type", "integer").put("description", "Source user-message entry number for remember (1-based integer). Defaults to the latest user message; explicit references must identify an actual user message.")), listOf("action"))
+        fun historySpecification(): JSONObject = spec("context_history", "Search the current chat and its complete compressed tool archives. Supply query or reference; reference accepts e-prefixed message numbers or c-prefixed archive IDs. offset pages text in 8000-character chunks.", JSONObject()
             .put("query", string()).put("reference", string()).put("offset", JSONObject().put("type", "integer")), emptyList())
         private fun string() = JSONObject().put("type", "string")
         private fun spec(name: String, description: String, properties: JSONObject, required: List<String>) = JSONObject().put("type", "function").put("function", JSONObject()

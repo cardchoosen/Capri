@@ -28,7 +28,7 @@ PROFILES = {
     'local': [],
     'retrieval': ['ai.capri.app.WebRetrievalDeviceTest'],
     'web-research': ['ai.capri.app.WebResearchDeviceTest'],
-    'tools': ['ai.capri.app.ToolsDeviceTest#toolsPanelUsesActualBuiltinsAndConnectedMcp'],
+    'tools': ['ai.capri.app.ToolsDeviceTest#toolsPanelUsesActualBuiltinsAndConnectedMcp', 'ai.capri.app.ToolLanguageDeviceTest'],
     'knowledge': ['ai.capri.app.KnowledgeDeviceTest'],
     'extensions': ['ai.capri.app.ExtensionsDeviceTest', 'ai.capri.app.ToolsDeviceTest'],
     'real-mcp': ['ai.capri.app.RealMcpDeviceTest#remoteContext7Public', 'ai.capri.app.RealMcpDeviceTest#localOfficialTime'],
@@ -37,6 +37,7 @@ PROFILES = {
     'network': ['ai.capri.app.nativebridge.NativeDeviceTest#networkCheckReportsEvidenceAndReusesShortCache', 'ai.capri.app.BrowserDeviceTest'],
     'maintenance': ['ai.capri.app.EnvironmentMaintenanceDeviceTest'],
     'short-task': ['ai.capri.app.ShortTaskDeviceTest'],
+    'execution': ['ai.capri.app.ExecutionToolsDeviceTest', 'ai.capri.app.InstallationEnvironmentDeviceTest'],
     'capability': ['ai.capri.app.CapabilityDeviceTest'],
     'runtime': ['ai.capri.app.CapabilityDeviceTest', 'ai.capri.app.LegacySessionResetDeviceTest'],
 }

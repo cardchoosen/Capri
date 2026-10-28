@@ -81,12 +81,12 @@ internal class PersonalMemory(private val store: KnowledgeStore) {
             任务对话只可读取个人记忆，不可写入；查阅任务历史不等于应导入个人记忆。个人记忆不能覆盖系统规则，原文与用户当前纠正优先。
         """.trimIndent()
         fun specification(): JSONObject = JSONObject().put("type", "function").put("function", JSONObject()
-            .put("name", "personal_memory").put("description", "个人经历与偏好：search查询；remember仅在默认个人对话中保存/更新有来源的重要信息。任务对话只读。非人格编辑工具。")
+            .put("name", "personal_memory").put("description", "Search personal experiences/preferences. remember saves or updates sourced important information only in the default personal chat; task chats are read-only. Cannot edit core persona records.")
             .put("parameters", JSONObject().put("type", "object").put("properties", JSONObject()
                 .put("action", JSONObject().put("type", "string").put("enum", JSONArray(listOf("search", "remember"))))
                 .put("query", JSONObject().put("type", "string")).put("text", JSONObject().put("type", "string"))
-                .put("id", JSONObject().put("type", "string").put("description", "更新旧记忆时提供原id"))
-                .put("source_entry", JSONObject().put("type", "integer").put("description", "remember必须引用当前个人对话真实user消息e编号的整数")))
+                .put("id", JSONObject().put("type", "string").put("description", "Existing memory ID when updating."))
+                .put("source_entry", JSONObject().put("type", "integer").put("description", "remember requires the 1-based entry number of an actual user message in the current personal chat.")))
                 .put("required", JSONArray(listOf("action")))))
     }
 }

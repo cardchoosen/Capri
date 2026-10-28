@@ -12,60 +12,71 @@ internal object CapabilityContract {
     private val fields = setOf("action", "requirements", "from_project", "command", "timeout_seconds")
     private val requirementFields = setOf("commands", "python_packages", "imports", "system_packages", "headers", "libraries", "compiler")
     fun validate(args: JSONObject): JSONObject {
+        require(!args.has("action") || args.opt("action") is String) { "action must be a string." }
         val action = args.optString("action", "inspect")
         if (action in listOf("lookup", "document", "record")) return ai.capri.app.environment.EnvironmentActions.validate(args)
-        require(args.keys().asSequence().all { it in fields }) { "未知环境参数" }
-        require(action in listOf("inspect", "refresh", "prepare", "verify")) { "未知环境action" }
-        if (args.has("from_project")) require(action == "prepare" && args.opt("from_project") is Boolean) { "from_project仅供prepare使用且需为布尔值" }
-        val requirements = if (args.has("requirements")) args.opt("requirements") as? JSONObject ?: throw IllegalArgumentException("requirements需为对象") else JSONObject()
-        require(requirements.keys().asSequence().all { it in requirementFields }) { "未知依赖类型" }
+        require(args.keys().asSequence().all { it in fields }) { "Unknown environment argument." }
+        require(action in listOf("inspect", "refresh", "prepare", "verify")) { "Unknown environment action." }
+        if (args.has("from_project")) require(action == "prepare" && args.opt("from_project") is Boolean) { "from_project must be a boolean and is only accepted by prepare." }
+        val requirements = if (args.has("requirements")) args.opt("requirements") as? JSONObject ?: throw IllegalArgumentException("requirements must be an object.") else JSONObject()
+        require(requirements.keys().asSequence().all { it in requirementFields }) { "Unknown requirement type." }
         for (key in requirementFields - "compiler") {
             if (!requirements.has(key)) continue
-            val list = requirements.opt(key) as? JSONArray ?: throw IllegalArgumentException("$key 需为数组")
-            require(list.length() in 0..20) { "$key 最多20项" }
+            val list = requirements.opt(key) as? JSONArray ?: throw IllegalArgumentException("$key must be an array.")
+            require(list.length() in 0..20) { "$key accepts at most 20 items." }
             for (i in 0 until list.length()) {
                 val item = list.opt(i)
-                require(item is String && item.length in 1..200) { "$key 项目无效" }
+                require(item is String && item.length in 1..200) { "$key entries must contain 1..200 characters." }
                 when (key) {
                     "python_packages" -> ai.capri.app.pythonenv.PythonEnvironmentContract.validate(JSONObject().put("action", "install").put("packages", JSONArray(listOf(item))))
-                    "headers" -> require(item.matches(Regex("[A-Za-z0-9_+./-]+")) && !item.startsWith('/') && ".." !in item.split('/')) { "头文件名无效" }
-                    "imports" -> require(item.matches(Regex("[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*"))) { "模块名无效" }
-                    else -> require(item.matches(Regex("[A-Za-z0-9][A-Za-z0-9_+.-]*"))) { "$key 名称无效" }
+                    "headers" -> require(item.matches(Regex("[A-Za-z0-9_+./-]+")) && !item.startsWith('/') && ".." !in item.split('/')) { "Invalid relative header name." }
+                    "imports" -> require(item.matches(Regex("[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*"))) { "Invalid Python import name." }
+                    else -> require(item.matches(Regex("[A-Za-z0-9][A-Za-z0-9_+.-]*"))) { "Invalid $key name." }
                 }
             }
         }
-        if (requirements.has("compiler")) require(requirements.opt("compiler") is String && requirements.getString("compiler").matches(Regex("[A-Za-z0-9][A-Za-z0-9_+.-]*"))) { "compiler无效" }
+        if (requirements.has("compiler")) require(requirements.opt("compiler") is String && requirements.getString("compiler").length <= 200 && requirements.getString("compiler").matches(Regex("[A-Za-z0-9][A-Za-z0-9_+.-]*"))) { "Invalid compiler command name." }
+        val allowed = when (action) {
+            "prepare" -> setOf("action", "requirements", "from_project")
+            "verify" -> setOf("action", "requirements", "command", "timeout_seconds")
+            else -> setOf("action", "requirements")
+        }
+        require(args.keys().asSequence().all { it in allowed }) { "Argument is not supported by this environment action." }
         if (action == "verify") {
-            val command = args.opt("command") as? JSONArray ?: throw IllegalArgumentException("verify需提供command参数数组")
-            require(command.length() in 1..32 && (0 until command.length()).all { command.opt(it) is String && command.getString(it).isNotEmpty() && command.getString(it).length <= 4000 && '\u0000' !in command.getString(it) }) { "command参数无效" }
-        } else require(!args.has("command") && !args.has("timeout_seconds")) { "仅verify接受command/timeout_seconds" }
+            val command = args.opt("command") as? JSONArray ?: throw IllegalArgumentException("verify requires a command argument array.")
+            require(command.length() in 1..32 && (0 until command.length()).all { command.opt(it) is String && command.getString(it).isNotEmpty() && command.getString(it).length <= 4000 && '\u0000' !in command.getString(it) }) { "Invalid command argument array." }
+        } else require(!args.has("command") && !args.has("timeout_seconds")) { "Only verify accepts command and timeout_seconds." }
         if (args.has("timeout_seconds")) {
             val value = args.opt("timeout_seconds")
-            require(value is Number && value.toDouble() == value.toInt().toDouble() && value.toInt() in 1..40) { "验证时限需为1..40秒整数" }
+            require(value is Number && value.toDouble() == value.toInt().toDouble() && value.toInt() in 1..40) { "timeout_seconds must be an integer in 1..40." }
         }
         return JSONObject(args.toString()).put("action", action)
     }
-    fun specification(): JSONObject {
-        fun strings(description: String) = JSONObject().put("type", "array").put("maxItems", 20).put("items", JSONObject().put("type", "string").put("maxLength", 200)).put("description", description)
-        val requirements = JSONObject().put("commands", strings("所需可执行命令，如git、node、g++"))
-            .put("python_packages", strings("Python包及版本条件，安装到当前会话venv"))
-            .put("imports", strings("要实际导入的Python模块，如PIL.Image；分发包名与模块名可不同"))
-            .put("system_packages", strings("明确需要的Ubuntu apt软件包名；全局共享，无需每会话重装"))
-            .put("headers", strings("要试编译的头文件名，如gif_lib.h"))
-            .put("libraries", strings("要试链接的库名，如gif；不含-l前缀"))
-            .put("compiler", JSONObject().put("type", "string").put("description", "试编译使用的命令，默认cc，可选g++等"))
-        val specification = JSONObject().put("type", "function").put("function", JSONObject().put("name", "environment")
-            .put("description", "安装环境档案与通用检测入口。lookup查询全安装任意软硬件/驱动事实，document分页读取Markdown，record凭真实工具environment_receipt写入观察；refresh按requirements强制刷新。inspect先复用有效证据，只补测缺失项；prepare实际准备依赖，verify始终实际执行。inspect核对命令/包版本/实际导入/头文件链接，并读取当前工作区项目依赖清单；prepare复用现有环境，安装明确缺少的Ubuntu系统包或当前会话Python包，from_project可按项目清单安装Python/npm依赖；verify执行明确的小样本command参数数组。无固定任务/图像格式枚举。已知缺包直接prepare，不机械先检查再重复检查；成功后直接开展任务。仅能验证声明的需求，不能保证任意程序。系统安装需环境空闲，先准备依赖再开持续终端；有使用者会返回busy，不自动停止。保留用户语言边界，缺少成熟库不意味着应手写编码器。verify会实际执行程序；不把可执行存在当作完整行为验证。")
-            .put("parameters", JSONObject().put("type", "object").put("additionalProperties", false).put("required", JSONArray(listOf("action")))
-                .put("properties", JSONObject()
-                    .put("action", JSONObject().put("type", "string").put("enum", JSONArray(listOf("inspect", "refresh", "prepare", "verify", "lookup", "document", "record"))))
-                    .put("requirements", JSONObject().put("type", "object").put("additionalProperties", false).put("properties", requirements))
-                    .put("from_project", JSONObject().put("type", "boolean"))
-                    .put("command", JSONObject().put("type", "array").put("minItems", 1).put("maxItems", 32).put("items", JSONObject().put("type", "string").put("maxLength", 4000)))
-                    .put("timeout_seconds", JSONObject().put("type", "integer").put("minimum", 1).put("maximum", 40)))))
-        ai.capri.app.environment.EnvironmentActions.extend(specification)
-        return specification
+    fun requirementsSchema(): JSONObject {
+        fun strings(description: String) = JSONObject().put("type", "array").put("maxItems", 20).put("items", JSONObject().put("type", "string").put("minLength", 1).put("maxLength", 200)).put("description", description)
+        val properties = JSONObject().put("commands", strings("Required executable names, such as git or g++."))
+            .put("python_packages", strings("Python distributions with optional extras/version constraints; installed in the chat venv."))
+            .put("imports", strings("Python modules to actually import; module names may differ from distribution names."))
+            .put("system_packages", strings("Explicit Ubuntu apt package names; shared across chats."))
+            .put("headers", strings("Relative headers to compile, such as gif_lib.h."))
+            .put("libraries", strings("Libraries to link, such as gif; omit the -l prefix."))
+            .put("compiler", JSONObject().put("type", "string").put("maxLength", 200).put("description", "Compiler executable, default cc."))
+        return JSONObject().put("type", "object").put("additionalProperties", false).put("properties", properties)
     }
+    fun specification(): JSONObject {
+        val properties = ai.capri.app.environment.EnvironmentActions.properties()
+            .put("requirements", requirementsSchema())
+            .put("from_project", JSONObject().put("type", "boolean").put("description", "prepare only: install Python/npm dependencies from project manifests."))
+            .put("command", JSONObject().put("type", "array").put("minItems", 1).put("maxItems", 32).put("items", JSONObject().put("type", "string").put("minLength", 1).put("maxLength", 4000)).put("description", "verify only: executable and argument array; actually runs the program."))
+            .put("timeout_seconds", JSONObject().put("type", "integer").put("minimum", 1).put("maximum", 40).put("description", "verify execution deadline; default 30 seconds."))
+        val fields = linkedMapOf("inspect" to setOf("requirements"), "refresh" to setOf("requirements"), "prepare" to setOf("requirements", "from_project"), "verify" to setOf("requirements", "command", "timeout_seconds"))
+        fields.putAll(ai.capri.app.environment.EnvironmentActions.fields)
+        val schema = ActionSchema.build(properties, fields, { action -> if (action == "verify") listOf("command") else ai.capri.app.environment.EnvironmentActions.required(action) })
+        return JSONObject().put("type", "function").put("function", JSONObject().put("name", "environment")
+            .put("description", "Task-driven dependency preparation and installation-wide evidence. inspect reuses valid checks and probes missing evidence; refresh forces declared checks. prepare installs explicit missing system/chat dependencies; verify always runs a small command. Known short-task requirements belong in python_run instead of a separate preparation call. lookup queries facts, document pages the Markdown archive, record stores receipt-backed observations. Only declared requirements are verified. Shared system changes require an idle environment; busy never stops other tasks. Historical failure is not permanent inability; cached downloads are not installed packages.")
+            .put("parameters", schema))
+    }
+
 }
 
 internal class CapabilityTool(private val context: Context, private val runtime: PythonRuntime, profileOverride: ai.capri.app.environment.InstallationEnvironment? = null) {
@@ -76,16 +87,16 @@ internal class CapabilityTool(private val context: Context, private val runtime:
         val phases = JSONObject()
         val result = try {
         val request = CapabilityContract.validate(args)
-        if (request.getString("action") in listOf("lookup", "document", "record")) return when (request.getString("action")) {
+        if (request.getString("action") in listOf("lookup", "document", "record")) return ExecutionResult.environment(JSONObject(when (request.getString("action")) {
             "lookup" -> profile.lookup(request)
             "document" -> profile.document(request)
             else -> profile.record(request)
-        }
+        }))
         if (request.getString("action") == "prepare") installs.getOrPut(context.filesDir.canonicalPath) { Mutex() }.withLock {
             phases.put("queue", PerformanceTrace.elapsed(started))
             val token = EnvironmentForeground.hold(context)
             val scope = if ((request.optJSONObject("requirements")?.optJSONArray("system_packages")?.length() ?: 0) > 0) "ubuntu_shared" else "session:$chat"
-            runCatching { profile.invalidate(scope, "依赖准备可能改变环境，需按实际结果更新") }
+            runCatching { profile.invalidate(scope, "Dependency preparation may change the environment; update from actual results.") }
             try {
                 timed(phases, "session") { runtime.ensureSession(chat) }
                 val packages = request.optJSONObject("requirements")?.optJSONArray("system_packages") ?: JSONArray()
@@ -103,9 +114,11 @@ internal class CapabilityTool(private val context: Context, private val runtime:
             } finally { EnvironmentForeground.release(context, token) }
         } else invoke(chat, request, 60)
     } catch (cancel: CancellationException) { throw cancel }
-    catch (error: IllegalArgumentException) { JSONObject().put("status", "invalid_argument").put("message", error.message).toString() }
-    catch (error: Exception) { JSONObject().put("status", if (error.message?.let { "使用" in it || "正在准备依赖" in it } == true) "busy" else "error").put("message", error.message?.take(1500)).toString() }
+    catch (error: IllegalArgumentException) { JSONObject().put("status", "invalid_argument").put("message", ExecutionResult.message(error)).toString() }
+    catch (error: Exception) { JSONObject().put("status", if (error is RuntimeBusyException) "busy" else "error").put("message", ExecutionResult.message(error)).toString() }
         val objectResult = JSONObject(result)
+        if (objectResult.optJSONObject("verification")?.optBoolean("passed") == false) objectResult.put("status", "verification_failed")
+        ExecutionResult.annotate(objectResult)
         val timing = objectResult.optJSONObject("timings_ms") ?: JSONObject()
         phases.keys().forEach { timing.put(it, phases.get(it)) }
         timing.put("client_total", PerformanceTrace.elapsed(started))
@@ -113,10 +126,11 @@ internal class CapabilityTool(private val context: Context, private val runtime:
             if (objectResult.optString("status") == "ok") PerformanceTrace.Status.RETURNED else PerformanceTrace.Status.ERROR,
             tool = "environment", details = timing)
         objectResult.put("timings_ms", timing)
+        val bounded = JSONObject(ExecutionResult.environment(objectResult))
         if (!objectResult.optBoolean("cached") && args.optString("action", "inspect") in setOf("inspect", "refresh", "prepare", "verify")) runCatching {
-            objectResult.put("environment_receipt", profile.receipt("environment.${args.optString("action", "inspect")}", "session:$chat", objectResult.toString()))
+            bounded.put("environment_receipt", profile.receipt("environment.${args.optString("action", "inspect")}", "session:$chat", bounded.toString()))
         }
-        return objectResult.toString()
+        return bounded.toString()
     }
     private suspend fun <T> timed(phases: JSONObject, key: String, block: suspend () -> T): T {
         val started = PerformanceTrace.now()
@@ -126,7 +140,7 @@ internal class CapabilityTool(private val context: Context, private val runtime:
         val effective = JSONObject(request.toString())
         val requirements = request.optJSONObject("requirements") ?: JSONObject()
         if (request.getString("action") == "refresh") {
-            runCatching { profile.invalidateChecks(chat, requirements, "用户要求强制刷新指定项目") }
+            runCatching { profile.invalidateChecks(chat, requirements, "Explicit refresh requested for these checks.") }
             effective.put("action", "inspect")
         }
         val known = if (request.getString("action") == "inspect") runCatching { profile.cachedChecks(chat, requirements) }.getOrDefault(JSONObject()) else JSONObject()
@@ -136,8 +150,8 @@ internal class CapabilityTool(private val context: Context, private val runtime:
                 .put("requirements_satisfied", keys.all { key -> val item = known.getJSONObject(key); item.opt("present") != false && item.opt("satisfies") != false && item.opt("passed") != false })
                 .put("missing", JSONArray(keys.filter { known.getJSONObject(it).opt("present") == false || known.getJSONObject(it).opt("satisfies") == false }))
                 .put("failed", JSONArray(keys.filter { known.getJSONObject(it).opt("passed") == false })).put("cached", true)
-                .put("project", JSONObject().put("notice", "此次复用环境档案；项目清单由当前指纹约束，必要时直接读项目文件"))
-                .put("notice", "未启动检测进程；各项verified_at是原验证时间，不是本次时间。明确verify仍会执行。")
+                .put("project", JSONObject().put("notice", "Cached archive checks reused under the current fingerprint; read project manifests directly if needed."))
+                .put("notice", "No probe was started. verified_at refers to the original check; explicit verify always executes.")
             return cacheResult.toString()
         }
         // Private client field. It is never accepted from the model/user tool arguments.
@@ -153,7 +167,7 @@ internal class CapabilityTool(private val context: Context, private val runtime:
         val output = runtime.runCommand(chat, listOf("/root/.venv/bin/python3", "-c", code), timeout, resultLimit = 1_900_000)
         return if (output.startsWith("exit=0\n")) {
             val result = JSONObject(output.substringAfter('\n'))
-            runCatching { profile.observeGuest(chat, request, result) }.onFailure { result.put("environment_archive_warning", "环境档案更新未完成，原检测结果仍有效；稍后检查档案，不因此重做已完成操作。") }
+            runCatching { profile.observeGuest(chat, request, result) }.onFailure { result.put("environment_archive_warning", "Archive update failed; original probe results remain available. Inspect the archive later without replaying completed operations.") }
             if (result.toString().length > 28_000) {
                 result.remove("project"); result.remove("operations"); result.remove("diagnostics")
                 result.put("truncated", "Large project/install diagnostics omitted; request specific requirements or inspect project files explicitly.")

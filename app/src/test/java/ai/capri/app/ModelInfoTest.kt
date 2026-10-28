@@ -54,6 +54,6 @@ class ModelInfoTest {
         assertEquals("info-1", saved.getJSONObject(1).getString("tool_call_id"))
         assertTrue(ModelInfoTool.guidance.contains("先调用 model_info"))
         assertTrue(ModelInfoTool.specification().toString().contains("current"))
-        assertFalse(ModelInfoTool.specification().toString().contains("switch"))
+        assertFalse(ModelInfoTool.specification().getJSONObject("function").getJSONObject("parameters").getJSONObject("properties").getJSONObject("action").getJSONArray("enum").toString().contains("switch"))
     }
 }

@@ -53,8 +53,8 @@ class PythonRuntime(private val context: Context, private val workspace: Workspa
                             while (!process.waitFor(100, TimeUnit.MILLISECONDS)) currentCoroutineContext().ensureActive()
                             true
                         }
-                        check(completed == true) { "会话准备超时（60秒），可重试" }
-                        check(process.exitValue() == 0) { "会话环境准备失败：" + output.readText().takeLast(1500) }
+                        check(completed == true) { "Session preparation timed out after 60 seconds; retry after checking the state." }
+                        check(process.exitValue() == 0) { "Session preparation failed: " + output.readText().takeLast(1500) }
                         marker.writeText("ubuntu-noble-v1")
                     } finally { stop(process) }
                 }
@@ -65,7 +65,7 @@ class PythonRuntime(private val context: Context, private val workspace: Workspa
     }
     suspend fun execute(id: String, code: String): String = withContext(Dispatchers.IO) {
         ensureSession(id)
-        require(code.length <= 128_000) { "脚本过大" }
+        require(code.length <= 128_000) { "Script exceeds 128000 characters." }
         val run = workspace.folder(id, "runs").resolve(java.util.UUID.randomUUID().toString()).apply { mkdirs() }
         val script = File(run, "main.py").apply { writeText(code) }
         val output = File(run, "output.txt")
@@ -74,12 +74,12 @@ class PythonRuntime(private val context: Context, private val workspace: Workspa
             val completed = withTimeoutOrNull(60_000) {
                 while (!process.waitFor(100, TimeUnit.MILLISECONDS)) {
                     kotlin.coroutines.coroutineContext.ensureActive()
-                    check(output.length() < 2_000_000) { "输出超过 2 MB，已停止" }
+                    check(output.length() < 2_000_000) { "Output exceeded 2 MB; execution stopped." }
                 }
                 true
             }
-            check(completed == true) { "执行超时（60秒），已停止" }
-            check(output.length() <= 2_000_000) { "输出超过 2 MB" }
+            check(completed == true) { "Execution timed out after 60 seconds and was stopped." }
+            check(output.length() <= 2_000_000) { "Output exceeds 2 MB." }
             "exit=${process.exitValue()}\n" + output.bufferedReader().use { reader ->
                 val buffer = CharArray(40_000)
                 val count = reader.read(buffer)
@@ -97,11 +97,11 @@ class PythonRuntime(private val context: Context, private val workspace: Workspa
             val completed = withTimeoutOrNull(timeout * 1000) {
                 while (!process.waitFor(100, TimeUnit.MILLISECONDS)) {
                     currentCoroutineContext().ensureActive()
-                    check(output.length() < 2_000_000) { "环境操作输出超过2MB" }
+                    check(output.length() < 2_000_000) { "Environment operation output exceeds 2 MB." }
                 }
                 true
             }
-            check(completed == true) { "环境操作超时（${timeout}秒），进程已停止；部分安装可能保留，请检查后重试" }
+            check(completed == true) { "Environment operation timed out after ${timeout} seconds and was stopped. Partial changes may remain; inspect before retrying." }
             "exit=${process.exitValue()}\n" + output.readText().takeLast(resultLimit)
         } finally { stop(process) }
     }

@@ -43,10 +43,10 @@ class TerminalContractTest {
             .first { it.getJSONObject("properties").getJSONObject("action").getJSONArray("enum").getString(0) == action }
 
         assertEquals(10000, schema("run").getJSONObject("properties").getJSONObject("wait_ms").getInt("maximum"))
-        assertEquals(20000, schema("read").getJSONObject("properties").getJSONObject("wait_ms").getInt("maximum"))
+        assertEquals(20000, TerminalContract.specification().getJSONObject("function").getJSONObject("parameters").getJSONObject("properties").getJSONObject("wait_ms").getInt("maximum"))
         assertTrue(schema("run").getJSONArray("required").toString().contains("command"))
         assertFalse(schema("read").getJSONObject("properties").has("command"))
-        assertTrue(schema("run").getJSONObject("properties").getJSONObject("terminal_id").has("pattern"))
+        assertTrue(TerminalContract.specification().getJSONObject("function").getJSONObject("parameters").getJSONObject("properties").getJSONObject("terminal_id").has("pattern"))
 
     }
 

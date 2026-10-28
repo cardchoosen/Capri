@@ -5,27 +5,33 @@ import org.json.JSONObject
 internal data class ToolActivity(val id: String, val label: String)
 
 internal fun toolLabel(name: String, args: JSONObject?): String = when (name) {
-    "model_info" -> "查看模型 / 芯片信息"
-    "web_search" -> "搜索网页"
-    "web_read" -> "读取网页正文"
-    "knowledge" -> "检索与管理知识"
-    "context_history", "conversation_history" -> "查阅会话历史"
-    "personal_memory" -> "回想共同经历"
-    "android" -> args?.optString("action")?.let { ai.capri.app.nativebridge.NativeCatalog.find(it)?.title } ?: "Android 原生工具"
+    "profile_search" -> "Search core profile"
+    "model_info" -> "View model"
+    "web_search" -> "Search web"
+    "web_read" -> "Read web page"
+    "knowledge" -> "Manage knowledge"
+    "context_history" -> "Read current chat history"
+    "conversation_history" -> "Read all chat histories"
+    "personal_memory" -> "Recall personal memories"
+    "android" -> args?.optString("action")?.let { ai.capri.app.nativebridge.NativeCatalog.find(it)?.title } ?: "Android tools"
     "terminal" -> when (args?.optString("action")) {
-        "open" -> "创建终端"; "list", "attach" -> "查看终端"; "run" -> "执行命令"; "read" -> "读取终端输出"
-        "input" -> "输入终端"; "cancel" -> "停止命令"; "close" -> "关闭终端"
-        "clear_history", "delete" -> "清理终端记录"; else -> "终端"
+        "open" -> "Open terminal"; "list", "attach" -> "Inspect terminals"; "run" -> "Run command"; "read" -> "Read terminal output"
+        "input" -> "Send terminal input"; "cancel" -> "Cancel command"; "close" -> "Close terminal"
+        "clear_history", "delete" -> "Clear terminal history"; else -> "Terminal"
     }
-    "browser" -> when (args?.optString("action")) { "open" -> "打开网页"; "observe" -> "读取网页"; "show" -> "切换网页"; "close" -> "关闭网页"; else -> "查看浏览器" }
+    "browser" -> when (args?.optString("action")) { "open" -> "Open web page"; "observe" -> "Observe web page"; "show" -> "Inspect web page"; "close" -> "Close web page"; else -> "Browser" }
     "python_env" -> when (args?.optString("action")) {
-        "install" -> "安装 Python 依赖"; "uninstall" -> "卸载 Python 依赖"; "list", "freeze" -> "查看 Python 依赖"
-        "check" -> "检查 Python 依赖"; else -> "诊断 Python 环境"
+        "install" -> "Install Python packages"; "uninstall" -> "Uninstall Python packages"; "list", "freeze" -> "List Python packages"
+        "check" -> "Check Python dependencies"; else -> "Inspect Python environment"
     }
-    "environment", "environment_check" -> when (args?.optString("action")) { "prepare" -> "准备任务环境"; "verify" -> "验证任务环境"; else -> "检查任务环境" }
-    "extensions" -> when (args?.optString("action")) { "install_skill" -> "安装技能"; "install_mcp" -> "安装 MCP"; "load_skill" -> "加载技能"; "activate" -> "连接扩展"; "deactivate" -> "断开扩展"; "read_resource" -> "读取技能资源"; else -> "查找扩展" }
-    "python_run" -> "运行 Python"; "list_files" -> "查看工作区"; "read_file" -> "读取文件"
-    "write_file" -> "写入文件"; "send_file" -> "发送附件"; else -> name
+    "environment", "environment_check" -> when (args?.optString("action")) {
+        "prepare" -> "Prepare environment"; "verify" -> "Verify environment"; "refresh" -> "Refresh environment checks"
+        "lookup" -> "Search environment facts"; "document" -> "Read environment archive"; "record" -> "Record environment observation"; else -> "Inspect environment"
+    }
+    "extensions" -> when (args?.optString("action")) { "install_skill" -> "Install Skill"; "install_mcp" -> "Install MCP"; "load_skill" -> "Load Skill"; "activate" -> "Connect MCP"; "deactivate" -> "Disconnect MCP"; "read_resource" -> "Read Skill resource"; else -> "Find extensions" }
+    "python_run" -> "Run short task"; "list_files" -> "List files"; "read_file" -> "Read file"
+    "search_files" -> "Search file contents"; "edit_file" -> "Edit file"
+    "write_file" -> "Write file"; "send_file" -> "Send attachment"; else -> name
 }
 internal fun toolRecordLabel(entry: Entry): String = toolLabel(entry.text.substringBefore('\n'),
     runCatching { JSONObject(entry.text.substringAfter('\n')) }.getOrNull())

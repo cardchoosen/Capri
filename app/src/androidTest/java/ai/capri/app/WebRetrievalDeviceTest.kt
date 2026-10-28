@@ -154,7 +154,7 @@ class WebRetrievalDeviceTest {
         while (editor != null && !editor.isEditable) editor = editor.parent
         val args = android.os.Bundle().apply { putCharSequence(android.view.accessibility.AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, "web_search") }
         assertTrue(editor!!.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_TEXT, args))
-        await { it == "搜索网页" }; await { it == "内置" }; click("详情")
+        await { it == "Search web" }; await { it == "内置" }; click("详情")
         await { it == "web_search" }; await { it.contains("query") && it.contains("count") }
         click("返回工具列表"); click("关闭")
     }
