@@ -22,6 +22,7 @@ internal object DebugBridge {
     private data class Request(val chat: String, val start: Int, val text: String, var end: Int? = null, var job: kotlinx.coroutines.Job? = null)
     private val requests = linkedMapOf<String, Request>()
     fun attach(model: CapriModel) { this.model = WeakReference(model) }
+    fun catalog(args: Bundle): DebugWebCatalog.Ticket = DebugWebCatalog.prepare(model.get() ?: error("not_ready: open Capri first"), args)
     fun attachment(args: Bundle): DebugWebAttachments.Ticket = DebugWebAttachments.prepare(
         model.get() ?: error("not_ready: open Capri first"), args)
     fun call(method: String, args: Bundle): JSONObject {

@@ -28,7 +28,7 @@ PROFILES = {
     'local': [],
     'retrieval': ['ai.capri.app.WebRetrievalDeviceTest'],
     'web-research': ['ai.capri.app.WebResearchDeviceTest'],
-    'tools': ['ai.capri.app.ToolsDeviceTest#toolsPanelUsesActualBuiltinsAndConnectedMcp', 'ai.capri.app.ToolLanguageDeviceTest'],
+    'tools': ['ai.capri.app.ToolsDeviceTest#toolsPanelUsesActualBuiltinsAndConnectedMcp', 'ai.capri.app.ToolLanguageDeviceTest', 'ai.capri.app.WebCatalogDeviceTest'],
     'knowledge': ['ai.capri.app.KnowledgeDeviceTest'],
     'extensions': ['ai.capri.app.ExtensionsDeviceTest', 'ai.capri.app.ToolsDeviceTest'],
     'real-mcp': ['ai.capri.app.RealMcpDeviceTest#remoteContext7Public', 'ai.capri.app.RealMcpDeviceTest#localOfficialTime'],

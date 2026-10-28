@@ -130,17 +130,19 @@ class PersistentTransportTest(unittest.TestCase):
     def test_read_can_reconnect_once_without_replaying_mutations(self):
         import io
         from unittest.mock import Mock
-        bridge = self.bridge()
-        old = Mock(); old.sendall.side_effect = BrokenPipeError('disconnected')
-        new = Mock(); bridge.connection = old
-        def connect():
-            bridge.connection = new
-            bridge.reader = io.BytesIO(b'{"revision":3}\n')
-            bridge.phone_token = 'new-token'
-        bridge._connect = Mock(side_effect=connect)
-        self.assertEqual(3, bridge.call('web_state', {})['revision'])
-        self.assertEqual(1, old.sendall.call_count)
-        self.assertEqual(1, new.sendall.call_count)
-        bridge.close()
+        for method in ('web_state', 'web_catalog'):
+            with self.subTest(method=method):
+                bridge = self.bridge()
+                old = Mock(); old.sendall.side_effect = BrokenPipeError('disconnected')
+                new = Mock(); bridge.connection = old
+                def connect():
+                    bridge.connection = new
+                    bridge.reader = io.BytesIO(b'{"revision":3}\n')
+                    bridge.phone_token = 'new-token'
+                bridge._connect = Mock(side_effect=connect)
+                self.assertEqual(3, bridge.call(method, {})['revision'])
+                self.assertEqual(1, old.sendall.call_count)
+                self.assertEqual(1, new.sendall.call_count)
+                bridge.close()
 
 if __name__ == '__main__': unittest.main()

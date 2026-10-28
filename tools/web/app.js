@@ -17,6 +17,7 @@ function controls() {
   $('uncertain').hidden = !pending || dispatching;
   $('send').disabled = !connected || dispatching || !!pending || !state || state.busy || state.deleting || state.preparing;
   $('create').disabled = !connected || dispatching || !!pending || !state || state.preparing;
+  $('catalog-open').disabled=!connected||!state;
   $('stop').hidden = !state?.busy; $('stop').disabled = !connected || dispatching;
 }
 function failure(message) { $('error').textContent = message; $('error').hidden = !message; }
@@ -145,22 +146,23 @@ function render(data,initial=false){
   const signature=JSON.stringify(data.sessions)+chat;
   const available=new Set(data.sessions.map(s=>s.chat_id));for(const id of views.keys())if(!available.has(id))views.delete(id);
   if(signature!==navSignature){
-    navSignature=signature;$('sessions').replaceChildren();
+    navSignature=signature;$('sessions').replaceChildren();$('pinned-sessions').replaceChildren();
     for(const s of data.sessions){
-      const row=document.createElement('div');row.className='session-row';row.dataset.chatId=s.chat_id;
+      const row=document.createElement('div');row.className='session-row'+(s.kind==='PERSONAL'?' personal-session':'');row.dataset.chatId=s.chat_id;
       const b=document.createElement('button');b.textContent=s.deleting?'正在删除…':(s.busy?'● ':'')+s.title;
       b.className=(s.chat_id===chat?'selected ':'')+(s.busy?'busy':'');b.disabled=!!s.deleting;b.onclick=()=>switchChat(s.chat_id);row.append(b);
+      if(s.kind==='PERSONAL'){b.setAttribute('aria-label',s.title+' · 默认会话');const badge=document.createElement('span');badge.className='personal-badge';badge.textContent='默认';row.append(badge);}
       if(s.kind==='TASK'){
         const remove=document.createElement('button');remove.className='session-delete';remove.textContent='×';
         remove.title=s.busy?'请先停止当前任务':'删除对话';remove.setAttribute('aria-label','删除会话 '+s.title);remove.disabled=!!s.busy||!!s.deleting||dispatching;
         remove.onclick=()=>{deleteTarget=s;$('delete-description').textContent=`将删除「${s.title}」的消息、工作区和会话环境，并关闭相关终端。全局配置保留。`;$('delete-dialog').showModal();};row.append(remove);
       }
-      $('sessions').append(row);
+      $(s.kind==='PERSONAL'?'pinned-sessions':'sessions').append(row);
     }
   }
   if(data.deletion_error)failure(data.deletion_error);
   renderMessages(data,initial);const progress=$('progress'),label=data.busy?(data.active_tool||data.notice||'思考中'):'';if(progress.dataset.label!==label){progress.dataset.label=label;progress.replaceChildren();if(data.busy){const spin=document.createElement('span');spin.className='spinner';progress.append(spin,document.createTextNode(label));}}
-  controls();
+  controls();if($('catalog-dialog').open&&catalogScope!==chat+'|'+epoch){catalogId='';loadCatalog();}
 }
 async function refresh(){
   if(polling){refreshAgain=true;return;}clearTimeout(pollTimer);polling=true;
@@ -195,3 +197,48 @@ $('delete-confirm').onclick=async()=>{
   catch(error){failure(error.message);}
   finally{dispatching=false;controls();requestRefresh();}
 };
+
+// Read-only catalog: fetch on demand, never activate services or load/execute Skill scripts.
+let catalogCategory='tools',catalogId='',catalogNext=null,catalogSequence=0,catalogSearchTimer=null,catalogScope='';
+function catalogText(tag,text){const node=document.createElement(tag);node.textContent=String(text??'');return node;}
+function catalogMetadata(item){
+  if(catalogCategory==='tools')return item.source;
+  if(catalogCategory==='mcp')return `${item.type} · ${item.enabled?'已启用':'已停用'} · ${item.active?'当前会话已选择':'当前会话未选择'} · ${item.state}`;
+  return `${item.builtin?'内置':'用户安装'} · ${item.enabled?'已启用':'已停用'}`;
+}
+async function loadCatalog(append=false){
+  if(!$('catalog-dialog').open)return;
+  const seq=++catalogSequence,requestedChat=chat,requestedEpoch=epoch;catalogScope=chat+'|'+epoch;
+  const args={chat_id:chat,epoch,category:catalogCategory,query:$('catalog-query').value.trim(),offset:append?(catalogNext||0):0};
+  if(catalogId)args.id=catalogId;
+  $('catalog-status').textContent='正在读取手机…';$('catalog-more').hidden=true;
+  try{
+    const data=await api('web_catalog',args);
+    if(seq!==catalogSequence||!$('catalog-dialog').open||chat!==requestedChat||epoch!==requestedEpoch)return;
+    const content=$('catalog-content');if(!append)content.replaceChildren();
+    $('catalog-back').hidden=!catalogId;
+    if(data.item){
+      const item=data.item;
+      if(!append){content.append(catalogText('h4',item.name),catalogText('small',`${item.id} · ${catalogMetadata(item)}`),catalogText('p',item.description));}
+      if(catalogCategory==='tools'){const pre=document.createElement('pre');pre.textContent=JSON.stringify(item.parameters,null,2);content.append(pre);}
+      if(catalogCategory==='skills'){let pre=content.querySelector('pre');if(!pre){pre=document.createElement('pre');pre.className='skill-source';content.append(pre);}pre.append(document.createTextNode(item.content));}
+      catalogNext=data.item.next_offset??null;$('catalog-status').textContent=catalogCategory==='skills'?'SKILL.md · 仅查看，不执行脚本':'详情 · 仅查看';
+    }else{
+      for(const item of data.items){const row=document.createElement('article');row.className='catalog-item';row.append(catalogText('strong',item.name),catalogText('small',`${item.id} · ${catalogMetadata(item)}`),catalogText('p',item.description));
+        const detail=catalogText('button',catalogCategory==='skills'?'查看 Skill':'详情');detail.onclick=()=>{catalogId=item.id;loadCatalog();};row.append(detail);content.append(row);}
+      catalogNext=data.next_offset??null;$('catalog-status').textContent=data.total?`${data.total} 项`:'没有匹配内容';
+    }
+    $('catalog-more').hidden=catalogNext===null;
+  }catch(error){if(seq===catalogSequence){$('catalog-status').textContent=error.message;$('catalog-back').hidden=!catalogId;}}
+}
+$('catalog-open').onclick=()=>{catalogId='';$('catalog-dialog').showModal();loadCatalog();};
+$('catalog-close').onclick=()=>$('catalog-dialog').close();
+$('catalog-dialog').addEventListener('close',()=>{catalogSequence++;clearTimeout(catalogSearchTimer);});
+$('catalog-tabs').querySelectorAll('button').forEach(button=>button.onclick=()=>{
+  catalogCategory=button.dataset.category;catalogId='';catalogNext=null;$('catalog-query').value='';
+  $('catalog-tabs').querySelectorAll('button').forEach(tab=>tab.setAttribute('aria-selected',String(tab===button)));loadCatalog();
+});
+$('catalog-query').oninput=()=>{catalogId='';clearTimeout(catalogSearchTimer);catalogSearchTimer=setTimeout(()=>loadCatalog(),250);};
+$('catalog-refresh').onclick=()=>loadCatalog();
+$('catalog-back').onclick=()=>{catalogId='';loadCatalog();};
+$('catalog-more').onclick=()=>loadCatalog(true);

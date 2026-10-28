@@ -157,7 +157,8 @@ class MainActivity : ComponentActivity() {
             Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) { Mark(Modifier.size(40.dp)); Text("CAPRI", letterSpacing = 5.sp, fontWeight = FontWeight.Bold) }
             val personal = vm.personalSession()
             NavigationDrawerItem(shape = RoundedCornerShape(2.dp),
-                label = { Column { Text("Capri"); Text("一直在这里", fontSize = 11.sp, color = Muted) } },
+                label = { Column { Text("Capri", color = Red, fontWeight = FontWeight.SemiBold); Text("默认会话 · 一直在这里", fontSize = 11.sp, color = Red.copy(alpha = .75f)) } },
+                colors = NavigationDrawerItemDefaults.colors(selectedContainerColor = Red.copy(alpha = .14f), unselectedContainerColor = Red.copy(alpha = .05f)),
                 selected = personal.id == session.id,
                 onClick = { vm.select(personal.id); scope.launch { drawer.close() } }, modifier = Modifier.padding(horizontal = 12.dp))
             Button(enabled = !vm.migrating && !vm.resettingMemory && !vm.memoryResetRequired, onClick = { vm.create(); scope.launch { drawer.close() } }, modifier = Modifier.padding(horizontal = 20.dp).fillMaxWidth()) { Icon(Icons.Outlined.Add, null); Text("新建任务对话", Modifier.padding(8.dp)) }

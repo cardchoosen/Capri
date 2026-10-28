@@ -37,7 +37,7 @@ internal object DebugWebBridge {
                 .put("deleting", actualChat in vm.deletingChats).put("deletion_error", vm.deletionError)
                 .put("notice", vm.notices[actualChat].orEmpty()).put("active_tool", vm.activeTools[actualChat]?.label.orEmpty())
                 .put("memory_revision", vm.memoryRevision).put("preparing", vm.migrating).put("total", session.messages.size).put("before", index)
-                .put("entries", JSONArray(entries.reversed())).put("sessions", JSONArray(vm.sessions.map {
+                .put("entries", JSONArray(entries.reversed())).put("sessions", JSONArray(vm.sessions.sortedBy { if (it.kind == SessionKind.PERSONAL) 0 else 1 }.map {
                     JSONObject().put("chat_id", it.id).put("title", it.title).put("kind", it.kind.name)
                         .put("busy", vm.jobs.containsKey(it.id)).put("deleting", it.id in vm.deletingChats)
                 }))

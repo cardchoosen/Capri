@@ -24,7 +24,7 @@ internal object DebugSocketBridge {
     private val main = Handler(Looper.getMainLooper())
     private val workers = ThreadPoolExecutor(2, 2, 20, TimeUnit.SECONDS, ArrayBlockingQueue(2),
         { task -> Thread(task, "CapriWebConnection").apply { isDaemon = true } })
-    private val methods = setOf("web_state", "web_create", "web_stop", "web_delete", "web_select", "web_attachment", "send", "status")
+    private val methods = setOf("web_state", "web_create", "web_stop", "web_delete", "web_select", "web_attachment", "web_catalog", "send", "status")
 
     @Synchronized fun connectionInfo(): JSONObject {
         if (listener == null) {
@@ -71,10 +71,14 @@ internal object DebugSocketBridge {
                     val task = FutureTask {
                         try {
                             val bundle = Bundle().apply {
-                                for (key in listOf("text", "request_id", "chat_id", "epoch")) if (values.has(key)) putString(key, values.getString(key))
+                                for (key in listOf("text", "request_id", "chat_id", "epoch", "category", "query", "id")) if (values.has(key)) putString(key, values.getString(key))
                                 for (key in listOf("offset", "before", "revision", "entry")) if (values.has(key)) putInt(key, values.getInt(key))
                             }
-                            if (method == "web_attachment") DebugBridge.attachment(bundle) else DebugBridge.call(method, bundle)
+                            when (method) {
+                                "web_attachment" -> DebugBridge.attachment(bundle)
+                                "web_catalog" -> DebugBridge.catalog(bundle)
+                                else -> DebugBridge.call(method, bundle)
+                            }
                         } catch (error: Exception) { JSONObject().put("error", error.message ?: "request failed") }
                     }
                     main.post(task)
@@ -85,6 +89,7 @@ internal object DebugSocketBridge {
                     }
                     when (dispatched) {
                         is DebugWebAttachments.Ticket -> dispatched.read()
+                        is DebugWebCatalog.Ticket -> dispatched.read()
                         is JSONObject -> dispatched
                         else -> JSONObject().put("error", "invalid response")
                     }

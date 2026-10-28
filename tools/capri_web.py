@@ -18,7 +18,7 @@ from urllib.parse import quote
 
 DEFAULT_PORT = 47863
 WEB = Path(__file__).with_name('web')
-METHODS = {'web_state', 'web_create', 'web_stop', 'web_delete', 'web_select', 'web_attachment', 'send', 'status'}
+METHODS = {'web_state', 'web_create', 'web_stop', 'web_delete', 'web_select', 'web_attachment', 'web_catalog', 'send', 'status'}
 
 
 class Bridge:
@@ -92,7 +92,7 @@ class Bridge:
                 except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
                     self._disconnect()
                     # Re-reading is safe. Mutations are NEVER replayed after transport failure.
-                    if method not in {'web_state', 'web_attachment', 'status'} or attempt:
+                    if method not in {'web_state', 'web_attachment', 'web_catalog', 'status'} or attempt:
                         raise RuntimeError('连接中断；请查看会话，未确认操作不会自动重发。') from None
 
     def close(self):
