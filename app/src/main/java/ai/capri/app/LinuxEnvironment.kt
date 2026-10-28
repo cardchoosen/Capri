@@ -20,6 +20,7 @@ internal data class LinuxState(val phase: String = "pending", val message: Strin
 internal class LinuxEnvironment(private val context: Context) {
     private class Shared {
         val install = Mutex()
+        val retired = ConcurrentHashMap.newKeySet<String>()
         val sessions = ConcurrentHashMap<String, Mutex>()
         val state = MutableStateFlow(LinuxState())
         val chats = MutableStateFlow<Map<String, LinuxState>>(emptyMap())
@@ -34,9 +35,13 @@ internal class LinuxEnvironment(private val context: Context) {
         File(root, "usr/bin/python3").exists() && File(root, "var/lib/dpkg/status").isFile
     fun publish(phase: String, message: String, error: String = "") { sharedState.state.value = LinuxState(phase, message, error) }
     fun chatState(chat: String, value: LinuxState) = synchronized(sharedState) {
-        sharedState.chats.value = sharedState.chats.value + (chat to value)
+        if (chat !in sharedState.retired) sharedState.chats.value = sharedState.chats.value + (chat to value)
     }
-    suspend fun <T> sessionLock(chat: String, block: suspend () -> T): T = sharedState.sessions.getOrPut(chat) { Mutex() }.withLock { block() }
+    fun retireChat(chat: String) = synchronized(sharedState) { sharedState.retired.add(chat); sharedState.chats.value = sharedState.chats.value - chat; Unit }
+    fun restoreChat(chat: String) { sharedState.retired.remove(chat) }
+    suspend fun <T> sessionLock(chat: String, block: suspend () -> T): T = sharedState.sessions.getOrPut(chat) { Mutex() }.withLock {
+        check(chat !in sharedState.retired) { "会话已删除" }; block()
+    }
     suspend fun ensureBase() = withContext(Dispatchers.IO) {
         sharedState.install.withLock {
             if (ready) { publish("ready", "执行环境已就绪"); return@withLock }

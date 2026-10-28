@@ -311,6 +311,9 @@ internal class ExtensionStore(private val context: Context) {
         }
     }
     fun setActive(chat: String, id: String, active: Boolean) { prefs.edit().putBoolean("active:$chat:$id", active).apply() }
+    fun clearChat(chat: String) {
+        val edit = prefs.edit(); prefs.all.keys.filter { it.startsWith("active:$chat:") }.forEach { edit.remove(it) }; edit.apply()
+    }
     fun active(chat: String, id: String) = prefs.getBoolean("active:$chat:$id", false)
     private fun key(): SecretKey {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }

@@ -16,16 +16,20 @@ import java.util.UUID
 import java.util.concurrent.FutureTask
 import java.util.concurrent.TimeUnit
 
-/** ADB shell / app UID only; compiled exclusively into the debug APK. No network listener. */
+/** ADB shell / app UID only; compiled exclusively into the debug APK. No TCP/LAN listener; optional shell-only Unix socket. */
 internal object DebugBridge {
     private var model = WeakReference<CapriModel>(null)
     private data class Request(val chat: String, val start: Int, val text: String, var end: Int? = null, var job: kotlinx.coroutines.Job? = null)
     private val requests = linkedMapOf<String, Request>()
     fun attach(model: CapriModel) { this.model = WeakReference(model) }
+    fun attachment(args: Bundle): DebugWebAttachments.Ticket = DebugWebAttachments.prepare(
+        model.get() ?: error("not_ready: open Capri first"), args)
     fun call(method: String, args: Bundle): JSONObject {
         check(Looper.myLooper() == Looper.getMainLooper())
         val vm = model.get() ?: return JSONObject().put("error", "not_ready: open Capri first")
         return when (method) {
+            "web_connect" -> DebugSocketBridge.connectionInfo()
+            "web_state", "web_create", "web_stop", "web_delete", "web_select" -> DebugWebBridge.call(vm, method, args)
             "sessions" -> JSONObject().put("sessions", JSONArray().apply {
                 vm.sessions.forEach { put(JSONObject().put("chat_id", it.id).put("title", it.title).put("busy", vm.jobs.containsKey(it.id))) }
             })
@@ -43,6 +47,7 @@ internal object DebugBridge {
             "send" -> {
                 val id = args.getString("request_id").orEmpty()
                 require(runCatching { UUID.fromString(id).toString() == id }.getOrDefault(false)) { "request_id must be a UUID" }
+                if (args.containsKey("epoch")) require(args.getString("epoch") == DebugWebBridge.epoch) { "app restarted; refresh history before submitting" }
                 val text = args.getString("text").orEmpty()
                 require(text.isNotBlank() && text.toByteArray().size <= 32000) { "text must be 1–32000 bytes" }
                 val previous = requests[id]
@@ -106,8 +111,8 @@ class DebugProvider : ContentProvider() {
             val decoded = extras?.getString("payload")?.let { encoded ->
                 val json = DebugPayload.decode(encoded)
                 Bundle().apply {
-                    for (key in listOf("text", "request_id", "chat_id")) if (json.has(key)) putString(key, json.getString(key))
-                    if (json.has("offset")) putInt("offset", json.getInt("offset"))
+                    for (key in listOf("text", "request_id", "chat_id", "epoch")) if (json.has(key)) putString(key, json.getString(key))
+                    for (key in listOf("offset", "before", "revision")) if (json.has(key)) putInt(key, json.getInt(key))
                 }
             } ?: extras ?: Bundle()
             DebugBridge.call(method, decoded)

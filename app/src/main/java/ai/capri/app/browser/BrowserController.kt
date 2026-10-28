@@ -34,6 +34,7 @@ internal class BrowserController(private val context: Context, workspace: Worksp
     private val store = BrowserStore(workspace)
     private val receipts = BrowserOperations(workspace)
     private val actionScript by lazy { context.assets.open("browser/actions.js").bufferedReader().use { it.readText() } }
+    private val retiredChats = mutableSetOf<String>()
     private val pages = linkedMapOf<String, MutableList<Page>>() // Main thread only.
     private val operation = Mutex()
     private val loadLocks = mutableMapOf<String, Mutex>()
@@ -82,16 +83,19 @@ internal class BrowserController(private val context: Context, workspace: Worksp
         scope.launch { runCatching { persist(chat) }.onFailure { changed("标签保存未完成") } }
     }
     private suspend fun load(chat: String): MutableList<Page> {
+        check(chat !in retiredChats) { "会话已删除" }
         require(chat.matches(Regex("[a-zA-Z0-9-]+")))
         return loadLocks.getOrPut(chat) { Mutex() }.withLock {
-            pages[chat] ?: withContext(Dispatchers.IO) { store.load(chat) }.map { Page(chat, it) }.toMutableList().also { pages[chat] = it; changed() }
+            pages[chat] ?: withContext(Dispatchers.IO) { store.load(chat) }.map { Page(chat, it) }.toMutableList().also { check(chat !in retiredChats) { "会话已删除" }; pages[chat] = it; changed() }
         }
     }
 
     private suspend fun persist(chat: String) {
+        if (chat in retiredChats) return
         val lock = saveLocks.getOrPut(chat) { Mutex() }
         lock.lock()
         try {
+            if (chat in retiredChats) return
             val records = pages[chat].orEmpty().map { it.record.copy() }
             withContext(Dispatchers.IO) { store.save(chat, records) }
         } finally { lock.unlock() }
@@ -471,6 +475,19 @@ internal class BrowserController(private val context: Context, workspace: Worksp
         } finally {
             if(begun && !receiptFinished) withContext(NonCancellable+Dispatchers.IO) { runCatching { receipts.finish(p.chat,id,state) } }
         }
+    }
+    fun deleteProfile(chat: String): Boolean {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)) return true
+        return try { androidx.webkit.ProfileStore.getInstance().deleteProfile("capri_chat_$chat"); true }
+        catch (_: IllegalStateException) { false } // Loaded profiles must wait for the next app process.
+    }
+    fun restoreChat(chat: String) { retiredChats.remove(chat) }
+    suspend fun deleteChat(chat: String) {
+        retiredChats.add(chat)
+        loadLocks.getOrPut(chat) { Mutex() }.withLock { pages.remove(chat).orEmpty().forEach(::destroy) }
+        files.deleteChat(chat)
+        saveLocks.getOrPut(chat) { Mutex() }.withLock { Unit }
+        changed("")
     }
     fun dispose() { disposed = true; files.dispose(); scope.cancel(); pages.values.flatten().forEach(::destroy) }
 }

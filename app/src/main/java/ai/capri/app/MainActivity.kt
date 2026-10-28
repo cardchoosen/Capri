@@ -76,6 +76,7 @@ class MainActivity : ComponentActivity() {
 @Composable private fun Capri(vm: CapriModel) {
     val update = vm.updates.collectAsState().value
     val session = vm.current()
+    val drawerTasks = remember(update) { vm.sessions.filter { it.kind == SessionKind.TASK }.map { it.copy(messages = mutableListOf()) } }
     val entries = remember(session.id, update) { session.messages.filter(ToolPresentation::visible) }
     val chatPositions = remember(vm.memoryRevision) { mutableMapOf<String, ChatScrollState>() }
     val chatPosition = chatPositions.getOrPut(session.id) { ChatScrollState(entries.size) }
@@ -83,7 +84,7 @@ class MainActivity : ComponentActivity() {
     val notice = vm.notices[session.id]
     val keyboard = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
-    var tab by remember { mutableIntStateOf(0) }
+    val tab = vm.activeTab
     var sshPanel by remember { mutableStateOf(false) }
     var gitAccounts by remember { mutableStateOf(false) }
     var settings by remember { mutableStateOf(false) }
@@ -103,6 +104,8 @@ class MainActivity : ComponentActivity() {
     }
     var input by remember(session.id, vm.memoryRevision) { mutableStateOf("") }
     var banner by remember { mutableStateOf("") }
+    var deleteTarget by remember { mutableStateOf<Session?>(null) }
+    var deleteDialogError by remember { mutableStateOf("") }
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -110,6 +113,8 @@ class MainActivity : ComponentActivity() {
         val id = vm.selected
         scope.launch(kotlinx.coroutines.Dispatchers.IO) {
             val outcome = runCatching {
+                val lease = RuntimeGate.beginFiles(context, id, "文件导入")
+                try {
                 uris.forEach { uri ->
                     val name = context.contentResolver.query(uri, null, null, null, null)?.use { c -> if (c.moveToFirst()) c.getString(c.getColumnIndexOrThrow(android.provider.OpenableColumns.DISPLAY_NAME)) else null } ?: "import-${System.currentTimeMillis()}"
                     val safe = name.replace(Regex("[^\\p{L}\\p{N}._ -]"), "_").take(120).ifBlank { "imported" }
@@ -126,12 +131,25 @@ class MainActivity : ComponentActivity() {
                     java.nio.file.Files.move(staged.toPath(), file.toPath())
                     } finally { staged.delete() }
                 }
+                } finally { RuntimeGate.endFiles(lease) }
             }
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
                 banner = outcome.fold({ "已导入 ${uris.size} 个文件" }, { it.message ?: "导入失败" })
                 vm.refresh()
             }
         }
+    }
+    deleteTarget?.let { target ->
+        AlertDialog(onDismissRequest = { deleteTarget = null }, title = { Text("删除对话？") },
+            text = { Column {
+                Text("将删除「${target.title}」的消息、工作区和会话环境，并关闭相关终端。全局配置保留。")
+                if (deleteDialogError.isNotBlank()) Text(deleteDialogError, color = Red)
+            } },
+            confirmButton = { TextButton(onClick = {
+                runCatching { vm.deleteSession(target.id) }.onSuccess { deleteTarget = null }
+                    .onFailure { deleteDialogError = it.message ?: "删除未完成" }
+            }) { Text("删除", color = Red) } },
+            dismissButton = { TextButton(onClick = { deleteTarget = null }) { Text("取消") } })
     }
     ModalNavigationDrawer(drawerState = drawer, drawerContent = {
         ModalDrawerSheet(drawerContainerColor = Ink, drawerShape = RoundedCornerShape(0.dp)) {
@@ -144,8 +162,16 @@ class MainActivity : ComponentActivity() {
                 onClick = { vm.select(personal.id); scope.launch { drawer.close() } }, modifier = Modifier.padding(horizontal = 12.dp))
             Button(enabled = !vm.migrating && !vm.resettingMemory && !vm.memoryResetRequired, onClick = { vm.create(); scope.launch { drawer.close() } }, modifier = Modifier.padding(horizontal = 20.dp).fillMaxWidth()) { Icon(Icons.Outlined.Add, null); Text("新建任务对话", Modifier.padding(8.dp)) }
             Text("你的任务空间", color = Muted, modifier = Modifier.padding(16.dp), fontSize = 12.sp)
-            LazyColumn { items(vm.sessions.filter { it.kind == SessionKind.TASK }, key = { it.id }) { item ->
-                NavigationDrawerItem(shape = RoundedCornerShape(2.dp), label = { Text(item.title, maxLines = 1) }, selected = item.id == session.id, onClick = { vm.select(item.id); scope.launch { drawer.close() } }, modifier = Modifier.padding(horizontal = 12.dp))
+            if (vm.deletionError.isNotBlank()) Text(vm.deletionError, color = Red, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 16.dp))
+            LazyColumn { items(drawerTasks, key = { it.id }) { item ->
+                NavigationDrawerItem(shape = RoundedCornerShape(2.dp),
+                    label = { Text(if (item.id in vm.deletingChats) "正在删除…" else item.title, maxLines = 1) },
+                    selected = item.id == session.id,
+                    onClick = { if (item.id !in vm.deletingChats) { vm.select(item.id); scope.launch { drawer.close() } } },
+                    badge = { IconButton(enabled = item.id !in vm.deletingChats && !vm.jobs.containsKey(item.id),
+                        onClick = { deleteDialogError = ""; deleteTarget = item }, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Outlined.DeleteOutline, "删除会话 ${item.title}", tint = Muted, modifier = Modifier.size(18.dp))
+                    } }, modifier = Modifier.padding(horizontal = 12.dp))
             } }
         }
     }) {
@@ -167,7 +193,7 @@ class MainActivity : ComponentActivity() {
                 HorizontalDivider(color = Line)
                 Row(Modifier.fillMaxWidth().height(48.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
                     listOf("对话" to Icons.Outlined.ChatBubbleOutline, "文件" to Icons.Outlined.FolderOpen, "运行" to Icons.Outlined.Terminal).forEachIndexed { index, pair ->
-                        TextButton(onClick = { tab = index }, colors = ButtonDefaults.textButtonColors(contentColor = if (tab == index) Green else Muted)) { Icon(pair.second, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text(pair.first, fontSize = 12.sp) }
+                        TextButton(onClick = { vm.activeTab = index }, colors = ButtonDefaults.textButtonColors(contentColor = if (tab == index) Green else Muted)) { Icon(pair.second, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text(pair.first, fontSize = 12.sp) }
                     }
                 }
             }
@@ -216,7 +242,7 @@ class MainActivity : ComponentActivity() {
                         LazyColumn(contentPadding = PaddingValues(16.dp)) { items(files) { file ->
                             Row(Modifier.fillMaxWidth().clickable {
                                 vm.previews.openFile(session.id, file.relativeTo(vm.store.workspace.folder(session.id, "workspace")).path)
-                                tab = 0; focusManager.clearFocus(); keyboard?.hide()
+                                vm.activeTab = 0; focusManager.clearFocus(); keyboard?.hide()
                             }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Outlined.Description, null, tint = Green)
                                 Column(Modifier.weight(1f).padding(horizontal = 14.dp)) { Text(file.relativeTo(vm.store.workspace.folder(session.id, "workspace")).path); Text("${file.length()} bytes", fontSize = 11.sp, color = Muted) }
@@ -234,7 +260,7 @@ class MainActivity : ComponentActivity() {
                             Text("执行环境", fontSize = 22.sp); Spacer(Modifier.height(12.dp))
                             OutlinedButton(onClick = { nativeCapabilities = true }) { Icon(Icons.Outlined.PhonelinkSetup, null, Modifier.size(16.dp)); Spacer(Modifier.width(8.dp)); Text("Android 原生能力") }
                             OutlinedButton(onClick = { terminalPanel = true }) { Icon(Icons.Outlined.Terminal, null, Modifier.size(16.dp)); Spacer(Modifier.width(8.dp)); Text("持续终端") }
-                            OutlinedButton(onClick = { vm.previews.openBrowserHome(session.id); tab = 0; focusManager.clearFocus(); keyboard?.hide() }) { Text("浏览器 · 当前会话") }
+                            OutlinedButton(onClick = { vm.previews.openBrowserHome(session.id); vm.activeTab = 0; focusManager.clearFocus(); keyboard?.hide() }) { Text("浏览器 · 当前会话") }
                             OutlinedButton(onClick = { sshPanel = true }, enabled = vm.runtime.ready) { Text("SSH · 全局") }
                             OutlinedButton(onClick = { gitAccounts = true }) { Text("Git 账号 · 全局") }
                             Text("设备、网络、Wi-Fi、定位、应用与系统操作统一由 android 工具调用。", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(vertical = 12.dp))

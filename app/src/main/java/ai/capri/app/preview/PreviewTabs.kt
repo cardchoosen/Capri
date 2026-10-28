@@ -54,6 +54,7 @@ internal class PreviewTabs {
             changed()
         }
     }
+    fun deleteChat(chat: String) { sessions.remove(chat); changed() }
     fun position(chat: String, id: String) = session(chat).positions[id] ?: 0
     fun rememberPosition(chat: String, id: String, offset: Int) { session(chat).positions[id] = offset.coerceAtLeast(0) }
 }

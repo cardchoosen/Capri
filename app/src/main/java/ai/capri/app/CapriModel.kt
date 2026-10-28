@@ -5,6 +5,12 @@ import android.util.Log
 import java.io.File
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.toMutableStateList
+import androidx.compose.runtime.mutableStateListOf
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -20,6 +26,11 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
     companion object { const val MAX_MODEL_CALLS = 50 }
     internal val gitAccounts = ai.capri.app.git.GitAccounts(app)
     val store = Store(app)
+    private val sessionDeletion = SessionDeletion(app.filesDir)
+    private val pendingDeletions = sessionDeletion.pending()
+    internal val deletingChats = mutableStateListOf<String>()
+    var deletionError by mutableStateOf("")
+        private set
     internal val knowledge = ai.capri.app.knowledge.KnowledgeStore(File(app.filesDir, "knowledge"), store.workspace)
     internal val contextHistory = ai.capri.app.knowledge.ContextHistory(File(app.filesDir, "context-history"))
     private val knowledgeTool = ai.capri.app.knowledge.KnowledgeTool(knowledge)
@@ -41,9 +52,17 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
     internal val pythonEnvironment = ai.capri.app.pythonenv.PythonEnvironmentTool(terminals)
     internal val extensions = ai.capri.app.extensions.ExtensionManager(app, runtime, store.workspace)
     val androidTools = ai.capri.app.nativebridge.AndroidTool(app)
-    val sessions = run { SharedMemoryReset.resume(app, store); store.load() }
+    val sessions = run {
+        SharedMemoryReset.resume(app, store)
+        store.load().also { list ->
+            val protected = list.filter { it.kind == SessionKind.PERSONAL }.map { it.id }.toSet()
+            list.removeAll { it.id in pendingDeletions && it.id !in protected }
+            (pendingDeletions - protected).forEach { runtime.environment.retireChat(it) }
+        }
+    }.toMutableStateList()
     init { store.save(sessions) }
-    var selected = store.selected(sessions)
+    var selected by mutableStateOf(store.selected(sessions))
+    internal var activeTab by mutableIntStateOf(0)
     internal val previews = ai.capri.app.preview.PreviewTabs()
     internal val browser = ai.capri.app.browser.BrowserController(app, store.workspace) { selected }.apply {
         pagesChanged = { chat, pages -> previews.syncBrowser(chat, pages.map { it.id to it.title }) }
@@ -72,6 +91,12 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
         private set
     private var migrationJob: Job? = null
     init {
+        if (pendingDeletions.isNotEmpty()) viewModelScope.launch {
+            for (chat in pendingDeletions) if (sessions.none { it.id == chat }) {
+                try { withContext(Dispatchers.IO) { cleanupDeletedSession(chat) } }
+                catch (_: Exception) { deletionError = "已删除的会话仍有文件待清理，下次启动会重试"; refresh() }
+            }
+        }
         viewModelScope.launch { runtime.environment.state.collect { refresh() } }
         viewModelScope.launch { runtime.environment.chats.collect { refresh() } }
         if (migrating) startMigration() else prepareSession(selected)
@@ -101,6 +126,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
             android.content.Intent(getApplication(), LinuxSetupService::class.java).putExtra("chat", chat).putExtra("base_only", baseOnly))
     }
     internal fun prepareSession(chat: String) {
+        if (chat in deletingChats || sessions.none { it.id == chat }) return
         if (migrating) { startMigration(); return }
         runtime.environment.chatState(chat, LinuxState("preparing", "正在准备会话环境"))
         try { startPreparationService(chat) }
@@ -126,7 +152,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
         }
     }
     internal fun maintainEnvironment(chat: String, action: EnvironmentMaintenance.Action) {
-        if (runtimeBusy || migrating) return
+        if (runtimeBusy || migrating || deletingChats.isNotEmpty()) return
         if (jobs.isNotEmpty()) { runtimeResult = "请等待所有会话任务结束后再维护环境"; refresh(); return }
         runtimeBusy = true; runtimeResult = "正在${action.label}…"; refresh()
         viewModelScope.launch {
@@ -145,10 +171,58 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
         if (migrating || runtimeBusy || resettingMemory || memoryResetRequired) return
         Session().also { sessions.add(0, it); selected = it.id }; browser.selectionChanged(selected); persist(); prepareSession(selected)
     }
+    private suspend fun cleanupDeletedSession(chat: String) {
+        val profileRemoved = withContext(Dispatchers.Main) { browser.deleteProfile(chat) }
+        withContext(Dispatchers.IO) {
+            sessionDeletion.cleanup(chat)
+            knowledge.deleteChat(chat)
+            store.models.forgetChat(chat)
+            if (profileRemoved) sessionDeletion.finish(chat)
+        }
+    }
+    internal fun deleteSession(chat: String): Boolean {
+        val target = sessions.firstOrNull { it.id == chat } ?: return true
+        require(target.kind == SessionKind.TASK) { "默认 Capri 会话不能删除" }
+        check(!jobs.containsKey(chat)) { "请先停止当前任务，再删除会话" }
+        check(!migrating && !runtimeBusy && !resettingMemory && !memoryResetRequired) { "环境维护中，请稍后删除" }
+        if (chat in deletingChats) return true
+        deletingChats.add(chat)
+        deletionError = ""; refresh()
+        viewModelScope.launch {
+            var committed = false
+            try {
+                runtime.environment.sessionLock(chat) {
+                    withContext(Dispatchers.IO) { sessionDeletion.validate(chat); terminals.deleteChat(chat) }
+                    extensions.deleteChat(chat)
+                    browser.deleteChat(chat)
+                    RuntimeGate.beginChatDeletion(getApplication(), chat)
+                    runtime.environment.retireChat(chat)
+                    withContext(NonCancellable) {
+                        withContext(Dispatchers.IO) { sessionDeletion.begin(chat) }
+                        // All session-index commits stay on Main, just like persist(): no stale IO snapshot can overwrite a newer chat.
+                        try { store.save(sessions.filterNot { it.id == chat }) }
+                        catch (error: Exception) { sessionDeletion.finish(chat); throw error }
+                        committed = true
+                        sessions.removeAll { it.id == chat }
+                        if (selected == chat) { selected = personalSession().id; store.select(selected); browser.selectionChanged(selected) }
+                        previews.deleteChat(chat); notices.remove(chat); activeTools.remove(chat)
+                        refresh()
+                        withContext(Dispatchers.IO) { cleanupDeletedSession(chat) }
+                    }
+                }
+            } catch (error: Exception) {
+                if (!committed) {
+                    RuntimeGate.restoreChat(getApplication(), chat); runtime.environment.restoreChat(chat); browser.restoreChat(chat)
+                    deletionError = "删除未完成：${error.message.orEmpty().take(180)}"
+                } else deletionError = "会话已删除，部分文件清理未完成，下次启动会重试"
+            } finally { deletingChats.remove(chat); refresh() }
+        }
+        return true
+    }
     fun select(id: String) { if (sessions.none { it.id == id }) return; selected = id; store.select(id); browser.selectionChanged(id); if (!runtime.environment.chats.value.containsKey(id)) prepareSession(id); refresh() }
     fun persist() { if (!resettingMemory && !memoryResetRequired) store.save(sessions); store.select(selected); refresh() }
     internal fun resetSharedMemory() {
-        if (resettingMemory || migrating || runtimeBusy) return
+        if (resettingMemory || migrating || runtimeBusy || deletingChats.isNotEmpty()) return
         if (jobs.isNotEmpty()) { memoryResetStatus = "请先停止或等待所有对话任务结束"; refresh(); return }
         resettingMemory = true; memoryResetRequired = true; memoryResetStatus = "正在重置共同经历…"; refresh()
         viewModelScope.launch {
@@ -169,7 +243,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
     fun stop() { jobs[selected]?.cancel(); notices[selected] = "已请求停止"; refresh() }
     fun send(text: String): Boolean = sendTo(selected, text)
     internal fun sendTo(chat: String, text: String): Boolean {
-        if (text.isBlank() || jobs.containsKey(chat)) return false
+        if (text.isBlank() || jobs.containsKey(chat) || chat in deletingChats) return false
         if (resettingMemory || memoryResetRequired) { notices[chat] = "记忆重置尚未完成，请先重试重置"; refresh(); return false }
         if (runtimeBusy) { notices[chat] = "环境维护或检查中，请稍后发送"; refresh(); return false }
         if (migrating) { notices[chat] = "正在准备新执行环境，完成后即可开始新会话"; refresh(); return false }

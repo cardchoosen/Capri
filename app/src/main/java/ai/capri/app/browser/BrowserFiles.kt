@@ -92,6 +92,11 @@ internal class BrowserFiles(private val context: Context, private val workspace:
         return t.json().put("status","ok")
     }
     fun closePage(page:String) { records.values.flatten().filter{it.page==page&&it.state in setOf("running","queued")}.forEach { it.state="interrupted";it.call?.cancel();it.job?.cancel() } }
+    suspend fun deleteChat(chat:String) {
+        val transfers=records.remove(chat).orEmpty()
+        transfers.forEach { it.call?.cancel();it.job?.cancel() }
+        transfers.mapNotNull { it.job }.forEach { it.join() }
+    }
     fun dispose(){records.values.flatten().forEach{it.call?.cancel();it.job?.cancel()}}
     private fun output(chat:String,filename:String):File {
         val dir=workspace.file(chat,"browser/$filename")

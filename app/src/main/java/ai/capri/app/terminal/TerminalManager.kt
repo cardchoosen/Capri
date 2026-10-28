@@ -1,5 +1,7 @@
 package ai.capri.app.terminal
 
+import ai.capri.app.SessionDeletion
+
 import android.content.Context
 import android.content.Intent
 import android.os.PowerManager
@@ -54,6 +56,7 @@ internal class TerminalManager private constructor(private val context: Context)
             val id = record.getString("terminal_id")
             val chat = record.getString("chat_id")
             if (!id.matches(Regex("[0-9a-f-]{36}")) || !chat.matches(Regex("[a-zA-Z0-9-]+"))) continue
+            if (SessionDeletion(context.filesDir).pending().contains(chat)) continue
             reconcile(record)
             if (record.getString("state") in liveStates) {
                 record.put("state", "interrupted").put("reason", "应用进程已终止；请新建终端，工作区和历史保留")
@@ -96,6 +99,13 @@ internal class TerminalManager private constructor(private val context: Context)
     suspend fun resetForNewEnvironment() = mutex.withLock {
         processes.keys.toList().forEach { id -> records[id]?.let { close(it) } }
         records.clear(); persist(); stopServiceIfIdle()
+    }
+
+    suspend fun deleteChat(chat: String) = mutex.withLock {
+        val owned = records.values.filter { it.getString("chat_id") == chat }
+        owned.forEach { close(it) }
+        owned.forEach { records.remove(it.getString("terminal_id")) }
+        persist(); stopServiceIfIdle()
     }
 
     fun attach(value: TerminalService) { service = value; serviceFailure = null }

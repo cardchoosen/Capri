@@ -279,6 +279,11 @@ internal class ExtensionManager(private val context: Context, private val runtim
         withContext(NonCancellable) { withTimeoutOrNull(2000) { runCatching { c?.client?.close() } } }
         c?.http?.close(); states[key] = status
     }
+    suspend fun deleteChat(chat: String) {
+        sessions.keys.filter { it.startsWith("$chat:") }.forEach { k -> locks.getOrPut(k) { Mutex() }.withLock { disconnectKey(k, "会话已删除") } }
+        states.keys.removeAll { it.startsWith("$chat:") }
+        store.clearChat(chat)
+    }
     fun dispose() {
         val all = sessions.values.toList(); sessions.clear(); scope.cancel()
         all.forEach { it.process?.let(OwnedProcesses::stop); it.http?.close() }

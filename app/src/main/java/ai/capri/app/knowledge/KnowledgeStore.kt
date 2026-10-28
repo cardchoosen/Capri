@@ -90,6 +90,10 @@ internal class KnowledgeStore(
         else for (i in 0 until data.length()) if (data.getJSONObject(i).getString("id") == record.getString("id")) data.put(i, record)
         save(data); return record
     }
+    @Synchronized fun deleteChat(chat: String) {
+        val data = load()
+        save(JSONArray((0 until data.length()).map { data.getJSONObject(it) }.filterNot { it.optString("scope") == chat }))
+    }
     @Synchronized fun change(chat: String, id: String, enabled: Boolean? = null) {
         val data = load(); val index = (0 until data.length()).firstOrNull { data.getJSONObject(it).getString("id") == id && visible(data.getJSONObject(it), chat) && data.getJSONObject(it).optString("kind") in setOf("memory", "document") }
         require(index != null) { "条目不存在或不属于可管理范围" }

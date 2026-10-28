@@ -9,9 +9,11 @@ internal object RuntimeGate {
     private val fileUses = mutableMapOf<String, Pair<String,Use>>()
     @Synchronized fun beginFiles(context: Context, chat: String, kind: String): String {
         check(!maintenance.containsKey(root(context))) { "环境维护中，请稍后操作文件" }
+        check((root(context) to chat) !in deletedChats) { "会话已删除" }
         val id=java.util.UUID.randomUUID().toString(); fileUses[id]=root(context) to Use(chat,kind); return id
     }
     @Synchronized fun endFiles(id: String) { fileUses.remove(id) }
+    private val deletedChats = mutableSetOf<Pair<String, String>>()
     private val maintenance = mutableMapOf<String, String>()
     private val running = mutableListOf<Running>()
     private fun root(context: Context) = context.filesDir.canonicalPath
@@ -26,7 +28,14 @@ internal object RuntimeGate {
         maintenance[root(context)] = if (allowPreparation) chat else ""
     }
     @Synchronized fun endMaintenance(context: Context) { maintenance.remove(root(context)) }
+    @Synchronized fun beginChatDeletion(context: Context, chat: String) {
+        check(!maintenance.containsKey(root(context))) { "环境维护中，请稍后删除会话" }
+        check(active(context).none { it.chat == chat }) { "会话仍有脚本或文件操作，请等待结束后删除" }
+        deletedChats.add(root(context) to chat)
+    }
+    @Synchronized fun restoreChat(context: Context, chat: String) { deletedChats.remove(root(context) to chat) }
     private fun checkStart(context: Context, chat: String, kind: String) {
+        check((root(context) to chat) !in deletedChats) { "会话已删除" }
         val owner = maintenance[root(context)]
         check(owner == null || (owner == chat && kind == "会话准备")) { "环境维护中，请稍后再执行任务" }
     }

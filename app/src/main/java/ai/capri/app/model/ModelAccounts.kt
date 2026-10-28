@@ -126,6 +126,9 @@ internal class ModelAccounts(private val read: () -> String?, private val write:
         require(all().any { it.id == account && it.models.any { m -> m.id == model } }) { "模型或API配置已删除，请重新选择" }
         val data = JSONObject(state().toString()); data.getJSONObject("selections").put(chat, JSONObject().put("account", account).put("model", model)); commit(data)
     }
+    @Synchronized fun forgetChat(chat: String) {
+        val data = JSONObject(state().toString()); data.getJSONObject("selections").remove(chat); commit(data)
+    }
     fun config(chat: String? = null): ModelConfig = selected(chat)?.let { it.first.config(it.second) } ?: ModelConfig()
     private fun commit(data: JSONObject) { write(data.toString()); state = data; cachedAccounts = null }
 }
