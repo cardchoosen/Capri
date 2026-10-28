@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """USB developer web client. Phone owns chats/tools; this loopback server stores no history.
-Run: python3 tools/capri_web.py [--serial DEVICE] [--port 8765]
+Run: python3 tools/capri_web.py [--serial DEVICE] [--port 47863]
 Debug APK must be installed. Open the printed one-time browser URL. Ctrl-C stops access.
 """
 import argparse
@@ -16,6 +16,7 @@ import subprocess
 import threading
 from urllib.parse import quote
 
+DEFAULT_PORT = 47863
 WEB = Path(__file__).with_name('web')
 METHODS = {'web_state', 'web_create', 'web_stop', 'web_delete', 'web_select', 'web_attachment', 'send', 'status'}
 
@@ -99,7 +100,7 @@ class Bridge:
             self._disconnect()
 
 
-def server_for(bridge, port=8765, token=None):
+def server_for(bridge, port=DEFAULT_PORT, token=None):
     token = token or secrets.token_urlsafe(32)
 
     class Handler(BaseHTTPRequestHandler):
@@ -213,7 +214,7 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--adb', default=os.environ.get('CAPRI_ADB', str(Path.home() / 'Library/Android/sdk/platform-tools/adb')))
     p.add_argument('--serial')
-    p.add_argument('--port', type=int, default=8765)
+    p.add_argument('--port', type=int, default=DEFAULT_PORT)
     args = p.parse_args()
     devices = subprocess.run([args.adb, 'devices', '-l'], capture_output=True, text=True, check=True, timeout=15)
     usb = [line.split()[0] for line in devices.stdout.splitlines() if '\tdevice ' in line and 'usb:' in line]

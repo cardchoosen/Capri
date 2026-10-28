@@ -1,6 +1,6 @@
 # 开发设备网页入口 · 首版
 
-Mac 上运行 `python3 tools/capri_web.py`，打开终端输出的访问链接。单台已授权 USB 手机自动选择，多台设备用 `--serial`；默认端口 8765，可用 `--port` 更改。手机安装 Debug APK 并保持 Capri 进程运行；Ctrl-C 关闭网页入口。Release APK 不包含此桥接。
+Mac 上运行 `python3 tools/capri_web.py`，打开终端输出的访问链接。单台已授权 USB 手机自动选择，多台设备用 `--serial`；默认端口 47863，可用 `--port` 更改。手机安装 Debug APK 并保持 Capri 进程运行；Ctrl-C 关闭网页入口。Release APK 不包含此桥接。
 
 网页 → Mac 本机 HTTP → ADB转发的持久Unix socket → 手机现有 CapriModel。ContentProvider仅用于首次获取受保护的连接信息；每个后续请求不再启动ADB/content命令。会话、消息、工具执行及凭据都由手机原有实现管理；网页没有独立模型配置或聊天数据库。支持会话列表、新建任务会话、历史分页、发消息、停止当前任务、工具折叠和最终回复渐进展示。网页切换及新建会话在手机处于对话Tab时同步选中；手机在文件/运行Tab时保留当前上下文，不主动跳转Tab。双端发送复用sendTo。首次加载历史立即显示；新最终回复采用展示动画，模型网络协议保持现状。
 
