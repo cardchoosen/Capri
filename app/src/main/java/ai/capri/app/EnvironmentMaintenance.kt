@@ -42,6 +42,7 @@ internal class EnvironmentMaintenance(private val context: Context, private val 
         targets(chat, action).sumOf { RuntimeFiles.size(it) }
     }
     suspend fun perform(chat: String, action: Action): String = withContext(Dispatchers.IO) {
+        if (action == Action.RESET) runCatching { ai.capri.app.environment.InstallationEnvironment.get(context).invalidate("session:$chat", "会话依赖即将重建") }
         RuntimeGate.beginMaintenance(context, chat, action == Action.RESET)
         try {
             var before = 0L

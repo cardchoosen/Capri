@@ -7,7 +7,7 @@ internal class NativeFailure(val status: String, override val message: String, v
 
 internal data class NativeAction(val name: String, val title: String, val parameters: String, val effect: String = "read")
 
-/** Closed action catalog. Only explicit root_exec dispatches host commands after su identity verification. */
+/** Closed catalog. Explicit root_exec and typed root_inspect verify su identity before host execution. */
 internal object NativeCatalog {
     val actions = listOf(
         NativeAction("capabilities", "原生能力清单与权限状态", "无"),
@@ -15,7 +15,8 @@ internal object NativeCatalog {
         NativeAction("request_permissions", "请求与任务相关的系统授权", "group: location/camera/bluetooth/contacts/calendar/notifications", "permission"),
         NativeAction("root_status", "检测设备root线索与Capri授权记录", "无；不弹授权，不把su缺失或PRoot失败当作整机未root"),
         NativeAction("root_request", "请求并实测Capri的root授权", "无；通过手机Root管理器授权，最多等待30秒；仅运行id等只读验证", "permission"),
-        NativeAction("root_exec", "在Android宿主以真实root执行短命令", "command:Android shell脚本；timeout_seconds:1..120，默认30；output_limit:1000..64000字节，默认16000；先root_request；不是Ubuntu/PRoot；不用于脱离托管的后台进程", "root_execute"),
+        NativeAction("root_inspect", "Batch read-only environment inspection with archive reuse", "queries:1..12 objects {id,type,value?,contains?,limit_bytes?,ttl_seconds?,validity?}; types:read_file/list_directory/readlink/command_exists/getprop/uname/kernel_log. value required except uname/kernel_log. Resolve tool paths with command_exists (value:bare name, e.g. sh); do not guess PRoot /bin paths. read_file/list_directory/readlink require absolute host paths under /sys/, /proc/, /system/, /system_ext/, /vendor/, /odm/, /product/ or /apex/. Optional contains is a literal filter; limit_bytes:100..1800 default1000; ttl_seconds defaults600 (dynamic5, kernel_log0), dynamic max30 otherwise86400; validity:boot(default)/stable/environment/volatile. refresh:boolean defaultfalse bypasses cache; timeout_seconds:1..40 default15. Only missing queries share one managed root execution; no arbitrary shell. See per-item status/cached/verified_at; empty samples do not prove unsupported hardware.", "root_read"),
+        NativeAction("root_exec", "Execute a managed host root command", "command:Android shell script; timeout_seconds:1..120 default30; output_limit:1000..64000 bytes default16000. Request authorization only if not yet granted; every execution verifies UID. Runs on Android, not Ubuntu/PRoot. Detached background processes are unsupported.", "root_execute"),
         NativeAction("device_info", "设备、系统、语言和运行信息", "无"),
         NativeAction("battery_info", "电量、充电与省电状态", "无"),
         NativeAction("storage_info", "应用存储空间与内存", "无"),
@@ -52,7 +53,7 @@ internal object NativeCatalog {
     fun find(name: String) = actions.firstOrNull { it.name == name }
     fun spec(): JSONObject = JSONObject().put("type", "function").put("function", JSONObject()
         .put("name", "android")
-        .put("description", "手机原生Android能力统一入口，包含可选su root宿主后端，不依赖ADB/Shizuku。root_status只读探测，root_request请求并验证本应用授权，root_exec在Android宿主执行有超时的root命令；普通PRoot终端仍是应用UID。网络任务不确定或失败时用network_check，可传目标url；network_info只说明系统联网，不证明外网站点可达。先用capabilities了解能力。Wi-Fi、设备状态、应用、定位等应优先使用此工具而非PRoot。缺少授权时按结果调用request_permissions并重试；不能把Python失败说成手机无法实现。params填写对应action的参数，未知参数不执行。launch类仅打开系统页面，不代表用户完成了操作。")
+        .put("description", "Native Android capabilities including an optional managed su root backend; no ADB/Shizuku dependency. Prefer root_inspect for independent read-only host environment queries: it reuses valid archive evidence and batches missing checks. Use root_exec for task commands; ordinary PRoot tools retain the app UID. root_request requests and verifies app authorization; root_status only reads known state. Reuse sufficient context instead of routinely calling capabilities/root_status first. Prefer native actions for device, Wi-Fi, app and location data. Use network_check with an optional target url when network reachability is uncertain; network_info does not prove website access. Follow permission-required results with request_permissions when appropriate. params must match the action; unknown parameters are rejected. Launch actions only request a system UI, not completion of its workflow.")
         .put("parameters", JSONObject().put("type", "object").put("required", JSONArray(listOf("action")))
             .put("properties", JSONObject()
                 .put("action", JSONObject().put("type", "string").put("enum", JSONArray(actions.map { it.name })))

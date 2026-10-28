@@ -64,15 +64,17 @@ def project_info(root):
 
 def inspect(request, root):
     required = request.get('requirements', {})
-    checks = {}
+    checks = dict(request.get("_cached_checks", {}))
     for name in required.get('commands', []):
+        if 'command:' + name in checks: continue
         executable = shutil.which(name)
-        item = {'present': executable is not None, 'path': executable}
+        item = {'present': executable is not None, 'path': executable, 'watch_path': executable}
         if executable:
             item['version_probe'] = run([executable, '-V' if name == 'ssh' else '--version'], root, 5, 500)
         checks['command:' + name] = item
     from pip._vendor.packaging.requirements import Requirement
     for raw in required.get('python_packages', []):
+        if 'python:' + raw in checks: continue
         requirement = Requirement(raw)
         try:
             version = importlib.metadata.version(requirement.name)
@@ -81,16 +83,18 @@ def inspect(request, root):
         except importlib.metadata.PackageNotFoundError:
             checks['python:' + raw] = {'present': False, 'satisfies': False}
     for name in required.get('imports', []):
+        if 'import:' + name in checks: continue
         try:
-            importlib.import_module(name)
-            checks['import:' + name] = {'passed': True}
+            loaded = importlib.import_module(name)
+            checks['import:' + name] = {'passed': True, 'watch_path': getattr(loaded, '__file__', None)}
         except Exception as error:
             checks['import:' + name] = {'passed': False, 'error': type(error).__name__ + ': ' + str(error)[:500]}
     for name in required.get('system_packages', []):
+        if 'system:' + name in checks: continue
         item = run(['dpkg-query', '-W', '-f=${Status}\t${Version}', name], root, 5)
         checks['system:' + name] = {'present': item['passed'] and 'install ok installed' in item.get('output', ''), 'evidence': item}
     headers, libraries = required.get('headers', []), required.get('libraries', [])
-    if headers or libraries:
+    if (headers or libraries) and not ('native_compile_link' in checks and 'native_load' in checks):
         compiler = required.get('compiler', 'cc')
         with tempfile.TemporaryDirectory(prefix='capri-compile-check-') as temporary:
             source = Path(temporary, 'check.cpp' if '++' in compiler else 'check.c')

@@ -270,6 +270,7 @@ class MainActivity : ComponentActivity() {
                             OutlinedButton(onClick = { enhancementsPanel = true }) { Text("增强能力") }
                             Spacer(Modifier.height(12.dp))
                             ai.capri.app.nativebridge.RootPanel(vm)
+                            ai.capri.app.environment.InstallationEnvironmentPanel(vm)
                             EnvironmentPanel(vm)
                             Spacer(Modifier.height(24.dp)); Text("会话独立目录", color = Green); Text("workspace / 任务文件\nhome / 用户目录\ntmp / 临时文件\nruns / 脚本与执行日志", color = Muted, lineHeight = 28.sp, modifier = Modifier.padding(vertical = 12.dp), fontFamily = FontFamily.Monospace)
                             Text("运行模型：单 APK · Android 原生调度 · PRoot/Ubuntu。PRoot 与 Android 共用内核，各会话属于同一应用 UID；目录分离不构成恶意代码安全隔离。", color = Muted, lineHeight = 24.sp, fontSize = 13.sp)

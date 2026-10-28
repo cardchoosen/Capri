@@ -12,9 +12,10 @@ internal object CapabilityContract {
     private val fields = setOf("action", "requirements", "from_project", "command", "timeout_seconds")
     private val requirementFields = setOf("commands", "python_packages", "imports", "system_packages", "headers", "libraries", "compiler")
     fun validate(args: JSONObject): JSONObject {
-        require(args.keys().asSequence().all { it in fields }) { "未知环境参数" }
         val action = args.optString("action", "inspect")
-        require(action in listOf("inspect", "prepare", "verify")) { "action需为inspect/prepare/verify" }
+        if (action in listOf("lookup", "document", "record")) return ai.capri.app.environment.EnvironmentActions.validate(args)
+        require(args.keys().asSequence().all { it in fields }) { "未知环境参数" }
+        require(action in listOf("inspect", "refresh", "prepare", "verify")) { "未知环境action" }
         if (args.has("from_project")) require(action == "prepare" && args.opt("from_project") is Boolean) { "from_project仅供prepare使用且需为布尔值" }
         val requirements = if (args.has("requirements")) args.opt("requirements") as? JSONObject ?: throw IllegalArgumentException("requirements需为对象") else JSONObject()
         require(requirements.keys().asSequence().all { it in requirementFields }) { "未知依赖类型" }
@@ -53,28 +54,38 @@ internal object CapabilityContract {
             .put("headers", strings("要试编译的头文件名，如gif_lib.h"))
             .put("libraries", strings("要试链接的库名，如gif；不含-l前缀"))
             .put("compiler", JSONObject().put("type", "string").put("description", "试编译使用的命令，默认cc，可选g++等"))
-        return JSONObject().put("type", "function").put("function", JSONObject().put("name", "environment")
-            .put("description", "按任务声明通用环境需求。inspect核对命令/包版本/实际导入/头文件链接，并读取当前工作区项目依赖清单；prepare复用现有环境，安装明确缺少的Ubuntu系统包或当前会话Python包，from_project可按项目清单安装Python/npm依赖；verify执行明确的小样本command参数数组。无固定任务/图像格式枚举。已知缺包直接prepare，不机械先检查再重复检查；成功后直接开展任务。仅能验证声明的需求，不能保证任意程序。系统安装需环境空闲，先准备依赖再开持续终端；有使用者会返回busy，不自动停止。保留用户语言边界，缺少成熟库不意味着应手写编码器。verify会实际执行程序；不把可执行存在当作完整行为验证。")
+        val specification = JSONObject().put("type", "function").put("function", JSONObject().put("name", "environment")
+            .put("description", "安装环境档案与通用检测入口。lookup查询全安装任意软硬件/驱动事实，document分页读取Markdown，record凭真实工具environment_receipt写入观察；refresh按requirements强制刷新。inspect先复用有效证据，只补测缺失项；prepare实际准备依赖，verify始终实际执行。inspect核对命令/包版本/实际导入/头文件链接，并读取当前工作区项目依赖清单；prepare复用现有环境，安装明确缺少的Ubuntu系统包或当前会话Python包，from_project可按项目清单安装Python/npm依赖；verify执行明确的小样本command参数数组。无固定任务/图像格式枚举。已知缺包直接prepare，不机械先检查再重复检查；成功后直接开展任务。仅能验证声明的需求，不能保证任意程序。系统安装需环境空闲，先准备依赖再开持续终端；有使用者会返回busy，不自动停止。保留用户语言边界，缺少成熟库不意味着应手写编码器。verify会实际执行程序；不把可执行存在当作完整行为验证。")
             .put("parameters", JSONObject().put("type", "object").put("additionalProperties", false).put("required", JSONArray(listOf("action")))
                 .put("properties", JSONObject()
-                    .put("action", JSONObject().put("type", "string").put("enum", JSONArray(listOf("inspect", "prepare", "verify"))))
+                    .put("action", JSONObject().put("type", "string").put("enum", JSONArray(listOf("inspect", "refresh", "prepare", "verify", "lookup", "document", "record"))))
                     .put("requirements", JSONObject().put("type", "object").put("additionalProperties", false).put("properties", requirements))
                     .put("from_project", JSONObject().put("type", "boolean"))
                     .put("command", JSONObject().put("type", "array").put("minItems", 1).put("maxItems", 32).put("items", JSONObject().put("type", "string").put("maxLength", 4000)))
                     .put("timeout_seconds", JSONObject().put("type", "integer").put("minimum", 1).put("maximum", 40)))))
+        ai.capri.app.environment.EnvironmentActions.extend(specification)
+        return specification
     }
 }
 
-internal class CapabilityTool(private val context: Context, private val runtime: PythonRuntime) {
+internal class CapabilityTool(private val context: Context, private val runtime: PythonRuntime, profileOverride: ai.capri.app.environment.InstallationEnvironment? = null) {
     companion object { private val installs = ConcurrentHashMap<String, Mutex>() }
+    private val profile by lazy { profileOverride ?: ai.capri.app.environment.InstallationEnvironment.get(context) }
     suspend fun execute(chat: String, args: JSONObject, trace: PerformanceTrace? = null): String {
         val started = PerformanceTrace.now()
         val phases = JSONObject()
         val result = try {
         val request = CapabilityContract.validate(args)
+        if (request.getString("action") in listOf("lookup", "document", "record")) return when (request.getString("action")) {
+            "lookup" -> profile.lookup(request)
+            "document" -> profile.document(request)
+            else -> profile.record(request)
+        }
         if (request.getString("action") == "prepare") installs.getOrPut(context.filesDir.canonicalPath) { Mutex() }.withLock {
             phases.put("queue", PerformanceTrace.elapsed(started))
             val token = EnvironmentForeground.hold(context)
+            val scope = if ((request.optJSONObject("requirements")?.optJSONArray("system_packages")?.length() ?: 0) > 0) "ubuntu_shared" else "session:$chat"
+            runCatching { profile.invalidate(scope, "依赖准备可能改变环境，需按实际结果更新") }
             try {
                 timed(phases, "session") { runtime.ensureSession(chat) }
                 val packages = request.optJSONObject("requirements")?.optJSONArray("system_packages") ?: JSONArray()
@@ -101,18 +112,48 @@ internal class CapabilityTool(private val context: Context, private val runtime:
         trace?.event(PerformanceTrace.Stage.ENVIRONMENT, PerformanceTrace.elapsed(started),
             if (objectResult.optString("status") == "ok") PerformanceTrace.Status.RETURNED else PerformanceTrace.Status.ERROR,
             tool = "environment", details = timing)
-        return objectResult.put("timings_ms", timing).toString()
+        objectResult.put("timings_ms", timing)
+        if (!objectResult.optBoolean("cached") && args.optString("action", "inspect") in setOf("inspect", "refresh", "prepare", "verify")) runCatching {
+            objectResult.put("environment_receipt", profile.receipt("environment.${args.optString("action", "inspect")}", "session:$chat", objectResult.toString()))
+        }
+        return objectResult.toString()
     }
     private suspend fun <T> timed(phases: JSONObject, key: String, block: suspend () -> T): T {
         val started = PerformanceTrace.now()
         try { return block() } finally { phases.put(key, PerformanceTrace.elapsed(started)) }
     }
     private suspend fun invoke(chat: String, request: JSONObject, timeout: Long): String {
-        val payload = java.util.Base64.getEncoder().encodeToString(request.toString().toByteArray())
+        val effective = JSONObject(request.toString())
+        val requirements = request.optJSONObject("requirements") ?: JSONObject()
+        if (request.getString("action") == "refresh") {
+            runCatching { profile.invalidateChecks(chat, requirements, "用户要求强制刷新指定项目") }
+            effective.put("action", "inspect")
+        }
+        val known = if (request.getString("action") == "inspect") runCatching { profile.cachedChecks(chat, requirements) }.getOrDefault(JSONObject()) else JSONObject()
+        val keys = profile.checkKeys(requirements)
+        if (keys.isNotEmpty() && keys.all { known.has(it) }) {
+            val cacheResult = JSONObject().put("status", "ok").put("scope", "current chat").put("checks", known)
+                .put("requirements_satisfied", keys.all { key -> val item = known.getJSONObject(key); item.opt("present") != false && item.opt("satisfies") != false && item.opt("passed") != false })
+                .put("missing", JSONArray(keys.filter { known.getJSONObject(it).opt("present") == false || known.getJSONObject(it).opt("satisfies") == false }))
+                .put("failed", JSONArray(keys.filter { known.getJSONObject(it).opt("passed") == false })).put("cached", true)
+                .put("project", JSONObject().put("notice", "此次复用环境档案；项目清单由当前指纹约束，必要时直接读项目文件"))
+                .put("notice", "未启动检测进程；各项verified_at是原验证时间，不是本次时间。明确verify仍会执行。")
+            return cacheResult.toString()
+        }
+        // Private client field. It is never accepted from the model/user tool arguments.
+        if (known.length() > 0) {
+            val cached = JSONObject(known.toString())
+            keys.filter { it.startsWith("native:") }.forEachIndexed { i, key ->
+                if (cached.has(key)) { cached.put(if (i == 0) "native_compile_link" else "native_load", cached.get(key)); cached.remove(key) }
+            }
+            effective.put("_cached_checks", cached)
+        }
+        val payload = java.util.Base64.getEncoder().encodeToString(effective.toString().toByteArray())
         val code = "import base64,json,runpy,contextlib,io\nprobe=runpy.run_path('/opt/capri/bootstrap/task_environment.py')\ncaptured=io.StringIO()\nwith contextlib.redirect_stdout(captured),contextlib.redirect_stderr(captured):\n result=probe['execute'](json.loads(base64.b64decode('$payload')))\nif captured.getvalue(): result['diagnostics']=captured.getvalue()[-4000:]\nprint(json.dumps(result,ensure_ascii=False))"
         val output = runtime.runCommand(chat, listOf("/root/.venv/bin/python3", "-c", code), timeout, resultLimit = 1_900_000)
         return if (output.startsWith("exit=0\n")) {
             val result = JSONObject(output.substringAfter('\n'))
+            runCatching { profile.observeGuest(chat, request, result) }.onFailure { result.put("environment_archive_warning", "环境档案更新未完成，原检测结果仍有效；稍后检查档案，不因此重做已完成操作。") }
             if (result.toString().length > 28_000) {
                 result.remove("project"); result.remove("operations"); result.remove("diagnostics")
                 result.put("truncated", "Large project/install diagnostics omitted; request specific requirements or inspect project files explicitly.")

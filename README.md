@@ -3,6 +3,7 @@
 Android 原生个人 AI Agent，在手机上执行任务。
 
 - 多会话与独立工作区
+- [安装环境档案](docs/INSTALLATION_ENVIRONMENT.md)：Markdown查询、自动更新与有效检测复用
 - 固定 Capri 个人对话与任务模式、有来源的个人记忆及跨会话历史回查（[首版说明](docs/PERSONA.md)）
 - 多模型 API、会话内模型切换、厂商 Logo 与上下文容量显示
 - Python、Node.js、C/C++ 与持续终端

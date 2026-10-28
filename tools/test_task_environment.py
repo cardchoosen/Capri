@@ -38,3 +38,21 @@ class TaskEnvironmentTest(unittest.TestCase):
             result = module.run([sys.executable, '-c', 'raise SystemExit(9)'], temporary)
             self.assertEqual(9, result['exit_code']); self.assertFalse(result['passed'])
             self.assertGreaterEqual(result['elapsed_ms'], 0)
+
+    def test_partial_cached_checks_do_not_repeat_commands_or_imports(self):
+        from unittest.mock import patch
+        known = {'command:cached': {'present': True, 'path': '/known/cached', 'cached': True},
+                 'import:cached_module': {'passed': True, 'cached': True}}
+        with tempfile.TemporaryDirectory() as temporary, patch.object(module.shutil, 'which', return_value=None) as which, patch.object(module.importlib, 'import_module') as imported:
+            result = module.inspect({'requirements': {'commands': ['cached', 'missing'], 'imports': ['cached_module']}, '_cached_checks': known}, Path(temporary))
+            which.assert_called_once_with('missing')
+            imported.assert_not_called()
+            self.assertTrue(result['checks']['command:cached']['cached'])
+            self.assertFalse(result['requirements_satisfied'])
+
+    def test_explicit_verification_never_reuses_probe_cache(self):
+        from unittest.mock import patch
+        with patch.object(module, 'run', return_value={'passed': True, 'output': 'ran'}) as run:
+            result = module._execute({'action': 'verify', 'command': ['true'], '_cached_checks': {'x': {'passed': True}}})
+            run.assert_called_once()
+            self.assertEqual('ran', result['verification']['output'])

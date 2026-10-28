@@ -17,7 +17,8 @@
 | `request_permissions` | 请求与任务相关的系统授权 | group: location/camera/bluetooth/contacts/calendar/notifications | permission |
 | `root_status` | 检测su和查看本应用的Root验证记录 | 不弹授权；区分su线索、设备已验证Root、本应用上次授权与本次身份 | read |
 | `root_request` | 请求并验证本应用Root授权 | 无参数；最多等待管理器30秒，只读验证id等；不绕过拒绝 | permission |
-| `root_exec` | 在Android宿主执行真实Root短命令 | command；timeout_seconds=1..120（默认30）；output_limit=1000..64000字节（默认16000）；先root_request | root_execute |
+| `root_inspect` | Batch read-only host environment queries | queries:1..12 typed items; reuse valid archive evidence and execute only missing items together; refresh forces a new sample | root_read |
+| `root_exec` | Execute a managed host root command | command; timeout_seconds=1..120 (default30); output_limit=1000..64000 bytes (default16000); request authorization only when not already granted | root_execute |
 | `device_info` | 设备、系统、语言和运行信息 | 无 | read |
 | `battery_info` | 电量、充电与省电状态 | 无 | read |
 | `storage_info` | 应用存储空间与内存 | 无 | read |
@@ -97,3 +98,17 @@ Root命令直接运行在Android宿主`/system/bin/sh`中，默认工作目录�
 设备验证只运行身份、工作目录、临时文件、非零退出码、超时、取消和输出限制测试；未进行ARP操作、抓取流量或修改网络设置。
 
 本轮验证：121项单元测试、Pixel 8a上3项设备测试通过。Capri UID10314获得Magisk授权，实际宿主命令验证effective_uid=0；超时、取消、输出上限均验证受管进程组已清理，普通原生查询回归通过。日志与APK摘要见work/root-verification/2026-10-27/。
+
+## Batched host environment inspection · 2026-10-28
+
+With granted authorization already in context, call `root_inspect` or `root_exec` directly; a preliminary `root_status`, `id` or `root_request` is unnecessary. Every actual managed root execution still verifies UID and cleanup. `root_exec` always executes task commands; arbitrary scripts are never cached.
+
+```json
+{"action":"root_inspect","params":{"queries":[{"id":"model","type":"getprop","value":"ro.product.model"},{"id":"kernel","type":"uname"},{"id":"shell","type":"command_exists","value":"sh"}]}}
+```
+
+Queries support `read_file`, `list_directory`, `readlink`, `command_exists`, `getprop`, `uname`, and `kernel_log`. `value` is required except for `uname` and `kernel_log`. File samples are limited to system environment paths, without traversal or process/kernel memory interfaces. `command_exists` resolves a path without executing the program. `contains` is an optional literal sample filter; it accepts no shell expressions. Samples use `limit_bytes` 100..1800 (default1000); timeout is 1..40 seconds (default15).
+
+`ttl_seconds=0` disables reuse. Defaults are 600 seconds for stable queries, 5 seconds for dynamic samples, and zero for kernel logs. Dynamic TTL is capped at30 seconds; other TTLs at86400. Dynamic queries always use volatile validity. Each result reports `status`, `cached`, and original `verified_at`; failures have at most30 seconds of reuse. `refresh=true` bypasses all requested cache entries. System/boot/environment fingerprints and watched path metadata invalidate evidence. Directory metadata does not guarantee every external tool modification is observed immediately; actual failures and fresh evidence take precedence.
+
+Only cache misses share one managed `RootRuntime.execute` call. `root_invocations` counts these managed executions, not individual su subprocesses (the existing cleanup can use a second su). When everything is cached, no root process starts and `current_command_verified=false`. Cached facts cannot establish current authorization. Interpret per-item failures and incomplete frames independently; empty or filtered samples do not prove unsupported hardware. Permission denial and unconfirmed cleanup remain explicit.

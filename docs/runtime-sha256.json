@@ -8,7 +8,7 @@
   "app/src/main/assets/runtime/session_bootstrap.py": "a6246ce6f09236ddb6dfe65420a7e8c6f2e4b6378151094143323ec4a0d4d948",
   "app/src/main/assets/runtime/ssh_config": "021d570ed3940235a336864fea7294a3da5ad5d799b395d6d412ac5e8921ccc9",
   "app/src/main/assets/runtime/ssh_identity.py": "e383c53a3105bc98d5ba09c3bfe01e94184e7c74d8b88300b01f11657ffcf3c0",
-  "app/src/main/assets/runtime/task_environment.py": "6e062c07f75f425bd0aa8cde83b97d3b8cb1f94b70e8a2ed8941a59b658e0307",
+  "app/src/main/assets/runtime/task_environment.py": "5beb5dd20a213863b4755eb009df84124e6e52dfaa12de7fc37e92fde3dfd34a",
   "app/src/main/assets/runtime/terminal_supervisor.py": "9b39cb48bfa3df22b06e1973613865d04e530b4f0a287ae6a32c9b4924a00f12",
   "app/src/main/assets/runtime/ubuntu-source.json": "38df8e4cdb86fe3a638da8a29f5709fac1e42a466c9655fcb70dacd4443b51e7",
   "app/src/main/assets/runtime/ubuntu_setup.sh": "f175e917cd6801167034ca3d994cbf21d1651a1573e7a40c5949f76b9a3a342f",
