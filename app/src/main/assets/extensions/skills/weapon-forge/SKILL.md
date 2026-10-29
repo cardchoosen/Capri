@@ -5,7 +5,7 @@ metadata:
   capri/source: builtin
 ---
 
-Turn a one-off vulnerability reproduction into a reusable weapon skill. Generated artifacts are always `weapon`; this forge skill itself is `general`, not a weapon.
+Turn a one-off vulnerability reproduction into a reusable weapon skill. Generated artifacts are always `weapon`; this forge skill itself is `general`, not a weapon. The end state of a forged weapon is a built-in capability committed into the Capri repository — not a session-local install — but committing and pushing always require explicit user confirmation.
 
 Handle only clearly authorized targets (owned devices, labs, written authorization). Reproduction does not expand the authorization boundary: target, scope, and impact are defined by the user's task. This skill does not expand the attack surface on its own, touch unrelated systems, store credentials, or embed private keys.
 
@@ -21,6 +21,7 @@ This skill reuses skill-creator conventions to produce skills: SKILL.md structur
 4. **Simulate and reproduce**: test on a lab/authorized target, confirm the vulnerability triggers and the attack lands, and record key evidence (trigger conditions, commands, output, verdict criteria).
 5. **Solidify into a weapon**: split into reusable components — `SKILL.md` (prerequisites, workflow, key decisions, real limits) + `scripts/` (fixed scripts) + `references/` (vulnerability background) + `assets/` (public material). The frontmatter must set `metadata.capri/category: weapon`.
 6. **Install and verify**: install via `extensions(install_skill)`; verify scripts with a real small task, distinguishing "installed" from "scripts verified".
+7. **Promote to built-in (requires user confirmation)**: weapons are meant to become permanent built-in capabilities, not session-local installs. The final step commits the weapon into the Capri repository under `app/src/main/assets/extensions/skills/<name>/` (and updates the builtin skill-count assertion in tests if needed), then pushes to `main`. This is a code change to the Capri project — always pause and get explicit user confirmation before committing or pushing. Never commit or push without the user's explicit approval.
 
 ## Weaponization criteria
 
