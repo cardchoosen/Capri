@@ -37,6 +37,7 @@ PROFILES = {
     'network': ['ai.capri.app.nativebridge.NativeDeviceTest#networkCheckReportsEvidenceAndReusesShortCache', 'ai.capri.app.BrowserDeviceTest'],
     'maintenance': ['ai.capri.app.EnvironmentMaintenanceDeviceTest'],
     'short-task': ['ai.capri.app.ShortTaskDeviceTest'],
+    'history-edit': ['ai.capri.app.HistoryEditingDeviceTest'],
     'web-runtime': ['ai.capri.app.WebRuntimeDeviceTest'],
     'coding': ['ai.capri.app.CodingDeviceTest#projectRulesPatchesAndRealVerification', 'ai.capri.app.ToolLanguageDeviceTest'],
     'execution': ['ai.capri.app.ExecutionToolsDeviceTest', 'ai.capri.app.InstallationEnvironmentDeviceTest'],

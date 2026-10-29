@@ -151,11 +151,12 @@ internal object DebugWebRuntime {
             }
             "knowledge" -> {
                 val personal = vm.sessions.first { it.id == chat }.kind == SessionKind.PERSONAL
+                val conversation = HistoryEditing.actualContextKey(vm.sessions.first { it.id == chat })
                 withContext(Dispatchers.IO) {
                     val records = vm.knowledge.records(chat); val offset = p.optInt("offset", 0); require(offset >= 0)
                     val page = records.drop(offset).take(8).map { r -> JSONObject(r.toString()).apply { remove("chunks"); if (has("text")) put("text", getString("text").take(2000)); put("text_truncated", r.optString("text").length > 2000) } }
                     JSONObject().put("personal", personal).put("records", JSONArray(page)).put("next", offset + page.size).put("has_more", offset + page.size < records.size)
-                        .put("summary", vm.contextHistory.summary(chat).take(16000)).put("budget", vm.contextHistory.budget(chat))
+                        .put("summary", vm.contextHistory.summary(conversation).take(16000)).put("budget", vm.contextHistory.budget(conversation))
                 }
             }
             "enhancements" -> JSONObject().put("deepseek_web", vm.enhancements.enabled(ai.capri.app.retrieval.ProviderCapabilities.DEEPSEEK_WEB))
@@ -255,10 +256,11 @@ internal object DebugWebRuntime {
                 check(!vm.resettingMemory && !vm.memoryResetRequired)
                 val personal = vm.sessions.first { it.id == chat }.kind == SessionKind.PERSONAL
                 val history = vm.sessions.first { it.id == chat }.messages.toList()
+                val conversation = HistoryEditing.actualContextKey(vm.sessions.first { it.id == chat })
                 require(!(personal && action == "memory_save")) { "Use the personal memory lifecycle." }
                 withContext(Dispatchers.IO) { when (action) {
                     "knowledge_search" -> result(vm.knowledge.search(chat, p.getString("query")))
-                    "history_search" -> obj(vm.contextHistory.query(chat, history, JSONObject().put("query", p.getString("query"))))
+                    "history_search" -> obj(vm.contextHistory.query(conversation, history, JSONObject().put("query", p.getString("query"))))
                     "memory_save" -> { vm.knowledge.putMemory(chat, p.getString("text"), "User entered in Run web settings", p.optBoolean("global"), p.optString("id")); result() }
                     "document_index" -> vm.knowledge.index(chat, p.getString("path"), p.optBoolean("global"))
                     else -> { if (!p.has("enabled")) confirmed(p); vm.knowledge.change(chat, p.getString("id"), if (p.has("enabled")) p.getBoolean("enabled") else null); result() }

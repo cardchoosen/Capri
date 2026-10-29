@@ -32,7 +32,7 @@ internal class SessionDeletion(private val root: File) {
     fun finish(chat: String) { marker(chat).delete() }
     private fun targets(chat: String): List<File> {
         require(chat.matches(Regex("[a-zA-Z0-9-]+")))
-        return listOf("sessions/$chat", "context-history/$chat", "web-retrieval/$chat", "agent-recovery/$chat.json", "agent-recovery/$chat.json.bak", "agent-recovery/$chat.json.new").map(::checked)
+        return listOf("history-backups/$chat", "sessions/$chat", "context-history/$chat", "web-retrieval/$chat", "agent-recovery/$chat", "agent-recovery/$chat.json", "agent-recovery/$chat.json.bak", "agent-recovery/$chat.json.new").map(::checked)
     }
     fun validate(chat: String) { targets(chat) }
     fun cleanup(chat: String) { targets(chat).forEach(RuntimeFiles::delete) }

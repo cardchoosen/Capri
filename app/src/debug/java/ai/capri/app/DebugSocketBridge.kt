@@ -24,7 +24,7 @@ internal object DebugSocketBridge {
     private val main = Handler(Looper.getMainLooper())
     private val workers = ThreadPoolExecutor(2, 2, 20, TimeUnit.SECONDS, ArrayBlockingQueue(2),
         { task -> Thread(task, "CapriWebConnection").apply { isDaemon = true } })
-    private val methods = setOf("web_state", "web_create", "web_stop", "web_delete", "web_select", "web_attachment", "web_catalog", "web_runtime", "send", "status")
+    private val methods = setOf("web_state", "web_revise", "web_message", "web_create", "web_stop", "web_delete", "web_select", "web_attachment", "web_catalog", "web_runtime", "send", "status")
 
     @Synchronized fun connectionInfo(): JSONObject {
         if (listener == null) {
@@ -71,9 +71,10 @@ internal object DebugSocketBridge {
                     val task = FutureTask {
                         try {
                             val bundle = Bundle().apply {
-                                for (key in listOf("text", "request_id", "chat_id", "epoch", "category", "query", "id", "skill_type", "action")) if (values.has(key)) putString(key, values.getString(key))
+                                for (key in listOf("text", "request_id", "chat_id", "epoch", "category", "query", "id", "skill_type", "action", "entry_id", "from_context", "context_id", "mode")) if (values.has(key)) putString(key, values.getString(key))
                                 for (key in listOf("offset", "before", "revision", "entry")) if (values.has(key)) putInt(key, values.getInt(key))
                             }
+                            if (values.has("history_revision")) bundle.putLong("history_revision", values.getLong("history_revision"))
                             if (values.has("payload")) bundle.putString("payload", values.getJSONObject("payload").toString())
                             when (method) {
                                 "web_attachment" -> DebugBridge.attachment(bundle)

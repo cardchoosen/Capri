@@ -115,7 +115,7 @@ class PersistentTransportTest(unittest.TestCase):
 
     def test_transport_failure_never_replays_mutations(self):
         from unittest.mock import Mock
-        for method in ('send', 'web_delete', 'web_create', 'web_stop', 'web_select', 'web_runtime'):
+        for method in ('send', 'web_delete', 'web_create', 'web_stop', 'web_select', 'web_runtime', 'web_revise'):
             with self.subTest(method=method):
                 bridge = self.bridge()
                 connection = Mock()

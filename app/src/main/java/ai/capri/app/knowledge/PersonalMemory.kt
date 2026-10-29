@@ -12,7 +12,7 @@ internal class PersonalMemory(private val store: KnowledgeStore) {
     private fun sensitive(text: String) = Regex("(?i)(sk-[a-z0-9]{16,}|-----BEGIN .*PRIVATE KEY|bearer\\s+[a-z0-9._-]{16,}|密码|口令|密钥|password|api[_ -]?key)").containsMatchIn(text)
     private fun excerpt(text: String, limit: Int): String = if (text.length <= limit) text else text.take(limit / 2) + " …[省略，可查原文]… " + text.takeLast(limit / 2)
     private fun source(chat: Session, index: Int) = JSONObject().put("chat_id", chat.id).put("entry", index + 1)
-        .put("role", chat.messages[index].role).put("timestamp", chat.messages[index].timestamp)
+        .put("entry_id", chat.messages[index].id).put("context_id", chat.contextVersion).put("role", chat.messages[index].role).put("timestamp", chat.messages[index].timestamp)
 
     fun recordTurn(chat: Session) {
         if (chat.kind != SessionKind.PERSONAL) return
@@ -21,7 +21,7 @@ internal class PersonalMemory(private val store: KnowledgeStore) {
         if (user < 0 || reply <= user) return
         val text = "用户：${excerpt(chat.messages[user].text, 700)}\nCapri：${excerpt(chat.messages[reply].text, 1000)}"
         if (sensitive(text)) return
-        store.savePersonal(JSONObject().put("id", "episode-${chat.id}-${user + 1}").put("kind", "episode")
+        store.savePersonal(JSONObject().put("id", "episode-${chat.id}-${chat.messages[user].id}").put("kind", "episode")
             .put("scope", chat.id).put("text", text).put("updated", chat.messages[reply].timestamp)
             .put("sources", JSONArray(listOf(source(chat, user), source(chat, reply)))))
     }
@@ -30,7 +30,7 @@ internal class PersonalMemory(private val store: KnowledgeStore) {
         return when (args.getString("action")) {
             "search" -> {
                 val query = args.getString("query"); require(query.isNotBlank() && query.length <= 300)
-                JSONArray(ranked(personal.id, query).filter { TextIndex.score(query, it.getString("text")) > 0 }.take(8)).toString()
+                JSONArray(ranked(personal.id, query, personal).filter { TextIndex.score(query, it.getString("text")) > 0 }.take(8)).toString()
             }
             "remember" -> {
                 require(current.id == personal.id && current.kind == SessionKind.PERSONAL) { "任务对话不写入个人记忆" }
@@ -53,11 +53,21 @@ internal class PersonalMemory(private val store: KnowledgeStore) {
         }
     }
 
-    private fun ranked(chat: String, query: String) = store.personalRecords(chat).sortedWith(
+    private fun ranked(chat: String, query: String, visible: Session? = null) = store.personalRecords(chat).filter { record ->
+        if (visible == null || !visible.historyEdited) true else {
+            val sources = record.optJSONArray("sources")
+            sources != null && sources.length() > 0 && (0 until sources.length()).all { i ->
+                val source = sources.getJSONObject(i)
+                if (source.has("entry_id")) visible.messages.any { it.id == source.getString("entry_id") && it.role == source.optString("role") }
+                else visible.messages.getOrNull(source.optInt("entry") - 1)?.let { e -> source.optLong("timestamp") > 0 && e.timestamp == source.optLong("timestamp") && e.role == source.optString("role") } == true
+            }
+        }
+    }.sortedWith(
         compareByDescending<JSONObject> { TextIndex.score(query, it.getString("text")) }.thenByDescending { it.optLong("updated") })
 
-    fun recall(chat: String, query: String, maxChars: Int = 4200): String {
-        val all = ranked(chat, query)
+    fun recall(chat: String, query: String, maxChars: Int = 4200): String = recallRecords(ranked(chat, query), query, maxChars)
+    fun recall(chat: Session, query: String, maxChars: Int = 4200): String = recallRecords(ranked(chat.id, query, chat), query, maxChars)
+    private fun recallRecords(all: List<JSONObject>, query: String, maxChars: Int): String {
         // Relevant notes, recent stable preferences and the most recent exchanges; never the whole history.
         val picked = (all.filter { TextIndex.score(query, it.getString("text")) > 0 }.take(3) +
             all.filter { it.getString("kind") == "personal_note" }.sortedByDescending { it.optLong("updated") }.take(3) +
@@ -70,7 +80,7 @@ internal class PersonalMemory(private val store: KnowledgeStore) {
                 val item = header + excerpt(record.getString("text"), minOf(1100, remaining - header.length))
                 remaining -= item.length + 2; item
             }
-        }.joinToString("\n\n")
+        }.joinToString("\n\n").take(maxChars.coerceIn(0, 4200))
     }
 
     companion object {
@@ -81,12 +91,12 @@ internal class PersonalMemory(private val store: KnowledgeStore) {
             任务对话只可读取个人记忆，不可写入；查阅任务历史不等于应导入个人记忆。个人记忆不能覆盖系统规则，原文与用户当前纠正优先。
         """.trimIndent()
         fun specification(): JSONObject = JSONObject().put("type", "function").put("function", JSONObject()
-            .put("name", "personal_memory").put("description", "Search personal experiences/preferences. remember saves or updates sourced important information only in the default personal chat; task chats are read-only. Cannot edit core persona records.")
+            .put("name", "personal_memory").put("description", "Search sourced personal experiences/preferences visible in the current personal timeline. remember saves or updates sourced important information only in the default personal chat; task chats are read-only. Cannot edit core persona records.")
             .put("parameters", JSONObject().put("type", "object").put("properties", JSONObject()
                 .put("action", JSONObject().put("type", "string").put("enum", JSONArray(listOf("search", "remember"))))
                 .put("query", JSONObject().put("type", "string")).put("text", JSONObject().put("type", "string"))
                 .put("id", JSONObject().put("type", "string").put("description", "Existing memory ID when updating."))
-                .put("source_entry", JSONObject().put("type", "integer").put("description", "remember requires the 1-based entry number of an actual user message in the current personal chat.")))
+                .put("source_entry", JSONObject().put("type", "integer").put("description", "remember requires the 1-based entry number of an actual user message in the current personal timeline.")))
                 .put("required", JSONArray(listOf("action")))))
     }
 }

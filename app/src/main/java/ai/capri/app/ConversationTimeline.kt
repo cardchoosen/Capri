@@ -33,7 +33,7 @@ import androidx.compose.ui.unit.sp
 
 private val TimelineMuted = Color(0xFF939E94)
 
-@Composable internal fun ConversationTimeline(entries: List<Entry>, busy: Boolean, position: ChatScrollState, modifier: Modifier = Modifier, activity: ToolActivity? = null, workspace: Workspace? = null, chat: String = "") {
+@Composable internal fun ConversationTimeline(entries: List<Entry>, busy: Boolean, position: ChatScrollState, modifier: Modifier = Modifier, activity: ToolActivity? = null, workspace: Workspace? = null, chat: String = "", history: HistoryActions? = null, context: String = HistoryEditing.INITIAL, historyVersion: Long = 0, onHistory: ((Entry) -> Unit)? = null, onRetry: ((Entry) -> Unit)? = null, onHistorySubmit: (() -> Boolean)? = null) {
     val rows = remember(entries, busy, activity) { timelineRows(entries, busy, activity) }
     val list = position.list
     val input = remember(position) { object : NestedScrollConnection {
@@ -69,7 +69,7 @@ private val TimelineMuted = Color(0xFF939E94)
             Column {
                 if (row.index > 0) Spacer(Modifier.height(if (row is TimelineRow.Message && row.entry.role == "tool") 6.dp else 18.dp))
                 when (row) {
-                    is TimelineRow.Message -> TimelineMessage(row.entry, workspace, chat)
+                    is TimelineRow.Message -> TimelineMessage(row.entry, workspace, chat, history, !busy, context, historyVersion, onHistory, onRetry, onHistorySubmit)
                     is TimelineRow.History -> {
                         val expanded = position.expandedGroups[row.index] == true
                         Row(Modifier.fillMaxWidth().heightIn(min = 28.dp)
@@ -106,18 +106,16 @@ private val TimelineMuted = Color(0xFF939E94)
     }
 }
 
-@Composable private fun TimelineMessage(message: Entry, workspace: Workspace?, chat: String) {
-    if (message.role == "attachment") {
-        if (workspace != null) AttachmentView(message.text, workspace, chat)
-        else Text("附件不可用", color = TimelineMuted)
-    } else if (message.role == "tool") ToolOutputRow(message.text)
-    else Column(Modifier.fillMaxWidth().then(if (message.role == "user")
-        Modifier.background(Color(0xFF111612), RoundedCornerShape(2.dp)).padding(12.dp) else Modifier)) {
-        Text(when (message.role) { "user" -> "YOU"; "assistant" -> "CAPRI"; else -> "SYSTEM" },
-            color = when (message.role) { "assistant" -> Color(0xFFA5FF75); "status" -> Color(0xFFFF514F); else -> TimelineMuted },
-            fontFamily = FontFamily.Monospace, fontSize = 10.sp, letterSpacing = 2.sp)
+@Composable private fun TimelineMessage(message: Entry, workspace: Workspace?, chat: String, history: HistoryActions? = null, enabled: Boolean = true,
+    context: String = HistoryEditing.INITIAL, revision: Long = 0, onEdit: ((Entry) -> Unit)? = null, onRetry: ((Entry) -> Unit)? = null, onSubmit: (() -> Boolean)? = null) {
+    if (message.role == "user") InlineUserMessage(message,history,enabled,context,revision,onEdit?.let{{it(message)}},onRetry?.let{{it(message)}},onSubmit)
+    else if (message.role == "attachment") {
+        if(workspace!=null)AttachmentView(message.text,workspace,chat) else Text("附件不可用",color=TimelineMuted)
+    } else if(message.role=="tool")ToolOutputRow(message.text)
+    else Column(Modifier.fillMaxWidth()) {
+        Text(if(message.role=="assistant")"CAPRI" else "SYSTEM",color=if(message.role=="assistant")Color(0xFFA5FF75) else Color(0xFFFF514F),fontFamily=FontFamily.Monospace,fontSize=10.sp,letterSpacing=2.sp)
         Spacer(Modifier.height(8.dp))
-        if (message.role == "assistant") MarkdownReply(message.text, message.reveal)
-        else SelectionContainer { Text(message.text, fontSize = 15.sp, color = Color(0xFFF4F6F3), lineHeight = 24.sp) }
+        if(message.role=="assistant")MarkdownReply(message.text,message.reveal)
+        else SelectionContainer{Text(message.text,fontSize=15.sp,color=Color(0xFFF4F6F3),lineHeight=24.sp)}
     }
 }

@@ -15,9 +15,10 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-data class Entry(val role: String, val text: String, internal val reveal: FinalReplyReveal? = null, internal val finalReply: Boolean = reveal != null, val timestamp: Long = System.currentTimeMillis())
+data class Entry(val role: String, val text: String, internal val reveal: FinalReplyReveal? = null, internal val finalReply: Boolean = reveal != null, val timestamp: Long = System.currentTimeMillis(), val id: String = UUID.randomUUID().toString())
 enum class SessionKind { TASK, PERSONAL }
-data class Session(val id: String = UUID.randomUUID().toString(), var title: String = "新会话", val messages: MutableList<Entry> = mutableListOf(), val kind: SessionKind = SessionKind.TASK)
+data class Session(val id: String = UUID.randomUUID().toString(), var title: String = "新会话", val messages: MutableList<Entry> = mutableListOf(), val kind: SessionKind = SessionKind.TASK,
+    var contextVersion: String = HistoryEditing.INITIAL, var historyVersion: Long = 0, var historyEdited: Boolean = false, var legacyContext: Boolean = false)
 data class ModelConfig(val endpoint: String = "https://api.openai.com/v1", val model: String = "", val key: String = "", val protocol: String = "CHAT", val accountId: String = "", val contextWindow: Int? = null, val maxOutput: Int? = null, val contextSource: String = "models_api", val providerId: String = "", val modelName: String = "")
 
 class Workspace(private val base: File) {
@@ -48,13 +49,36 @@ class Store(val context: Context) {
     val workspace = Workspace(File(context.filesDir, "sessions"))
     private val index = AtomicFile(File(context.filesDir, "sessions.json"))
     private val prefs = context.getSharedPreferences("config", Context.MODE_PRIVATE)
-    fun load(): MutableList<Session> = try {
-        SessionCatalog.decode(index.openRead().bufferedReader().use { it.readText() })
-    } catch (_: java.io.FileNotFoundException) { SessionCatalog.ensurePersonal(mutableListOf()) }
+    fun load(): MutableList<Session> {
+        val raw=try { index.openRead().bufferedReader().use { it.readText() } }
+            catch (_: java.io.FileNotFoundException) { return SessionCatalog.ensurePersonal(mutableListOf()) }
+        // Preserve the complete short-lived branch format before projecting it to one timeline.
+        val all=JSONArray(raw)
+        for(i in 0 until all.length()) {
+            val item=all.getJSONObject(i)
+            if(item.optJSONArray("branches")?.length()?.let{it>0}==true) {
+                val id=item.getString("id");require(id.matches(Regex("[a-zA-Z0-9-]+")))
+                val original=item.toString()
+                val hash=java.security.MessageDigest.getInstance("SHA-256").digest(original.toByteArray()).joinToString(""){"%02x".format(it)}
+                val target=File(context.filesDir,"history-backups/$id/legacy-$hash.json")
+                if(!target.exists())backup(target,JSONArray().put(item).toString())
+            }
+        }
+        return SessionCatalog.decode(raw)
+    }
     fun save(sessions: List<Session>) {
         val stream = index.startWrite()
         try { stream.write(SessionCatalog.encode(sessions).toByteArray()); index.finishWrite(stream) }
         catch (e: Exception) { index.failWrite(stream); throw e }
+    }
+    private fun backup(target: File, raw: String) {
+        check(target.parentFile!!.mkdirs() || target.parentFile!!.isDirectory)
+        val file=AtomicFile(target);val stream=file.startWrite()
+        try{stream.write(raw.toByteArray());file.finishWrite(stream)}catch(e:Exception){file.failWrite(stream);throw e}
+    }
+    internal fun backupHistory(session: Session) {
+        require(session.id.matches(Regex("[a-zA-Z0-9-]+")))
+        backup(File(context.filesDir,"history-backups/${session.id}/previous.json"),SessionCatalog.encode(listOf(session)))
     }
     fun selected(sessions: List<Session>): String = prefs.getString("selected_chat", null)
         ?.takeIf { id -> sessions.any { it.id == id } } ?: sessions.first { it.kind == SessionKind.PERSONAL }.id

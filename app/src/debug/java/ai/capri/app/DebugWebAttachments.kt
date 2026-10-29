@@ -36,6 +36,8 @@ internal object DebugWebAttachments {
         val session = vm.sessions.firstOrNull { it.id == chat } ?: error("会话已删除")
         check(chat !in vm.deletingChats) { "会话正在删除" }
         val entry = session.messages.getOrNull(args.getInt("entry", -1)) ?: error("附件记录不存在")
+        if (args.containsKey("context_id")) require(args.getString("context_id") == session.contextVersion) { "History changed; reload attachments." }
+        if (args.containsKey("entry_id")) require(args.getString("entry_id") == entry.id) { "Attachment message changed." }
         require(entry.role == "attachment") { "仅允许读取已发送的附件" }
         val item = JSONObject(entry.text)
         val file = vm.store.workspace.file(chat, item.getString("path"))

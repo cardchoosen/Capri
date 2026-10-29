@@ -17,6 +17,7 @@ import org.json.JSONObject
 
 @Composable internal fun KnowledgePanel(vm: CapriModel, onDismiss: () -> Unit) {
     val chat = remember { vm.selected }
+    val conversation = ai.capri.app.HistoryEditing.actualContextKey(vm.sessions.first { it.id == chat })
     val personal = vm.sessions.first { it.id == chat }.kind == ai.capri.app.SessionKind.PERSONAL
     val updates by vm.updates.collectAsState()
     var tab by remember { mutableIntStateOf(0) }
@@ -28,7 +29,7 @@ import org.json.JSONObject
     var summary by remember { mutableStateOf("") }; var budget by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
     LaunchedEffect(updates, chat) { withContext(Dispatchers.IO) {
-        Triple(vm.knowledge.records(chat), vm.contextHistory.summary(chat), vm.contextHistory.budget(chat))
+        Triple(vm.knowledge.records(chat), vm.contextHistory.summary(conversation), vm.contextHistory.budget(conversation))
     }.let { records = it.first; summary = it.second; budget = it.third } }
     fun perform(onSuccess: () -> Unit = {}, block: () -> String) {
         busy = true
@@ -51,7 +52,7 @@ import org.json.JSONObject
                     Text(budget, style = MaterialTheme.typography.bodySmall)
                     Text("历史摘录摘要", style = MaterialTheme.typography.titleMedium); Text(summary)
                     OutlinedTextField(query, { query = it }, label = { Text("搜索当前会话历史") }, modifier = Modifier.fillMaxWidth())
-                    Button(enabled = !busy && !vm.resettingMemory && !vm.memoryResetRequired && query.isNotBlank(), onClick = { val q = query; val entries = vm.sessions.first { it.id == chat }.messages.toList(); perform { vm.contextHistory.query(chat, entries, JSONObject().put("query", q)) } }) { Text("检索历史") }
+                    Button(enabled = !busy && !vm.resettingMemory && !vm.memoryResetRequired && query.isNotBlank(), onClick = { val q = query; val entries = vm.sessions.first { it.id == chat }.messages.toList(); perform { vm.contextHistory.query(conversation, entries, JSONObject().put("query", q)) } }) { Text("检索历史") }
                 } else if (tab == 1 && personal) {
                     Text("一起聊过的事情会留下记忆，重要的偏好与纠正也会逐渐延续。任务对话单独保存，Capri可以按需回看。")
                     Text("这里只保留整体重置。重置会清空共同经历，核心人格保留。", style = MaterialTheme.typography.bodySmall)

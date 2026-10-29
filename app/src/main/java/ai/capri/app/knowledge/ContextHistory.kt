@@ -23,8 +23,9 @@ internal class ContextHistory(
     }
 ) {
     private fun directory(chat: String): File {
-        require(chat.matches(Regex("[a-zA-Z0-9-]+")))
-        return File(root, chat).apply { mkdirs() }
+        val (id, revision, legacy) = ai.capri.app.HistoryEditing.scope(chat)
+        val base = File(root, id)
+        return (if (revision == null) base else File(base, "${if(legacy) "branches" else "revisions"}/$revision")).apply { mkdirs() }
     }
     private fun write(file: File, text: String) = writeText(file, text)
     fun summary(chat: String): String = try { readText(File(directory(chat), "summary.txt")) }

@@ -19,7 +19,7 @@ import java.util.concurrent.TimeUnit
 /** ADB shell / app UID only; compiled exclusively into the debug APK. No TCP/LAN listener; optional shell-only Unix socket. */
 internal object DebugBridge {
     private var model = WeakReference<CapriModel>(null)
-    private data class Request(val chat: String, val start: Int, val text: String, var end: Int? = null, var job: kotlinx.coroutines.Job? = null)
+    private data class Request(val chat: String, val start: Int, val text: String, val context: String = HistoryEditing.INITIAL, var end: Int? = null, var job: kotlinx.coroutines.Job? = null)
     private val requests = linkedMapOf<String, Request>()
     fun attach(model: CapriModel) { this.model = WeakReference(model) }
     fun currentModel() = model.get()
@@ -32,7 +32,7 @@ internal object DebugBridge {
         val vm = model.get() ?: return JSONObject().put("error", "not_ready: open Capri first")
         return when (method) {
             "web_connect" -> DebugSocketBridge.connectionInfo()
-            "web_state", "web_create", "web_stop", "web_delete", "web_select" -> DebugWebBridge.call(vm, method, args)
+            "web_state", "web_revise", "web_message", "web_create", "web_stop", "web_delete", "web_select" -> DebugWebBridge.call(vm, method, args)
             "sessions" -> JSONObject().put("sessions", JSONArray().apply {
                 vm.sessions.forEach { put(JSONObject().put("chat_id", it.id).put("title", it.title).put("busy", vm.jobs.containsKey(it.id))) }
             })
@@ -67,7 +67,8 @@ internal object DebugBridge {
                     val session = if (chat == null) Session(title = "调试 · " + text.take(16)).also { vm.sessions.add(0, it); vm.prepareSession(it.id) }
                         else vm.sessions.firstOrNull { it.id == chat } ?: error("unknown chat_id")
                     check(!vm.jobs.containsKey(session.id)) { "chat busy" }
-                    val request = Request(session.id, session.messages.size, text)
+                    if (args.containsKey("from_context")) require(args.getString("from_context") == session.contextVersion && args.getLong("history_revision",-1) == session.historyVersion) { "History changed; refresh before sending." }
+                    val request = Request(session.id, session.messages.size, text, context = session.contextVersion)
                     if (!vm.sendTo(session.id, text)) {
                         vm.persist()
                         JSONObject().put("error", vm.notices[session.id] ?: "message rejected").put("chat_id", session.id)
@@ -90,11 +91,13 @@ internal object DebugBridge {
         }
     }
     private fun snapshot(vm: CapriModel, id: String, request: Request, offset: Int): JSONObject {
-        val entries = vm.sessions.firstOrNull { it.id == request.chat }?.messages?.let { it.subList(request.start, request.end ?: it.size).toList() }.orEmpty()
+        val session = vm.sessions.firstOrNull { it.id == request.chat }
+        val history = session?.let { if (it.contextVersion == request.context) it.messages else null }.orEmpty()
+        val entries = history.subList(request.start.coerceAtMost(history.size), (request.end ?: history.size).coerceIn(request.start.coerceAtMost(history.size),history.size)).toList()
         require(offset in 0..entries.size) { "invalid offset" }
         val page = entries.drop(offset).take(20)
         return JSONObject().put("request_id", id).put("chat_id", request.chat)
-            .put("running", request.job?.isCompleted == false).put("notice", vm.notices[request.chat].orEmpty())
+            .put("context_id", request.context).put("history_changed",session?.contextVersion!=request.context).put("running", request.job?.isCompleted == false).put("notice", vm.notices[request.chat].orEmpty())
             .put("next_offset", offset + page.size).put("has_more", offset + page.size < entries.size)
             .put("entries", JSONArray().apply {
                 page.forEach { put(JSONObject().put("role", it.role).put("text", redact(it.text).take(12000))) }
@@ -114,7 +117,8 @@ class DebugProvider : ContentProvider() {
             val decoded = extras?.getString("payload")?.let { encoded ->
                 val json = DebugPayload.decode(encoded)
                 Bundle().apply {
-                    for (key in listOf("text", "request_id", "chat_id", "epoch")) if (json.has(key)) putString(key, json.getString(key))
+                    for (key in listOf("text", "request_id", "chat_id", "epoch", "from_context", "context_id", "entry_id", "mode")) if (json.has(key)) putString(key, json.getString(key))
+                    if (json.has("history_revision")) putLong("history_revision", json.getLong("history_revision"))
                     for (key in listOf("offset", "before", "revision")) if (json.has(key)) putInt(key, json.getInt(key))
                 }
             } ?: extras ?: Bundle()

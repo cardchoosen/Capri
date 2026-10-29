@@ -8,9 +8,10 @@ import java.io.File
 /** Internal task checkpoint, separate from visible chat. Never stores credentials or full profile results. */
 internal class AgentRecovery(private val root: File) {
     private fun file(chat: String): AtomicFile {
-        require(chat.matches(Regex("[a-zA-Z0-9-]+")))
-        check(root.mkdirs() || root.isDirectory)
-        return AtomicFile(File(root, "$chat.json"))
+        val (id, revision, legacy) = HistoryEditing.scope(chat)
+        val target = if (revision == null) File(root, "$id.json") else File(root, "$id/${if(legacy) "branches" else "revisions"}/$revision.json")
+        check(target.parentFile!!.mkdirs() || target.parentFile!!.isDirectory)
+        return AtomicFile(target)
     }
     fun load(chat: String): JSONArray? = runCatching {
         JSONArray(file(chat).openRead().bufferedReader().use { it.readText() }).takeIf {

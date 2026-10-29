@@ -17,12 +17,12 @@ internal object SharedMemoryReset {
     fun resume(context: Context, store: Store) {
         if (!pending(context)) return
         clearCaches(context.filesDir)
-        val sessions = store.load().map { it.copy(title = if (it.kind == SessionKind.PERSONAL) "Capri" else "新会话", messages = mutableListOf()) }
+        val sessions = store.load().map { it.copy(title = if (it.kind == SessionKind.PERSONAL) "Capri" else "新会话", messages = mutableListOf(), contextVersion = HistoryEditing.INITIAL, historyVersion = it.historyVersion + 1, historyEdited = false, legacyContext = false) }
         store.save(sessions)
         marker(context).delete()
         check(!pending(context)) { "重置标记未能清除，请重试" }
     }
     internal fun clearCaches(root: File) {
-        listOf("knowledge", "context-history", "agent-recovery", "web-retrieval").forEach { RuntimeFiles.delete(File(root, it)) }
+        listOf("history-backups", "knowledge", "context-history", "agent-recovery", "web-retrieval").forEach { RuntimeFiles.delete(File(root, it)) }
     }
 }

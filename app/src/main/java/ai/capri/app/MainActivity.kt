@@ -79,7 +79,8 @@ class MainActivity : ComponentActivity() {
     val drawerTasks = remember(update) { vm.sessions.filter { it.kind == SessionKind.TASK }.map { it.copy(messages = mutableListOf()) } }
     val entries = remember(session.id, update) { session.messages.filter(ToolPresentation::visible) }
     val chatPositions = remember(vm.memoryRevision) { mutableMapOf<String, ChatScrollState>() }
-    val chatPosition = chatPositions.getOrPut(session.id) { ChatScrollState(entries.size) }
+    val chatPosition = chatPositions.getOrPut("${session.id}:${session.contextVersion}") { ChatScrollState(entries.size) }
+    val historyActions = remember(session.id) { HistoryActions() }
     val busy = vm.jobs.containsKey(session.id)
     val notice = vm.notices[session.id]
     val keyboard = LocalSoftwareKeyboardController.current
@@ -221,7 +222,10 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                         } else {
-                            ConversationTimeline(entries, busy, chatPosition, Modifier.weight(1f), vm.activeTools[session.id], vm.store.workspace, session.id)
+                            ConversationTimeline(entries, busy, chatPosition, Modifier.weight(1f), vm.activeTools[session.id], vm.store.workspace, session.id, history = historyActions, context = session.contextVersion, historyVersion = session.historyVersion,
+                                onHistory = { entry -> chatPosition.followLatest=false;chatPosition.userScrollPending=false;historyActions.open(session, entry) }, onRetry = { entry ->
+                                    runCatching { vm.reviseMessage(session.id,entry.id,null,session.contextVersion,session.historyVersion) }.onFailure { vm.notices[session.id]=it.message.orEmpty();vm.refresh() }
+                                }, onHistorySubmit = { historyActions.submit(vm,session) })
                         }
                         vm.environmentState().takeIf { it.phase != "ready" }?.let { state ->
                             Text(state.message, color = if (state.phase == "error") Red else Muted, fontSize = 11.sp,
