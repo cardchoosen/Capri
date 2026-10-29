@@ -5,6 +5,8 @@ import org.json.JSONObject
 internal data class ToolActivity(val id: String, val label: String)
 
 internal fun toolLabel(name: String, args: JSONObject?): String = when (name) {
+    "project" -> "Inspect project"
+    "apply_patch" -> "Apply code patch"
     "profile_search" -> "Search core profile"
     "model_info" -> "View model"
     "web_search" -> "Search web"

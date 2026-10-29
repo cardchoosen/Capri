@@ -62,7 +62,7 @@ class WebCatalogDeviceTest {
             model.extensions.store.installConfig(JSONObject().put("id", server).put("name", "Catalog fixture").put("type", "remote").put("url", "https://example.com/private-catalog-fixture").put("enabled", false))
             model.extensions.store.saveSecret(server, "catalog-fixture-secret-never-export")
             val tools = read("tools")
-            assertTrue(tools.toString(), tools.getInt("total") >= 20)
+            assertTrue(tools.toString(), tools.getInt("total") >= 22)
             assertEquals(8, tools.getJSONArray("items").length())
             val details = read("tools", "read_file").getJSONObject("item")
             assertEquals("read_file", details.getString("id")); assertTrue(details.getJSONObject("parameters").has("properties"))

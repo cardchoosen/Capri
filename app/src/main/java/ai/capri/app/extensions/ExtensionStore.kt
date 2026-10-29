@@ -65,7 +65,7 @@ internal object ExtensionPolicy {
     }
 }
 
-internal data class SkillInfo(val id: String, val name: String, val description: String, val directory: File, val builtin: Boolean)
+internal data class SkillInfo(val id: String, val name: String, val description: String, val directory: File, val builtin: Boolean, val category: SkillCategory = SkillCategory.GENERAL)
 internal object SkillParser {
     fun parse(directory: File, builtin: Boolean = false): SkillInfo {
         val source = File(directory, "SKILL.md")
@@ -80,7 +80,8 @@ internal object SkillParser {
         require(name == directory.name) { "技能name必须与目录名一致" }
         val description = metadata["description"] as? String ?: error("缺少description")
         require(description.length in 1..1024)
-        return SkillInfo(name, name, description, directory, builtin)
+        val category = (metadata["metadata"] as? Map<*, *>)?.get("capri/category") as? String
+        return SkillInfo(name, name, description, directory, builtin, SkillCategory.from(category))
     }
 }
 
@@ -232,11 +233,16 @@ internal class ExtensionStore(private val context: Context) {
     fun skills(): List<SkillInfo> = synchronized(lock) { skillsRoot.listFiles().orEmpty().filter { it.isDirectory }.mapNotNull {
         runCatching { SkillParser.parse(it, context.assets.list("extensions/skills").orEmpty().contains(it.name)) }.getOrNull()
     }.sortedBy { it.id } }
+    fun category(skill: SkillInfo) = SkillCategory.from(prefs.getString("skill-category:${skill.id}", skill.category.id))
+    fun setCategory(skill: SkillInfo, category: SkillCategory) = synchronized(lock) {
+        require(skills().any { it.id == skill.id }) { "Skill no longer exists." }
+        check(prefs.edit().putString("skill-category:${skill.id}", category.id).commit()) { "Unable to save Skill category." }
+    }
     fun enabled(skill: SkillInfo) = prefs.getBoolean("skill:${skill.id}", true)
     fun enable(skill: SkillInfo, value: Boolean) { prefs.edit().putBoolean("skill:${skill.id}", value).apply() }
     fun skill(id: String) = skills().firstOrNull { it.id == id && enabled(it) } ?: error("技能不存在或已停用")
     fun <T> withSkill(id: String, block: (SkillInfo) -> T): T = synchronized(lock) { block(skill(id)) }
-    fun removeSkill(id: String) = synchronized(lock) { val s = skills().first { it.id == id }; require(!s.builtin) { "内置技能可停用，不可删除" }; ai.capri.app.RuntimeFiles.delete(s.directory) }
+    fun removeSkill(id: String) = synchronized(lock) { val s = skills().first { it.id == id }; require(!s.builtin) { "内置技能可停用，不可删除" }; ai.capri.app.RuntimeFiles.delete(s.directory); prefs.edit().remove("skill-category:$id").apply() }
     fun importSkill(input: InputStream, zip: Boolean, replace: Boolean = false): String = synchronized(lock) {
         val stage = File(root, "import-${UUID.randomUUID()}").apply { mkdirs() }
         try {

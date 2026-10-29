@@ -16,12 +16,12 @@ import org.junit.Test
 
 class ToolLanguageTest {
     @Test fun builtInContractsAndActionLabelsAreEnglish() {
-        val definitions = FileToolContract.specifications() + listOf(
+        val definitions = FileToolContract.specifications() + ai.capri.app.coding.CodingContract.specifications() + listOf(
             FileToolContract.sendSpecification(), ModelInfoTool.specification(), KnowledgeTool.specification(),
             KnowledgeTool.historySpecification(), PersonalMemory.specification(), ConversationHistory.specification(),
             ShortTaskContract.specification(), CapabilityContract.specification(), NativeCatalog.spec(), TerminalContract.specification(),
             BrowserContract.specification(), ExtensionInstall.specification(), WebContract.search(), WebContract.read())
-        assertEquals(19, definitions.size) // profile_search lives in CapriModel and is checked on device.
+        assertEquals(21, definitions.size) // profile_search lives in CapriModel and is checked on device.
         for (definition in definitions) {
             val function = definition.getJSONObject("function"); val name = function.getString("name")
             assertTrue(name, name.matches(Regex("[a-z][a-z0-9_]*")))

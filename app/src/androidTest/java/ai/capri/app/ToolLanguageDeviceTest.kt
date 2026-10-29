@@ -30,10 +30,10 @@ class ToolLanguageDeviceTest {
             Thread.sleep(100)
         }
         val definitions = requireNotNull(builtins)
-        assertEquals(20, definitions.length())
+        assertEquals(22, definitions.length())
         assertFalse(definitions.toString().any { it in '\u4e00'..'\u9fff' })
         val catalog = ToolsCatalog.entries(definitions, emptyList(), { toolLabel(it, null) }, { it })
-        assertEquals(20, catalog.map { it.name }.distinct().size)
+        assertEquals(22, catalog.map { it.name }.distinct().size)
         for (entry in catalog) assertFalse(entry.name, (entry.title + entry.description + entry.parameters).any { it in '\u4e00'..'\u9fff' })
         assertEquals("View model", catalog.single { it.name == "model_info" }.title)
         assertEquals("Read current chat history", catalog.single { it.name == "context_history" }.title)

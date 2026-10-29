@@ -18,7 +18,7 @@ from urllib.parse import quote
 
 DEFAULT_PORT = 47863
 WEB = Path(__file__).with_name('web')
-METHODS = {'web_state', 'web_create', 'web_stop', 'web_delete', 'web_select', 'web_attachment', 'web_catalog', 'send', 'status'}
+METHODS = {'web_state', 'web_create', 'web_stop', 'web_delete', 'web_select', 'web_attachment', 'web_catalog', 'web_runtime', 'send', 'status'}
 
 
 class Bridge:
@@ -130,6 +130,7 @@ def server_for(bridge, port=DEFAULT_PORT, token=None):
                 self.reply(403, {'error': 'Invalid host'}); return
             files = {'/': ('index.html', 'text/html; charset=utf-8'),
                      '/app.js': ('app.js', 'text/javascript; charset=utf-8'),
+                     '/run.js': ('run.js', 'text/javascript; charset=utf-8'),
                      '/style.css': ('style.css', 'text/css; charset=utf-8')}
             asset = files.get(self.path)
             if asset is None:

@@ -29,6 +29,7 @@ import org.json.JSONObject
     val scope = rememberCoroutineScope()
     var revision by remember { mutableIntStateOf(0) }
     var category by remember { mutableIntStateOf(2) }
+    var skillCategory by remember { mutableStateOf<SkillCategory?>(null) }
     var busy by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("") }
     var job by remember { mutableStateOf<Job?>(null) }
@@ -109,15 +110,23 @@ import org.json.JSONObject
                     } else if (category == 1) {
                         Text("仅名称与简介参与发现，正文和资源按需读取。支持标准SKILL.md或单技能ZIP；也可让Capri从工作区安装。导入后不自动执行脚本。", fontSize = 12.sp)
                         TextButton(enabled = !busy && vm.jobs.isEmpty(), onClick = { importer.launch(arrayOf("*/*")) }) { Text("导入 Skill / ZIP") }
-                        skills.forEach { skill ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(selected = skillCategory == null, onClick = { skillCategory = null }, label = { Text("All") })
+                            SkillCategory.entries.forEach { type -> FilterChip(selected = skillCategory == type, onClick = { skillCategory = type }, label = { Text(type.title) }) }
+                        }
+                        skills.filter { skillCategory == null || manager.store.category(it) == skillCategory }.forEach { skill ->
                             HorizontalDivider()
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Column(Modifier.weight(1f).padding(top = 12.dp)) { Text(skill.name, color = MaterialTheme.colorScheme.primary); Text(if (skill.builtin) "内置" else "用户导入", fontSize = 11.sp) }
+                                Column(Modifier.weight(1f).padding(top = 12.dp)) { Text(skill.name, color = MaterialTheme.colorScheme.primary); Text("${manager.store.category(skill).title} · ${if (skill.builtin) "内置" else "用户导入"}", fontSize = 11.sp, color = if (manager.store.category(skill) == SkillCategory.WEAPON) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant) }
                                 Switch(checked = manager.store.enabled(skill), enabled = !busy && vm.jobs.isEmpty(), onCheckedChange = { manager.store.enable(skill, it); revision++ })
                             }
                             Text(skill.description, fontSize = 12.sp)
                             Row {
                                 TextButton(onClick = { detailTitle = "Skill 指令"; skillBody = skill.directory.resolve("SKILL.md").readText() }) { Text("查看指令") }
+                                TextButton(enabled = !busy && vm.jobs.isEmpty(), onClick = { action {
+                                    manager.store.setCategory(skill, if (manager.store.category(skill) == SkillCategory.WEAPON) SkillCategory.GENERAL else SkillCategory.WEAPON)
+                                    "分类已更新"
+                                } }) { Text(if (manager.store.category(skill) == SkillCategory.WEAPON) "Move to General" else "Move to Weapon") }
                                 if (!skill.builtin) TextButton(enabled = !busy && vm.jobs.isEmpty(), onClick = { action { manager.store.removeSkill(skill.id); "已删除技能，已生成的会话产物保留" } }) { Text("删除") }
                             }
                         }

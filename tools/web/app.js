@@ -18,6 +18,7 @@ function controls() {
   $('send').disabled = !connected || dispatching || !!pending || !state || state.busy || state.deleting || state.preparing;
   $('create').disabled = !connected || dispatching || !!pending || !state || state.preparing;
   $('catalog-open').disabled=!connected||!state;
+  $('run-open').disabled=!connected||!state;
   $('stop').hidden = !state?.busy; $('stop').disabled = !connected || dispatching;
 }
 function failure(message) { $('error').textContent = message; $('error').hidden = !message; }
@@ -204,12 +205,14 @@ function catalogText(tag,text){const node=document.createElement(tag);node.textC
 function catalogMetadata(item){
   if(catalogCategory==='tools')return item.source;
   if(catalogCategory==='mcp')return `${item.type} · ${item.enabled?'已启用':'已停用'} · ${item.active?'当前会话已选择':'当前会话未选择'} · ${item.state}`;
-  return `${item.builtin?'内置':'用户安装'} · ${item.enabled?'已启用':'已停用'}`;
+  return `${item.skill_category==='weapon'?'Weapon':'General'} · ${item.builtin?'内置':'用户安装'} · ${item.enabled?'已启用':'已停用'}`;
 }
 async function loadCatalog(append=false){
   if(!$('catalog-dialog').open)return;
+  $('catalog-skill-type').hidden=catalogCategory!=='skills';
   const seq=++catalogSequence,requestedChat=chat,requestedEpoch=epoch;catalogScope=chat+'|'+epoch;
   const args={chat_id:chat,epoch,category:catalogCategory,query:$('catalog-query').value.trim(),offset:append?(catalogNext||0):0};
+  if(catalogCategory==='skills')args.skill_type=$('catalog-skill-type').value;
   if(catalogId)args.id=catalogId;
   $('catalog-status').textContent='正在读取手机…';$('catalog-more').hidden=true;
   try{
@@ -242,3 +245,5 @@ $('catalog-query').oninput=()=>{catalogId='';clearTimeout(catalogSearchTimer);ca
 $('catalog-refresh').onclick=()=>loadCatalog();
 $('catalog-back').onclick=()=>{catalogId='';loadCatalog();};
 $('catalog-more').onclick=()=>loadCatalog(true);
+
+$('catalog-skill-type').onchange=()=>{catalogId='';loadCatalog();};

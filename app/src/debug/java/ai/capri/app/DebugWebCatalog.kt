@@ -21,6 +21,8 @@ internal object DebugWebCatalog {
         require(vm.sessions.any { it.id == chat } && chat !in vm.deletingChats) { "Unknown or deleting chat." }
         val category = args.getString("category", "tools")
         require(category in setOf("tools", "mcp", "skills")) { "Unknown catalog category." }
+        val skillType = args.getString("skill_type", "all")
+        require(skillType in setOf("all", "general", "weapon")) { "Unknown Skill category." }
         val query = args.getString("query").orEmpty().trim(); require(query.length <= 300)
         val id = args.getString("id").orEmpty(); require(id.length <= 200)
         val offset = args.getInt("offset", 0); require(offset >= 0)
@@ -39,9 +41,9 @@ internal object DebugWebCatalog {
                         .put("type", config.getString("type")).put("enabled", config.optBoolean("enabled"))
                         .put("active", manager.store.active(chat, key)).put("state", manager.state(chat, key))
                 }
-                else -> manager.store.skills().map {
+                else -> manager.store.skills().filter { skillType == "all" || manager.store.category(it).id == skillType }.map {
                     JSONObject().put("id", it.id).put("name", it.name).put("description", it.description)
-                        .put("enabled", manager.store.enabled(it)).put("builtin", it.builtin)
+                        .put("enabled", manager.store.enabled(it)).put("builtin", it.builtin).put("skill_category", manager.store.category(it).id)
                 }
             }
             if (id.isNotBlank()) {
