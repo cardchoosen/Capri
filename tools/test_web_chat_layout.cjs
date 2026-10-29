@@ -1,0 +1,11 @@
+'use strict';
+const assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs');
+const scope={};vm.createContext(scope);vm.runInContext(fs.readFileSync(__dirname+'/web/chat-layout.js','utf8'),scope);
+const entries=[{id:'u',index:0,role:'user',text:'request'},{id:'p',index:1,role:'assistant',text:'Checking',process_group:'p',process_count:2},{id:'t1',index:2,role:'tool',text:'read_file\n{}',process_group:'p',process_count:2},{id:'a',index:3,role:'attachment',text:'{}'},{id:'t2',index:4,role:'tool',text:'python_run\n{}',process_group:'p',process_count:2},{id:'f',index:5,role:'assistant',text:'Done',final_reply:true}];
+const groups=scope.groupChatEntries(entries);
+assert.equal(groups.length,4);assert.equal(groups[1].tool,true);assert.deepEqual(Array.from(groups[1].items,e=>e.id),['p','t1','t2']);assert.equal(groups.at(-1).items[0].id,'f');
+const error=scope.toolOutputSummary({text:'terminal\n'+JSON.stringify({status:'ok',data:{command:{state:'failed',exit_code:2}}}),tool_label:'Run command'});
+assert.equal(error.failed,true);assert.equal(error.label,'Run command · 命令退出 2');
+assert.equal(scope.toolOutputSummary({text:'android\n'+JSON.stringify({status:'permission_required'}),tool_label:'Read location'}).label,'Read location · 需要授权');
+assert.equal(scope.toolOutputSummary({text:'read_file\n{}',tool_label:'Read file'}).label,'Read file');
+console.log('PASS: phone process groups, final/attachment visibility, tool labels and failure states');

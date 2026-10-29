@@ -21,7 +21,7 @@ internal object SessionCatalog {
             val id = obj.getString("id")
             fun entries(data: JSONArray, legacy: Boolean = false): MutableList<Entry> = (0 until data.length()).map { j ->
                 data.getJSONObject(j).let { e -> Entry(e.getString("role"), e.getString("text"),
-                    finalReply = e.optBoolean("final_reply", false), timestamp = e.optLong("timestamp", 0),
+                    inputs = e.optJSONArray("inputs")?.toString(), finalReply = e.optBoolean("final_reply", false), timestamp = e.optLong("timestamp", 0),
                     id = e.optString("id").ifBlank { require(legacy) { "Branch message ID missing." }; java.util.UUID.nameUUIDFromBytes((id + ":" + j + ":" + e.toString()).toByteArray()).toString() }) }
             }.toMutableList()
             val messages = entries(obj.getJSONArray("messages"), true)
@@ -38,7 +38,7 @@ internal object SessionCatalog {
     }
 
     private fun entry(entry: Entry) = JSONObject().put("id", entry.id).put("role", entry.role).put("text", entry.text)
-        .put("final_reply", entry.finalReply).put("timestamp", entry.timestamp)
+        .put("final_reply", entry.finalReply).put("timestamp", entry.timestamp).apply { entry.inputs?.let { put("inputs", JSONArray(it)) } }
     fun encode(sessions: List<Session>): String = JSONArray(sessions.map { s ->
         JSONObject().put("id",s.id).put("title",s.title).put("kind",s.kind.name)
             .put("messages",JSONArray(s.messages.map(::entry))).put("context_version",s.contextVersion).put("history_version",s.historyVersion)

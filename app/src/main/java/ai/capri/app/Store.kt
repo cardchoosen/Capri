@@ -15,7 +15,7 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-data class Entry(val role: String, val text: String, internal val reveal: FinalReplyReveal? = null, internal val finalReply: Boolean = reveal != null, val timestamp: Long = System.currentTimeMillis(), val id: String = UUID.randomUUID().toString())
+data class Entry(val role: String, val text: String, internal val reveal: FinalReplyReveal? = null, internal val finalReply: Boolean = reveal != null, val timestamp: Long = System.currentTimeMillis(), val id: String = UUID.randomUUID().toString(), val inputs: String? = null)
 enum class SessionKind { TASK, PERSONAL }
 data class Session(val id: String = UUID.randomUUID().toString(), var title: String = "新会话", val messages: MutableList<Entry> = mutableListOf(), val kind: SessionKind = SessionKind.TASK,
     var contextVersion: String = HistoryEditing.INITIAL, var historyVersion: Long = 0, var historyEdited: Boolean = false, var legacyContext: Boolean = false)

@@ -19,7 +19,7 @@ import java.util.concurrent.TimeUnit
 /** ADB shell / app UID only; compiled exclusively into the debug APK. No TCP/LAN listener; optional shell-only Unix socket. */
 internal object DebugBridge {
     private var model = WeakReference<CapriModel>(null)
-    private data class Request(val chat: String, val start: Int, val text: String, val context: String = HistoryEditing.INITIAL, var end: Int? = null, var job: kotlinx.coroutines.Job? = null)
+    private data class Request(val chat: String, val start: Int, val text: String, val context: String = HistoryEditing.INITIAL, var end: Int? = null, var job: kotlinx.coroutines.Job? = null, val inputIds: List<String> = emptyList())
     private val requests = linkedMapOf<String, Request>()
     fun attach(model: CapriModel) { this.model = WeakReference(model) }
     fun currentModel() = model.get()
@@ -51,11 +51,14 @@ internal object DebugBridge {
                 val id = args.getString("request_id").orEmpty()
                 require(runCatching { UUID.fromString(id).toString() == id }.getOrDefault(false)) { "request_id must be a UUID" }
                 if (args.containsKey("epoch")) require(args.getString("epoch") == DebugWebBridge.epoch) { "app restarted; refresh history before submitting" }
-                val text = args.getString("text").orEmpty()
+                val inputArray = JSONArray(args.getString("input_ids") ?: "[]")
+                require(inputArray.length() <= InputAttachments.MAX_FILES) { "Too many input files." }
+                val inputIds = (0 until inputArray.length()).map { inputArray.getString(it) }
+                val text = args.getString("text").orEmpty().ifBlank { if (inputIds.isNotEmpty()) "请查看附件。" else "" }
                 require(text.isNotBlank() && text.toByteArray().size <= 32000) { "text must be 1–32000 bytes" }
                 val previous = requests[id]
                 if (previous != null) {
-                    require(previous.text == text && (args.getString("chat_id").isNullOrEmpty() || args.getString("chat_id") == previous.chat)) { "request_id conflict" }
+                    require(previous.text == text && previous.inputIds == inputIds && (args.getString("chat_id").isNullOrEmpty() || args.getString("chat_id") == previous.chat)) { "request_id conflict" }
                     snapshot(vm, id, previous, 0)
                 } else {
                     if (requests.size >= 100) {
@@ -68,8 +71,8 @@ internal object DebugBridge {
                         else vm.sessions.firstOrNull { it.id == chat } ?: error("unknown chat_id")
                     check(!vm.jobs.containsKey(session.id)) { "chat busy" }
                     if (args.containsKey("from_context")) require(args.getString("from_context") == session.contextVersion && args.getLong("history_revision",-1) == session.historyVersion) { "History changed; refresh before sending." }
-                    val request = Request(session.id, session.messages.size, text, context = session.contextVersion)
-                    if (!vm.sendTo(session.id, text)) {
+                    val request = Request(session.id, session.messages.size, text, context = session.contextVersion, inputIds = inputIds)
+                    if (!vm.sendTo(session.id, text, inputIds)) {
                         vm.persist()
                         JSONObject().put("error", vm.notices[session.id] ?: "message rejected").put("chat_id", session.id)
                     } else {
@@ -118,6 +121,7 @@ class DebugProvider : ContentProvider() {
                 val json = DebugPayload.decode(encoded)
                 Bundle().apply {
                     for (key in listOf("text", "request_id", "chat_id", "epoch", "from_context", "context_id", "entry_id", "mode")) if (json.has(key)) putString(key, json.getString(key))
+                    if (json.has("input_ids")) putString("input_ids", json.getJSONArray("input_ids").toString())
                     if (json.has("history_revision")) putLong("history_revision", json.getLong("history_revision"))
                     for (key in listOf("offset", "before", "revision")) if (json.has(key)) putInt(key, json.getInt(key))
                 }

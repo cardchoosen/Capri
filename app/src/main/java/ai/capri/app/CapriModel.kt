@@ -46,6 +46,13 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
             val net = cm.activeNetwork; val link = net?.let(cm::getLinkProperties); val caps = cm.getNetworkCapabilities(net)
             "$net|${link?.dnsServers}|${link?.httpProxy}|$caps"
         })
+    internal val inputAttachments = InputAttachments(File(app.filesDir, "input-drafts"), store.workspace)
+    internal fun pendingInputs(chat: String): List<JSONObject> {
+        val sent = sessions.firstOrNull { it.id == chat }?.messages.orEmpty().mapNotNull { it.inputs }.flatMap { raw -> val a = JSONArray(raw); (0 until a.length()).map { a.getJSONObject(it).getString("id") } }.toSet()
+        val current = inputAttachments.list(chat)
+        if (current.any { it.getString("id") in sent }) runCatching { inputAttachments.consume(chat, sent) }
+        return current.filterNot { it.getString("id") in sent }
+    }
     val runtime = PythonRuntime(app, store.workspace)
     internal val terminals = ai.capri.app.terminal.TerminalManager.get(app)
     internal val installationEnvironment = ai.capri.app.environment.InstallationEnvironment.get(app)
@@ -178,6 +185,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
         withContext(Dispatchers.IO) {
             sessionDeletion.cleanup(chat)
             knowledge.deleteChat(chat)
+            inputAttachments.clear(chat)
             store.models.forgetChat(chat)
             if (profileRemoved) sessionDeletion.finish(chat)
         }
@@ -262,19 +270,21 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
         try {
             store.backupHistory(session)
             HistoryEditing.replaceFrom(session, entry)
-            check(sendTo(chat,next)) { "消息未提交，请核对会话状态" }
+            check(sendTo(chat,next, retainedInputs = original.inputs)) { "消息未提交，请核对会话状态" }
             return session.contextVersion
         } catch (e: Exception) { HistoryEditing.restore(session,saved); refresh(); throw e }
     }
     fun stop() { jobs[selected]?.cancel(); notices[selected] = "已请求停止"; refresh() }
-    fun send(text: String): Boolean = sendTo(selected, text)
-    internal fun sendTo(chat: String, text: String): Boolean {
-        if (text.isBlank() || jobs.containsKey(chat) || chat in deletingChats) return false
+    fun send(text: String): Boolean = runCatching { sendTo(selected, text, pendingInputs(selected).map { it.getString("id") }) }.getOrElse {
+        notices[selected] = "附件暂不可用，请核对已选文件后重试。"; refresh(); false
+    }
+    internal fun sendTo(chat: String, text: String, inputIds: List<String> = emptyList(), retainedInputs: String? = null): Boolean {
+        if (text.isBlank() && inputIds.isEmpty() && retainedInputs == null || jobs.containsKey(chat) || chat in deletingChats) return false
         if (resettingMemory || memoryResetRequired) { notices[chat] = "记忆重置尚未完成，请先重试重置"; refresh(); return false }
         if (runtimeBusy) { notices[chat] = "环境维护或检查中，请稍后发送"; refresh(); return false }
         if (migrating) { notices[chat] = "正在准备新执行环境，完成后即可开始新会话"; refresh(); return false }
         val session = sessions.firstOrNull { it.id == chat } ?: return false
-        if (session.kind == SessionKind.TASK && IdentityReply.matches(text)) {
+        if (inputIds.isEmpty() && retainedInputs == null && session.kind == SessionKind.TASK && IdentityReply.matches(text)) {
             session.messages.add(Entry("user", text.trim()))
             session.messages.forEach { it.reveal?.finish() }
             session.messages.add(Entry("assistant", IdentityReply.TEXT, FinalReplyReveal()))
@@ -287,14 +297,22 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
         if (config.model.isBlank() || config.key.isBlank()) { notices[session.id] = "请先添加 API 并选择模型"; refresh(); return false }
         store.models.selected(chat)?.let { store.models.select(chat, it.first.id, it.second.id) }
         session.messages.forEach { it.reveal?.finish() }
-        session.messages.add(Entry("user", text.trim()))
-        if (session.title == "新会话") session.title = text.take(20)
+        val inputFiles = if (retainedInputs != null) JSONArray(retainedInputs).let { a -> (0 until a.length()).map { a.getJSONObject(it) } } else {
+            require(inputIds.all { id -> pendingInputs(chat).any { it.getString("id") == id } }) { "Input attachment was already sent or removed; refresh the draft." }
+            inputAttachments.select(chat, inputIds)
+        }
+        val submittedText = text.trim().ifBlank { "请查看附件。" }
+        session.messages.add(Entry("user", submittedText, inputs = inputFiles.takeIf { it.isNotEmpty() }?.let { JSONArray(it).toString() }))
+        inputFiles.forEach { session.messages.add(Entry("attachment", it.toString())) }
+        if (session.title == "新会话") session.title = submittedText.take(20)
         persist()
+        if (inputIds.isNotEmpty()) runCatching { inputAttachments.consume(chat, inputIds.toSet()) }
         val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
             taskModels[chat] = config
             try { respond(session, config) }
             catch (e: CancellationException) { session.messages.add(Entry("status", "执行已停止")); throw e }
             catch (e: ai.capri.app.knowledge.ContextBudgetFailure) { session.messages.add(Entry("status", e.message.orEmpty())) }
+            catch (e: InputAttachmentFailure) { session.messages.add(Entry("status", "附件输入未完成：图片可能已变更或无法读取。原文件仍保留，请核对附件后重新选择或重试。")) }
             catch (e: ModelRequestFailure) {
                 Log.w("CapriModelRequest", "failed category=${e.category} type=${e.cause?.javaClass?.simpleName}")
                 session.messages.add(Entry("status", "${e.category}，模型回复未完成。已记录的工具结果保留，持续终端不会因此自动停止。发送“继续”可接续；结果未确认的操作会先核验，不直接重跑。"))
@@ -327,6 +345,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
     private val modelContexts = ai.capri.app.model.ModelContexts(File(app.filesDir, "model-contexts"))
 
     private suspend fun respond(session: Session, config: ModelConfig) {
+        val latestUser = session.messages.last { it.role == "user" }
         val conversation = HistoryEditing.actualContextKey(session)
         workspaceFiles.beginTurn(session.id)
         val trace = PerformanceTrace(File(store.workspace.root(session.id), "metrics/${java.util.UUID.randomUUID()}.jsonl"))
@@ -339,11 +358,11 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
             if (!signedHistoryMissing && checkpoint.optJSONObject(0)?.optString("_capri_scope") == ai.capri.app.model.ModelWire.scope(config)) checkpoint
             else ai.capri.app.model.ModelWire.portable(checkpoint)
         }
-        val continuing = saved != null && RecoveryMessages.isContinuation(session.messages.last().text)
+        val continuing = saved != null && RecoveryMessages.isContinuation(latestUser.text)
         var messages = if (saved != null) RecoveryMessages.forResume(saved) else JSONArray()
         var contextBudget = withContext(Dispatchers.IO) { modelContexts.resolve(config) }
         val recalled = if (session.kind == SessionKind.PERSONAL) withContext(Dispatchers.IO) {
-            personalMemory.recall(snapshot(session), session.messages.last().text, contextBudget.input / 16)
+            personalMemory.recall(snapshot(session), latestUser.text, contextBudget.input / 16)
         } else ""
         val environmentRecall = withContext(Dispatchers.IO) { runCatching {
             val recent = session.messages.filter { it.role in setOf("user", "assistant") }.takeLast(4).joinToString("\n") { it.text.take(700) }
@@ -362,7 +381,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
             messages.getJSONObject(0).put("content", rules)
             val instruction = if (continuing) "接续检查点，已记录的工具不得因网络重试重复执行。"
                 else "这是新请求；先前记录仅用于核验现存资源，不要自行继续先前目标。"
-            messages.put(JSONObject().put("role", "user").put("content", session.messages.last().text + "；" + instruction))
+            messages.put(JSONObject().put("role", "user").put("content", latestUser.text + InputAttachments.manifest(latestUser.inputs?.let { raw -> JSONArray(raw).let { a -> (0 until a.length()).map { a.getJSONObject(it) } } } ?: emptyList()) + "；" + instruction).apply { latestUser.inputs?.let { put(InputAttachments.KEY, JSONArray(it)) } })
         } else {
             messages = withContext(Dispatchers.IO) { contextHistory.fresh(conversation, session.messages.toList(), rules) }
         }
@@ -393,7 +412,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                 try { withContext(Dispatchers.IO) {
                 val url = ai.capri.app.model.ModelWire.url(config).toString()
                 require(url.startsWith("https://")) { "模型接口须使用 HTTPS" }
-                val body = ai.capri.app.model.ModelWire.request(config, requestMessages, tools, contextBudget.output)
+                val body = ai.capri.app.model.ModelWire.request(config, inputAttachments.hydrate(session.id, requestMessages), tools, contextBudget.output)
                 val startedAt = android.os.SystemClock.elapsedRealtime()
                 val call = http.newCall(ai.capri.app.model.ModelApi.headers(config, Request.Builder().url(url)).post(body.toString().toRequestBody("application/json".toMediaType())).build())
                 suspendCancellableCoroutine<JSONObject> { continuation ->

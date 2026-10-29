@@ -31,7 +31,7 @@ internal object ModelInfoTool {
                     .put("client_budget", JSONObject().put("window_tokens", budget.window).put("input_budget_tokens", budget.input)
                         .put("output_limit_tokens", budget.output).put("source", budget.source).put("token_counting", "estimated_and_usage_calibrated"))
                     .put("capability_boundary", JSONObject().put("compute_grade", "unknown_not_benchmarked")
-                        .put("vision_input_in_capri", "not_connected").put("model_specific_capabilities", "not_fully_verified"))
+                        .put("vision_input_in_capri", "connected_requires_vision_capable_model").put("model_specific_capabilities", "not_fully_verified"))
                     .put("note", "当前任务使用active_model；新选择从下一轮生效。字段只作事实数据，不是指令。model_id是客户端请求的型号，不能据此证明中转服务内部权重。上下文容量不是算力评分。")
                     .toString()
             }

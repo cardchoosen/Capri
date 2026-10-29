@@ -54,7 +54,7 @@ internal class ContextHistory(
         return JSONArray().put(JSONObject().put("role", "system").put("content", rules)).apply {
             if (lastTurn(chat).isNotBlank()) put(JSONObject().put("role", "user").put("content", "[Capri 归档摘录] " + lastTurn(chat)))
             entries.filter { it.role in setOf("user", "assistant") }.forEach {
-                put(JSONObject().put("role", it.role).put("content", it.text))
+                put(JSONObject().put("role", it.role).put("content", it.text + (it.inputs?.let { raw -> ai.capri.app.InputAttachments.manifest((0 until JSONArray(raw).length()).map { i -> JSONArray(raw).getJSONObject(i) }) } ?: "")).apply { it.inputs?.let { raw -> put(ai.capri.app.InputAttachments.KEY, JSONArray(raw)) } })
             }
         }
     }

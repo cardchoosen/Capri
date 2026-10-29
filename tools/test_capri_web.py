@@ -145,4 +145,132 @@ class PersistentTransportTest(unittest.TestCase):
                 self.assertEqual(1, new.sendall.call_count)
                 bridge.close()
 
+class RecoveryTest(unittest.TestCase):
+    def test_selected_phone_is_pinned_and_unauthorized_devices_are_not_started(self):
+        from capri_web import DeviceTarget, BridgeError
+        from unittest.mock import patch, Mock
+        target = DeviceTarget()
+        def devices(value): return Mock(stdout='List of devices attached\n' + value)
+        with patch('capri_web.subprocess.run', return_value=devices('phone-a device usb:1-1 model:test\n')):
+            self.assertEqual('phone-a', target.resolve('adb'))
+        with patch('capri_web.subprocess.run', return_value=devices('phone-b device usb:1-2 model:test\n')):
+            with self.assertRaises(BridgeError) as error: target.resolve('adb')
+            self.assertEqual('device_offline', error.exception.code)
+        with patch('capri_web.subprocess.run', return_value=devices('phone-a unauthorized usb:1-1\n')):
+            with self.assertRaises(BridgeError) as error: target.resolve('adb')
+            self.assertEqual('device_unauthorized', error.exception.code)
+        with patch('capri_web.subprocess.run', return_value=devices('a device usb:1-1\nb device usb:1-2\n')):
+            with self.assertRaises(BridgeError) as error: DeviceTarget().resolve('adb')
+            self.assertEqual('device_ambiguous', error.exception.code)
+
+    def test_app_is_started_only_when_provider_reports_not_ready(self):
+        import io
+        from unittest.mock import Mock, patch
+        from capri_web import Bridge
+        for ready in (False, True, "provider_missing"):
+            bridge=Bridge('adb','phone-a');bridge.target.resolve=Mock()
+            info={'socket':'ai.capri.app.web.12345','token':'phone-token'}
+            from capri_web import BridgeError
+            sequence=[BridgeError('bridge_unavailable','missing'),info] if ready=='provider_missing' else [info] if ready else [{'error':'not_ready: open Capri first'},info]
+            bridge._content=Mock(side_effect=sequence)
+            connection=Mock();connection.makefile.return_value=io.BytesIO()
+            with patch('capri_web.subprocess.run',return_value=Mock(stdout='12345\n')) as command, patch('capri_web.socket.create_connection',return_value=connection), patch('capri_web.time.sleep'):
+                bridge._connect()
+                starts=[c for c in command.call_args_list if 'start' in c.args[0]]
+                self.assertEqual(0 if ready is True else 1,len(starts))
+                self.assertEqual(1 if ready is True else 2,bridge._content.call_count)
+                bridge.close()
+
+    def test_expired_idle_socket_is_replaced_before_sending_a_mutation(self):
+        import io
+        from unittest.mock import Mock, patch
+        from capri_web import Bridge
+        bridge=Bridge('adb','phone');old=Mock();bridge.connection=old;bridge.last_used=1
+        new=Mock()
+        def connect():
+            bridge.connection=new;bridge.reader=io.BytesIO(b'{"accepted":true}\n');bridge.phone_token='new'
+        bridge._connect=Mock(side_effect=connect)
+        with patch('capri_web.time.monotonic',return_value=12):
+            self.assertTrue(bridge.call('send',{'chat_id':'chat','epoch':'e','request_id':'id'})['accepted'])
+        old.sendall.assert_not_called();new.sendall.assert_called_once();bridge.close()
+
+    def test_state_lane_is_independent_of_bulk_lane_and_shares_device_identity(self):
+        from capri_web import BridgePool
+        from unittest.mock import Mock
+        bridge=BridgePool('adb','phone')
+        bridge.state.call=Mock(return_value={'revision':1});bridge.work.call=Mock(return_value={'ok':True})
+        self.assertIs(bridge.state.target,bridge.work.target)
+        bridge.call('web_state',{});bridge.call('web_runtime',{})
+        bridge.state.call.assert_called_once_with('web_state',{})
+        bridge.work.call.assert_called_once_with('web_runtime',{})
+
+    def test_device_tracker_parses_real_length_frames_including_disconnect(self):
+        import io
+        from capri_web import tracker_frame
+        raw=b'phone device usb:1-1\n'
+        stream=io.BytesIO(f'{len(raw):04x}'.encode()+raw+b'0000')
+        self.assertEqual(raw.decode(),tracker_frame(stream))
+        self.assertEqual('',tracker_frame(stream))
+        with self.assertRaises(EOFError):tracker_frame(stream)
+        with self.assertRaises(ValueError):tracker_frame(io.BytesIO(b'NOPE'))
+
+    def test_device_event_wakes_phone_and_opens_browser_once_ready(self):
+        import io
+        from unittest.mock import Mock, patch
+        from capri_web import DeviceMonitor, BridgeError
+        bridge=Mock();bridge.state.adb_path='adb'
+        bridge.call.side_effect=[BridgeError('app_not_ready','starting'),{'epoch':'new'}]
+        raw=b'phone device usb:1-1\n'
+        process=Mock();process.stdout=io.BytesIO(f'{len(raw):04x}'.encode()+raw);process.poll.return_value=0
+        monitor=DeviceMonitor(bridge)
+        opened=[]
+        def connected(): opened.append(True);monitor.stopped.set()
+        monitor.connected=connected
+        monitor.stopped.wait=lambda timeout: monitor.stopped.is_set()
+        with patch('capri_web.subprocess.Popen',return_value=process): monitor.run()
+        self.assertEqual([True],opened)
+        self.assertEqual(2,bridge.call.call_count)
+        for call in bridge.call.call_args_list:self.assertEqual(('web_state',{}),call.args)
+
+    def test_access_token_survives_service_restart_and_is_owner_only(self):
+        import tempfile,os
+        from pathlib import Path
+        from capri_web import access_token
+        with tempfile.TemporaryDirectory() as temp:
+            path=Path(temp)/'access.token'
+            first=access_token(path);self.assertEqual(first,access_token(path))
+            self.assertEqual(0o600,path.stat().st_mode & 0o777)
+            link=Path(temp)/'link';link.symlink_to(path)
+            with self.assertRaises(ValueError):access_token(link)
+
+    def test_service_update_waits_until_launchd_unregisters_the_old_job(self):
+        from capri_web_service import unload
+        from unittest.mock import Mock, patch
+        with patch('capri_web_service.launchctl',side_effect=[Mock(returncode=0),Mock(returncode=0),Mock(returncode=113)]) as control, patch('capri_web_service.time.sleep') as pause:
+            unload('gui/501/ai.capri.web')
+            self.assertEqual(['bootout','print','print'],[call.args[0] for call in control.call_args_list])
+            pause.assert_called_once_with(.2)
+
+    def test_autostart_uses_loopback_server_without_sending_tasks(self):
+        from capri_web_service import configuration
+        config=configuration('/usr/bin/adb','phone-a')
+        self.assertTrue(config['RunAtLoad']);self.assertTrue(config['KeepAlive'])
+        self.assertIn('--open-browser',config['ProgramArguments'])
+        self.assertNotIn('send',config['ProgramArguments'])
+        self.assertEqual(['--serial','phone-a'],config['ProgramArguments'][-2:])
+
+
+class RecoveryEndpointTest(unittest.TestCase):
+    setUp = WebBoundaryTest.setUp
+    tearDown = WebBoundaryTest.tearDown
+    request = WebBoundaryTest.request
+    def test_connection_errors_have_actionable_codes(self):
+        from capri_web import BridgeError
+        def offline(*_):raise BridgeError('device_offline','Selected phone offline.')
+        self.bridge.call=offline
+        status,body,_=self.request()
+        self.assertEqual(503,status)
+        self.assertEqual('device_offline',json.loads(body)['code'])
+
+
 if __name__ == '__main__': unittest.main()

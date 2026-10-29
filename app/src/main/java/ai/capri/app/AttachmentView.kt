@@ -41,7 +41,7 @@ import kotlin.math.roundToInt
             val ratio = (data!!.getDouble("width") / data.getDouble("height")).toFloat().coerceIn(.5f, 2f)
             LocalImage(workspace, chat, data.getString("path"), Modifier.fillMaxWidth().heightIn(max = 360.dp).aspectRatio(ratio).clickable { expanded = true }, name)
         }
-        Text(caption.ifBlank { name }, fontSize = 13.sp, color = Color(0xFFF4F6F3))
+        Text((if (data?.optString("direction") == "input") "你发送的附件 · " else "") + caption.ifBlank { name }, fontSize = 13.sp, color = Color(0xFFF4F6F3))
         Row {
             if (image) TextButton(onClick = { expanded = true }) { Text("查看图片", fontSize = 11.sp) }
             TextButton(onClick = {
@@ -64,17 +64,17 @@ import kotlin.math.roundToInt
     }
 }
 
-/** Native decoder handles GIF/animated WebP; no network loading, WebView or Base64 in model messages. */
-@Composable private fun LocalImage(workspace: Workspace, chat: String, path: String, modifier: Modifier, label: String) {
+/** Native decoder handles GIF/animated WebP; no network loading or WebView. */
+@Composable internal fun LocalImage(workspace: Workspace, chat: String, path: String, modifier: Modifier, label: String, maxEdge: Int = 1280) {
     var error by remember(path) { mutableStateOf(false) }
-    val drawable by produceState<Drawable?>(null, workspace, chat, path) {
+    val drawable by produceState<Drawable?>(null, workspace, chat, path, maxEdge) {
         value = withContext(Dispatchers.IO) {
             runCatching {
                 val file = workspace.file(chat, path)
                 require(file.isFile && file.length() in 1..Attachments.MAX_BYTES)
                 ImageDecoder.decodeDrawable(ImageDecoder.createSource(file)) { decoder, info, _ ->
                     require(info.size.width.toLong() * info.size.height <= 32_000_000L)
-                    val scale = minOf(1f, 1280f / maxOf(info.size.width, info.size.height))
+                    val scale = minOf(1f, maxEdge.toFloat() / maxOf(info.size.width, info.size.height))
                     decoder.setTargetSize((info.size.width * scale).roundToInt().coerceAtLeast(1), (info.size.height * scale).roundToInt().coerceAtLeast(1))
                 }
             }.getOrNull()

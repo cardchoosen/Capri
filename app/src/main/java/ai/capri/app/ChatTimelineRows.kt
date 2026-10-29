@@ -25,8 +25,10 @@ internal fun timelineRows(entries: List<Entry>, busy: Boolean, activity: ToolAct
         val count = process.count { turn[it].role == "tool" }
         if (count > 0 || running && activity != null) {
             if (processStart == 1) rows += TimelineRow.Message(start, turn.first())
+            val inputFiles = (processStart until processEnd).filter { turn[it].role == "attachment" && runCatching { org.json.JSONObject(turn[it].text).optString("direction") == "input" }.getOrDefault(false) }
+            inputFiles.forEach { rows += TimelineRow.Message(start + it, turn[it]) }
             rows += TimelineRow.History(if (process.isNotEmpty()) start + process.first() else start + turn.size, process.map { turn[it] }, count, running, if (running) activity else null)
-            for (i in processStart until processEnd) if (turn[i].role in setOf("attachment", "status"))
+            for (i in processStart until processEnd) if (turn[i].role in setOf("attachment", "status") && i !in inputFiles)
                 rows += TimelineRow.Message(start + i, turn[i])
             if (final >= 0) for (i in final until turn.size) rows += TimelineRow.Message(start + i, turn[i])
         } else turn.forEachIndexed { i, entry -> rows += TimelineRow.Message(start + i, entry) }

@@ -49,4 +49,13 @@ class ChatTimelineRowsTest {
         assertTrue(rows.any { it is TimelineRow.Message && it.entry.role == "attachment" })
         assertFalse(rows.filterIsInstance<TimelineRow.History>().single().entries.any { it.role == "attachment" })
     }
+    @Test fun userInputAttachmentsStayBeforeExecutionAndOutputAttachmentsStayAfterIt() {
+        val input = Entry("attachment", "{\"direction\":\"input\"}")
+        val output = Entry("attachment", "{\"direction\":\"output\"}")
+        val rows = timelineRows(listOf(Entry("user", "Inspect this"), input, Entry("tool", "read_file\n{}"), output, Entry("assistant", "Done", finalReply = true)), false)
+        assertEquals(input, (rows[1] as TimelineRow.Message).entry)
+        assertTrue(rows[2] is TimelineRow.History)
+        assertEquals(output, (rows[3] as TimelineRow.Message).entry)
+    }
+
 }

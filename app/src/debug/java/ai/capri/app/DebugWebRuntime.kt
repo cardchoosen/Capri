@@ -71,6 +71,11 @@ internal object DebugWebRuntime {
                     withContext(Dispatchers.IO) { synchronized(u) { u.file.delete(); uploads.remove(p.getString("id")) } }
                     return@withContext result("Upload removed.")
                 }
+                if (action == "upload_status") {
+                    val u = uploads[p.getString("id")] ?: error("Upload unavailable; refresh selected inputs before starting another upload.")
+                    require(u.chat == chat) { "Upload belongs to another chat." }
+                    return@withContext JSONObject().put("size", u.size).put("offset", u.file.length())
+                }
                 if (action == "upload_chunk") {
                     val u = uploads[p.getString("id")] ?: error("Upload unavailable.")
                     require(u.chat == chat && android.os.SystemClock.elapsedRealtime() - u.created < 1200000)
@@ -169,10 +174,22 @@ internal object DebugWebRuntime {
     private suspend fun execute(vm: CapriModel, chat: String, action: String, p: JSONObject): JSONObject {
         val context = vm.getApplication<android.app.Application>()
         return when (action) {
+            "input_remove" -> withContext(Dispatchers.IO) {
+                val lease = RuntimeGate.beginFiles(context, chat, "Remove input selection")
+                try { vm.inputAttachments.remove(chat, p.getString("id")); result("Input selection removed.") } finally { RuntimeGate.endFiles(lease) }
+            }
+            "input_commit" -> withContext(Dispatchers.IO) {
+                val lease = RuntimeGate.beginFiles(context, chat, "Import input file")
+                try { upload(chat, p.getString("upload_id"), "file") { source ->
+                    require(p.getString("name").length in 1..512) { "Invalid input filename." }
+                    val job = currentCoroutineContext()
+                    result(source.inputStream().use { vm.inputAttachments.import(chat, p.getString("name"), it) { job.ensureActive() } })
+                } } finally { RuntimeGate.endFiles(lease) }
+            }
             "upload_begin" -> withContext(Dispatchers.IO) {
                 uploads.entries.removeAll { (_, u) -> if (android.os.SystemClock.elapsedRealtime() - u.created > 1200000) { u.file.delete(); true } else false }
                 require(uploads.size < 2); val kind = p.getString("kind"); val size = p.getInt("size")
-                require(kind in setOf("ssh", "skill") && size in 1..if (kind == "ssh") 65536 else 10000000)
+                require(kind in setOf("ssh", "skill", "file") && size in 1..when(kind) { "ssh" -> 65536; "file" -> 20000000; else -> 10000000 })
                 val directory = File(context.cacheDir, "web-imports").apply { mkdirs() }
                 if (uploads.isEmpty()) directory.listFiles().orEmpty().forEach { it.delete() }
                 val id = UUID.randomUUID().toString(); val file = File(directory, id); check(file.createNewFile()); android.system.Os.chmod(file.path, 384)

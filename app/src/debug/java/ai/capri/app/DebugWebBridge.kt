@@ -48,6 +48,13 @@ internal object DebugWebBridge {
             }
             val before = args.getInt("before", session.messages.size).coerceAtMost(session.messages.size)
             require(before >= 0) { "invalid history cursor" }
+            val visible = session.messages.filter(ToolPresentation::visible)
+            val process = mutableMapOf<String, JSONObject>()
+            timelineRows(visible, vm.jobs.containsKey(actualChat), vm.activeTools[actualChat]).filterIsInstance<TimelineRow.History>().forEach { row ->
+                val key = row.entries.firstOrNull()?.id ?: "active"
+                row.entries.forEach { entry -> process[entry.id] = JSONObject().put("process_group", key).put("process_count", row.toolCount)
+                    .put("process_running", row.running).put("process_label", row.activity?.label ?: "") }
+            }
             val entries = mutableListOf<JSONObject>()
             var index = before
             var bytes = 0
@@ -58,14 +65,17 @@ internal object DebugWebBridge {
                 val text = entry.text.take(16000)
                 bytes += text.toByteArray().size
                 entries.add(JSONObject().put("index", index).put("id", entry.id).put("role", entry.role).put("text", text)
-                    .put("truncated", text.length < entry.text.length).put("final_reply", entry.finalReply).put("timestamp", entry.timestamp))
+                    .put("truncated", text.length < entry.text.length).put("final_reply", entry.finalReply).put("timestamp", entry.timestamp).apply {
+                        process[entry.id]?.let { meta -> meta.keys().forEach { key -> put(key, meta.get(key)) } }
+                        if (entry.role == "tool") put("tool_label", toolRecordLabel(entry))
+                    })
             }
             JSONObject().put("epoch", epoch).put("revision", vm.updates.value) .put("selected", vm.selected).put("phone_tab", vm.activeTab)
                 .put("chat_id", actualChat).put("title", session.title).put("busy", vm.jobs.containsKey(actualChat))
                 .put("deleting", actualChat in vm.deletingChats).put("deletion_error", vm.deletionError)
                 .put("notice", vm.notices[actualChat].orEmpty()).put("active_tool", vm.activeTools[actualChat]?.label.orEmpty())
                 .put("context_id",session.contextVersion).put("history_revision",session.historyVersion)
-                .put("memory_revision", vm.memoryRevision).put("preparing", vm.migrating).put("total", session.messages.size).put("before", index)
+                .put("input_drafts", JSONArray(vm.pendingInputs(actualChat))).put("memory_revision", vm.memoryRevision).put("preparing", vm.migrating).put("total", session.messages.size).put("before", index)
                 .put("entries", JSONArray(entries.reversed())).put("sessions", JSONArray(vm.sessions.sortedBy { if (it.kind == SessionKind.PERSONAL) 0 else 1 }.map {
                     JSONObject().put("chat_id", it.id).put("title", it.title).put("kind", it.kind.name)
                         .put("busy", vm.jobs.containsKey(it.id)).put("deleting", it.id in vm.deletingChats)

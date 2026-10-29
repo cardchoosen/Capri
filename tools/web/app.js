@@ -10,23 +10,60 @@ let pollTimer = null, refreshAgain = false;
 const views = new Map();
 let deleteTarget = null, historyTarget = null, historyEditor = null;
 let entries = new Map(), nodes = new Map();
-const nearBottom = () => $('messages').scrollHeight - $('messages').scrollTop - $('messages').clientHeight < 90;
-const follow = sticky => { if (sticky) $('messages').scrollTop = $('messages').scrollHeight; };
+// Reading intent survives rendering; proximity alone must never resume following.
+class ChatViewport {
+  constructor(element, changed=()=>{}) {
+    this.element=element;this.changed=changed;this.pinned=true;this.lastTop=element.scrollTop;
+    element.addEventListener('wheel',e=>{if(e.deltaY<0)this.pause();},{passive:true});
+    let touchY=null;
+    element.addEventListener('touchstart',e=>{touchY=e.touches[0]?.clientY;},{passive:true});
+    element.addEventListener('touchmove',e=>{const y=e.touches[0]?.clientY;if(touchY!=null&&y>touchY)this.pause();touchY=y;},{passive:true});
+    element.addEventListener('keydown',e=>{if(['ArrowUp','PageUp','Home'].includes(e.key)&&!e.target.closest('textarea,input'))this.pause();});
+    element.addEventListener('scroll',()=>{
+      const top=element.scrollTop;
+      if(top<this.lastTop-1)this.pinned=false;
+      else if(this.atBottom())this.pinned=true;
+      this.lastTop=top;this.changed(this.pinned);
+    },{passive:true});
+  }
+  atBottom(){const e=this.element;return e.scrollHeight-e.clientHeight-e.scrollTop<=2;}
+  pause(){this.pinned=false;this.changed(false);}
+  bottom(){this.pinned=true;this.element.scrollTop=this.element.scrollHeight;this.lastTop=this.element.scrollTop;this.changed(true);}
+  capture(){
+    const e=this.element;if(this.pinned)return {pinned:true};
+    const edge=e.getBoundingClientRect().top;
+    const anchor=Array.from($('entries').children).find(n=>n.getBoundingClientRect().bottom>edge);
+    return {pinned:this.pinned,top:e.scrollTop,anchor,offset:anchor?.getBoundingClientRect().top};
+  }
+  restore(saved){
+    if(saved.pinned){this.bottom();return;}
+    const offset=saved.anchor?.isConnected?saved.anchor.getBoundingClientRect().top-saved.offset:0;
+    this.element.scrollTop=saved.top+offset;this.lastTop=this.element.scrollTop;this.pinned=false;this.changed(false);
+  }
+}
+const viewport=new ChatViewport($('messages'),pinned=>{$('latest').hidden=pinned;});
+$('latest').onclick=()=>viewport.bottom();
 function pendingSet(value) { pending = value; if (value) sessionStorage.setItem('capri-pending', JSON.stringify(value)); else sessionStorage.removeItem('capri-pending'); controls(); }
 function controls() {
   $('uncertain').hidden = !pending || dispatching;
-  $('send').disabled = !connected || dispatching || !!pending || !state || state.busy || state.deleting || state.preparing;
+  $('send').disabled = !connected || dispatching || !!pending || !state || state.busy || state.deleting || state.preparing || !!window.CapriInputs?.blocking;
   $('create').disabled = !connected || dispatching || !!pending || !state || state.preparing;
   $('catalog-open').disabled=!connected||!state;
   $('run-open').disabled=!connected||!state;
+  $('attach-input').disabled=!connected||!state||state.preparing||state.deleting;
   const locked=historyLocked();for(const b of document.querySelectorAll('.user-edit,.user-retry'))b.disabled=locked;
   if(historyEditor){const stale=historyTarget&&(chat!==historyTarget.chat_id||epoch!==historyTarget.epoch||state?.context_id!==historyTarget.from_context||state?.history_revision!==historyTarget.history_revision);historyEditor.send.disabled=locked||!!stale;if(stale)historyEditor.error.textContent='历史记录已变化，请取消后重新编辑。';}
   $('stop').hidden = !state?.busy; $('stop').disabled = !connected || dispatching;
 }
 function failure(message) { $('error').textContent = message; $('error').hidden = !message; }
 async function api(method, args) {
-  const response = await fetch('/api/call', { method: 'POST', headers: {'Content-Type':'application/json', Authorization:'Bearer '+token}, body:JSON.stringify({method,args}), signal:AbortSignal.timeout(16000) });
-  const result = await response.json(); if (!response.ok || result.error) throw new Error(result.error || '连接失败'); return result;
+  const response = await fetch('/api/call', { method: 'POST', headers: {'Content-Type':'application/json', Authorization:'Bearer '+token}, body:JSON.stringify({method,args}), signal:AbortSignal.timeout(60000) });
+  const result = await response.json();
+  if (!response.ok || result.error) {
+    const messages={device_offline:'等待已选择的手机连接；请检查 USB 和调试授权。',device_unauthorized:'请在手机上允许这台电脑进行 USB 调试。',device_ambiguous:'检测到多台手机，请用 --serial 指定设备。',app_not_ready:'正在恢复 Capri，请检查手机是否需要解锁或确认启动。',bridge_unavailable:'手机调试入口不可用，请确认安装的是 Capri Debug 版本。',connection_lost:'连接已断开，正在自动恢复；未确认的操作不会自动重发。'};
+    const error=new Error(response.status===401?'访问凭证已变化，请用电脑服务的“打开网页”命令重新进入。':messages[result.code]||result.error||'连接失败');error.code=result.code;throw error;
+  }
+  return result;
 }
 // Build text nodes only. Model output never becomes executable HTML.
 function inline(parent, text) {
@@ -63,12 +100,12 @@ function revealFinal(body, text, record) {
     if(finished||gen!==generation||version!==record.version)return;
     if(now-lastFrame<32){requestAnimationFrame(animate);return;}lastFrame=now;
     const length=duration?Math.ceil(total*Math.min(1,(now-start)/duration)):total;
-    if(length!==lastLength){const pin=nearBottom();
+    if(length!==lastLength){const reading=viewport.capture();
       while(cursor<chunks.length){const chunk=chunks[cursor],count=Math.min(chunk.chars.length,Math.max(0,length-chunk.start));
         if(count>0){chunk.block.hidden=false;chunk.node.data=chunk.chars.slice(0,count).join('');}
         if(count<chunk.chars.length)break;cursor++;
       }
-      lastLength=length;follow(pin);
+      lastLength=length;viewport.restore(reading);
     }
     if(length<total)requestAnimationFrame(animate);else record.finish();
   }
@@ -80,7 +117,7 @@ function attachmentView(body, entry, record) {
   const figure=document.createElement('figure');figure.className='attachment-figure';body.append(figure);
   const imageTypes=new Set(['image/png','image/jpeg','image/gif','image/webp']),isImage=imageTypes.has(item.mime);
   const status=document.createElement('p');status.className='attachment-status';status.textContent=isImage?'正在读取图片…':'附件 · '+(item.name||'文件');
-  const caption=document.createElement('figcaption');caption.textContent=item.caption||item.name||'附件';
+  const caption=document.createElement('figcaption');caption.textContent=(item.direction==='input'?'你发送的附件 · ':'')+(item.caption||item.name||'附件');
   const name=document.createElement('small');name.textContent=(item.name||'附件')+' · '+Math.ceil((item.size||0)/1024)+' KB';
   const download=document.createElement('button');download.className='attachment-download';download.textContent=isImage?'下载原图':'下载文件';
   let image=null;
@@ -109,18 +146,17 @@ function attachmentView(body, entry, record) {
 function resetMessages() { historyTarget=null;historyEditor=null;generation++;for(const record of nodes.values()){record.finish?.();record.cancel?.();}entries.clear();nodes.clear();$('entries').replaceChildren();olderCursor=0; }
 function requestRefresh(){clearTimeout(pollTimer);if(polling){refreshAgain=true;return;}void refresh();}
 function switchChat(id){
-  if(state){views.set(chat,{state:{...state,entries:[...entries.values()],before:olderCursor},top:$('messages').scrollTop});if(views.size>5)views.delete(views.keys().next().value);}
+  if(state){views.set(chat,{state:{...state,entries:[...entries.values()],before:olderCursor},top:$('messages').scrollTop,pinned:viewport.pinned});if(views.size>5)views.delete(views.keys().next().value);}
   chat=id;sessionStorage.setItem('capri-chat',chat);state=null;resetMessages();
-  const cached=views.get(chat);if(cached){render(cached.state,true);$('messages').scrollTop=cached.top;}
+  const cached=views.get(chat);if(cached){render(cached.state,true);$('messages').scrollTop=cached.top;viewport.lastTop=cached.top;viewport.pinned=cached.pinned;$('latest').hidden=cached.pinned;}
   else{$('title').textContent='加载会话…';$('connection').textContent='正在同步手机…';controls();}
   void api('web_select',{chat_id:id,epoch}).catch(error=>failure(error.message));
   requestRefresh();
 }
 function renderMessages(data, initial, older=false) {
-  const sticky=initial||nearBottom(),oldHeight=$('messages').scrollHeight,oldTop=$('messages').scrollTop;
+  const reading=viewport.capture();
   for(const entry of data.entries) entries.set(entry.index,entry);
-  const ordered=[...entries.values()].sort((a,b)=>a.index-b.index), groups=[];
-  for(const entry of ordered) { const prev=groups.at(-1);if(entry.role==='tool'&&prev?.tool){prev.items.push(entry);}else groups.push({key:String(entry.index),tool:entry.role==='tool',items:[entry]}); }
+  const ordered=[...entries.values()].sort((a,b)=>a.index-b.index), groups=groupChatEntries(ordered);
   const live=new Set();
   let positionIndex=0;
   for(const group of groups) {
@@ -128,7 +164,21 @@ function renderMessages(data, initial, older=false) {
     if(!record) { const node=document.createElement(group.tool?'details':'article');record={node,signature:'',version:0};nodes.set(key,record); }
     const node=record.node;
     if(record.signature!==signature){record.cancel?.();record.cancel=null;record.signature=signature;record.version++;const entry=group.items[0];
-      if(group.tool){const open=node.open;node.replaceChildren();const summary=document.createElement('summary');summary.textContent=`运行了 ${group.items.length} 个工具`;node.append(summary);for(const item of group.items){const pre=document.createElement('pre');pre.textContent=item.text+(item.truncated?'\n[内容较长，此处节选]':'');node.append(pre);}node.open=open;}
+      if(group.tool){
+        const open=node.open;record.toolOpen=record.toolOpen||new Set();node.className='tool-process';node.replaceChildren();
+        const summary=document.createElement('summary'),info=group.items[0],count=info.process_count??group.items.filter(e=>e.role==='tool').length;
+        summary.textContent=info.process_running?(info.process_label||'工具执行中'):`工具记录 · ${count} 条`;
+        node.append(summary);const content=document.createElement('div');content.className='tool-process-content';node.append(content);
+        for(const item of group.items){
+          if(item.role!=='tool'){const note=document.createElement('div');note.className='tool-preamble';markdown(note,item.text);content.append(note);continue;}
+          const data=toolOutputSummary(item),detail=document.createElement('details'),key=item.id||item.index;
+          detail.className='tool-entry'+(data.failed?' failed':'');const label=document.createElement('summary');label.textContent=data.label;detail.append(label);
+          detail.open=record.toolOpen.has(key);
+          const show=()=>{if(!detail.open)return;record.toolOpen.add(key);if(detail.dataset.loaded)return;detail.dataset.loaded='true';const pre=document.createElement('pre');pre.textContent=data.display+(item.truncated?'\n[内容较长，此处节选]':'');const copy=document.createElement('button');copy.type='button';copy.className='tool-copy';copy.textContent='复制输出';copy.onclick=()=>navigator.clipboard.writeText(data.body).catch(()=>failure('复制失败，请手动选择输出'));detail.append(pre,copy);};
+          detail.addEventListener('toggle',()=>{if(!detail.open)record.toolOpen.delete(key);show();});show();content.append(detail);
+        }
+        node.open=open;node.ontoggle=()=>{if(node.open)viewport.pause();};
+      }
       else {node.className=entry.role;node.replaceChildren();if(entry.role==='assistant'){const label=document.createElement('label');label.textContent='CAPRI';node.append(label);}const body=document.createElement('div');node.append(body);
         if(entry.role==='attachment'){attachmentView(body,entry,record);}else if(!initial&&!older&&entry.role==='assistant'&&entry.final_reply&&Date.now()-entry.timestamp<30000){revealFinal(body,entry.text,record);}else if(entry.role==='assistant')markdown(body,entry.text);else body.textContent=entry.text;
         if(entry.role==='user'&&entry.id){body.className='user-bubble';const footer=document.createElement('div');footer.className='user-footer';if(entry.timestamp){const time=document.createElement('span');time.textContent=new Date(entry.timestamp).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});footer.append(time);}footer.append(historyButton('复制消息','copy',()=>copyHistorical(entry)),historyButton('重试消息','retry',()=>retryHistorical(entry)),historyButton('编辑消息','edit',()=>openHistorical(entry)));node.append(footer);}
@@ -140,10 +190,10 @@ function renderMessages(data, initial, older=false) {
     if($('entries').children[position]!==node)$('entries').insertBefore(node,$('entries').children[position]||null);
   }
   for(const [key,record]of nodes)if(!live.has(key)){record.cancel?.();record.node.remove();nodes.delete(key);}
-  if(older){olderCursor=data.before;$('messages').scrollTop=oldTop+$('messages').scrollHeight-oldHeight;}
+  if(older)olderCursor=data.before;
   else if(initial)olderCursor=data.before;
   $('older').hidden=olderCursor===0;
-  if(!older){if(sticky)follow(true);else $('messages').scrollTop=oldTop;}
+  if(older)viewport.restore({...reading,pinned:false});else if(initial)viewport.bottom();else viewport.restore(reading);
 }
 function render(data,initial=false){
   state=data;epoch=data.epoch;chat=data.chat_id;sessionStorage.setItem('capri-chat',chat);
@@ -166,7 +216,8 @@ function render(data,initial=false){
     }
   }
   if(data.deletion_error)failure(data.deletion_error);
-  renderMessages(data,initial);const progress=$('progress'),label=data.busy?(data.active_tool||data.notice||'思考中'):'';if(progress.dataset.label!==label){progress.dataset.label=label;progress.replaceChildren();if(data.busy){const spin=document.createElement('span');spin.className='spinner';progress.append(spin,document.createTextNode(label));}}
+  window.CapriInputs?.render(data);renderMessages(data,initial);const progress=$('progress'),label=data.busy?(data.active_tool||data.notice||'思考中'):'';if(progress.dataset.label!==label){progress.dataset.label=label;progress.replaceChildren();if(data.busy){const spin=document.createElement('span');spin.className='spinner';progress.append(spin,document.createTextNode(label));}}
+  if(viewport.pinned)viewport.bottom();
   controls();if($('catalog-dialog').open&&catalogScope!==chat+'|'+epoch){catalogId='';loadCatalog();}
 }
 async function refresh(){
@@ -180,18 +231,20 @@ async function refresh(){
     if(state&&(epoch!==data.epoch||data.memory_revision!==state.memory_revision||data.context_id!==state.context_id||data.history_revision!==state.history_revision))views.clear();
     const initial=!state||data.chat_id!==chat||epoch!==data.epoch||data.memory_revision!==state.memory_revision||data.total<state.total||data.context_id!==state.context_id||data.history_revision!==state.history_revision;
     if(initial)resetMessages();render(data,initial);
-  }catch(error){connected=false;$('connection').textContent='连接中断 · 恢复后自动同步';failure(error.message);controls();}
+  }catch(error){connected=false;$('connection').textContent=error.code==='device_offline'?'等待手机连接 · 连接后自动同步':'连接中断 · 正在自动恢复';failure(error.message);controls();}
   finally{polling=false;const delay=refreshAgain?0:!connected?2000:document.hidden?2000:state?.busy?250:750;refreshAgain=false;pollTimer=setTimeout(refresh,delay);}
 }
 $('refresh').onclick=()=>{if(!polling){chat='';state=null;resetMessages();requestRefresh();}};
 $('older').onclick=async()=>{const gen=generation;try{const data=await api('web_state',{chat_id:chat,before:olderCursor,context_id:state?.context_id});if(gen===generation)renderMessages(data,false,true);}catch(error){failure(error.message);}};
 $('ack').onclick=()=>{pendingSet(null);failure('');requestRefresh();};
-$('composer').onsubmit=async event=>{event.preventDefault();const text=$('input').value.trim();if(!text||$('send').disabled)return;
-  const request={request_id:crypto.randomUUID(),chat_id:chat,epoch,from_context:state.context_id,history_revision:state.history_revision};pendingSet(request);dispatching=true;controls();try{await api('send',{...request,text});$('input').value='';pendingSet(null);}catch(error){failure(error.message);}finally{dispatching=false;controls();requestRefresh();}};
+$('composer').onsubmit=async event=>{event.preventDefault();const text=$('input').value.trim();if((!text&&!state?.input_drafts?.length)||$('send').disabled)return;
+  viewport.bottom();const request={request_id:crypto.randomUUID(),chat_id:chat,epoch,from_context:state.context_id,history_revision:state.history_revision};pendingSet(request);dispatching=true;controls();try{await api('send',{...request,text:text||'请查看附件。',input_ids:(state.input_drafts||[]).map(file=>file.id)});$('input').value='';pendingSet(null);}catch(error){failure(error.message);}finally{dispatching=false;controls();requestRefresh();}};
 $('input').onkeydown=event=>{if(event.key==='Enter'&&!event.shiftKey&&!event.isComposing){event.preventDefault();$('composer').requestSubmit();}};
 $('create').onclick=async()=>{const request={request_id:crypto.randomUUID(),epoch};pendingSet(request);dispatching=true;controls();try{const result=await api('web_create',request);chat=result.chat_id;state=null;resetMessages();pendingSet(null);}catch(error){failure(error.message);}finally{dispatching=false;controls();requestRefresh();}};
 $('stop').onclick=async()=>{dispatching=true;controls();try{await api('web_stop',{chat_id:chat,epoch});}catch(error){failure(error.message);}finally{dispatching=false;controls();requestRefresh();}};
-document.addEventListener('visibilitychange',()=>{if(!document.hidden)requestRefresh();});controls();requestRefresh();
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)requestRefresh();});
+window.addEventListener('online',requestRefresh);window.addEventListener('pageshow',requestRefresh);
+controls();requestRefresh();
 
 $('delete-cancel').onclick=()=>{$('delete-dialog').close();deleteTarget=null;};
 $('delete-confirm').onclick=async()=>{
@@ -209,7 +262,7 @@ function catalogText(tag,text){const node=document.createElement(tag);node.textC
 function catalogMetadata(item){
   if(catalogCategory==='tools')return item.source;
   if(catalogCategory==='mcp')return `${item.type} · ${item.enabled?'已启用':'已停用'} · ${item.active?'当前会话已选择':'当前会话未选择'} · ${item.state}`;
-  return `${item.skill_category==='weapon'?'Weapon':'General'} · ${item.builtin?'内置':'用户安装'} · ${item.enabled?'已启用':'已停用'}`;
+  return `${item.skill_category==='weapon'?'Weapon':'General'} · ${item.builtin?'内置':'用户'} · ${item.enabled?'已启用':'已停用'}`;
 }
 async function loadCatalog(append=false){
   if(!$('catalog-dialog').open)return;

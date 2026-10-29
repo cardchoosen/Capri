@@ -18,6 +18,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import kotlinx.coroutines.ensureActive
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -110,14 +112,28 @@ class MainActivity : ComponentActivity() {
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     val context = androidx.compose.ui.platform.LocalContext.current
+    var pickerChat by rememberSaveable { mutableStateOf("") }
+    var pickerAsInput by rememberSaveable { mutableStateOf(true) }
+    var importing by remember { mutableStateOf(false) }
+    var inputMenu by remember { mutableStateOf(false) }
+    val pendingInputs = remember(session.id, update) { vm.pendingInputs(session.id) }
     val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
-        val id = vm.selected
+        val id = pickerChat.ifBlank { vm.selected }
+        val attach = pickerAsInput
+        importing = uris.isNotEmpty()
         scope.launch(kotlinx.coroutines.Dispatchers.IO) {
             val outcome = runCatching {
-                val lease = RuntimeGate.beginFiles(context, id, "文件导入")
+                require(vm.sessions.any { it.id == id } && id !in vm.deletingChats) { "会话已删除" }
+                if (attach) require(uris.size + vm.pendingInputs(id).size <= InputAttachments.MAX_FILES) { "每条消息最多选择8个文件" }
+                val lease = RuntimeGate.beginFiles(context, id, "Import user files")
                 try {
                 uris.forEach { uri ->
                     val name = context.contentResolver.query(uri, null, null, null, null)?.use { c -> if (c.moveToFirst()) c.getString(c.getColumnIndexOrThrow(android.provider.OpenableColumns.DISPLAY_NAME)) else null } ?: "import-${System.currentTimeMillis()}"
+                    if (attach) {
+                        val job = kotlinx.coroutines.currentCoroutineContext()
+                        context.contentResolver.openInputStream(uri)?.use { source -> vm.inputAttachments.import(id, name, source) { job.ensureActive() } } ?: error("无法读取所选文件")
+                        return@forEach
+                    }
                     val safe = name.replace(Regex("[^\\p{L}\\p{N}._ -]"), "_").take(120).ifBlank { "imported" }
                     val file = vm.store.workspace.file(id, safe)
                     require(!file.exists()) { "同名文件已存在：$safe" }
@@ -135,7 +151,8 @@ class MainActivity : ComponentActivity() {
                 } finally { RuntimeGate.endFiles(lease) }
             }
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-                banner = outcome.fold({ "已导入 ${uris.size} 个文件" }, { it.message ?: "导入失败" })
+                importing = false
+                banner = outcome.fold({ if (attach) "已选择 ${uris.size} 个附件，可在输入栏查看" else "已导入 ${uris.size} 个文件" }, { it.message ?: "导入失败" })
                 vm.refresh()
             }
         }
@@ -233,14 +250,32 @@ class MainActivity : ComponentActivity() {
                         }
                         notice?.takeUnless { vm.activeTools.containsKey(session.id) }?.let { Text(it, color = Green, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp)) }
                         ai.capri.app.model.ModelPicker(vm, session.id) { settings = true }
+                        if (importing) Text("正在导入附件…", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 16.dp))
+                        if (pendingInputs.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            pendingInputs.forEach { item -> key(item.getString("id")) {
+                                Row(Modifier.border(1.dp, Line, RoundedCornerShape(2.dp)).padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    if (item.optInt("width") > 0) LocalImage(vm.store.workspace, session.id, item.getString("path"), Modifier.size(48.dp), item.getString("name"), 128)
+                                    else Icon(Icons.Outlined.AttachFile, null, Modifier.size(24.dp), tint = Muted)
+                                    Column(Modifier.widthIn(max = 160.dp).padding(horizontal = 6.dp)) { Text(item.getString("name"), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, fontSize = 12.sp); Text("${(item.getLong("size") + 1023) / 1024} KB", fontSize = 10.sp, color = Muted) }
+                                    IconButton(enabled = !importing, onClick = { val owner = session.id; scope.launch(kotlinx.coroutines.Dispatchers.IO) { val result = runCatching { val lease = RuntimeGate.beginFiles(context, owner, "Remove input selection"); try { vm.inputAttachments.remove(owner, item.getString("id")) } finally { RuntimeGate.endFiles(lease) } }; kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { result.onFailure { banner = "无法移除附件，请刷新后重试" }; vm.refresh() } } }, modifier = Modifier.size(28.dp)) { Icon(Icons.Outlined.Close, "移除附件 ${item.getString("name")}", Modifier.size(16.dp), tint = Muted) }
+                                }
+                            } }
+                        }
+                        if (pendingInputs.any { it.optInt("width") > 0 }) Text("图片识别需要支持视觉的模型", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 3.dp))
                         Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp).border(1.dp, if (busy) Red else Line, RoundedCornerShape(2.dp)).background(Panel, RoundedCornerShape(2.dp)).padding(2.dp), verticalAlignment = Alignment.Bottom) {
-                            IconButton(enabled = !vm.migrating, onClick = { importer.launch(arrayOf("*/*")) }) { Icon(Icons.Outlined.Add, "导入文件", tint = Muted) }
+                            Box {
+                                IconButton(enabled = !vm.migrating && !importing, onClick = { inputMenu = true }) { Icon(Icons.Outlined.Add, "添加文件或图片", tint = Muted) }
+                                DropdownMenu(expanded = inputMenu, onDismissRequest = { inputMenu = false }) {
+                                    DropdownMenuItem(text = { Text("选择图片") }, onClick = { inputMenu = false; pickerChat = session.id; pickerAsInput = true; importer.launch(arrayOf("image/*")) })
+                                    DropdownMenuItem(text = { Text("选择文件") }, onClick = { inputMenu = false; pickerChat = session.id; pickerAsInput = true; importer.launch(arrayOf("*/*")) })
+                                }
+                            }
                             TextField(value = input, onValueChange = { input = it }, modifier = Modifier.weight(1f), placeholder = { Text(if (session.kind == SessionKind.PERSONAL) "跟 Capri 说点什么…" else "下达你的指令…", fontSize = 14.sp) }, maxLines = 5, colors = TextFieldDefaults.colors(focusedContainerColor = Panel, unfocusedContainerColor = Panel, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent))
-                            FilledIconButton(shape = RoundedCornerShape(2.dp), onClick = { if (busy) vm.stop() else if(input.isNotBlank()) { if(vm.send(input)) { chatPosition.followLatest = true; input = ""; focusManager.clearFocus(force = true); keyboard?.hide() } } }, colors = IconButtonDefaults.filledIconButtonColors(containerColor = if(busy) Red else Green, contentColor = Ink), modifier = Modifier.padding(bottom = 4.dp)) { Icon(if(busy) Icons.Outlined.Stop else Icons.Outlined.ArrowUpward, if(busy) "停止" else "发送") }
+                            FilledIconButton(shape = RoundedCornerShape(2.dp), onClick = { if (busy) vm.stop() else if(!importing && (input.isNotBlank() || pendingInputs.isNotEmpty())) { if(vm.send(input)) { chatPosition.followLatest = true; input = ""; focusManager.clearFocus(force = true); keyboard?.hide() } } }, colors = IconButtonDefaults.filledIconButtonColors(containerColor = if(busy) Red else Green, contentColor = Ink), modifier = Modifier.padding(bottom = 4.dp)) { Icon(if(busy) Icons.Outlined.Stop else Icons.Outlined.ArrowUpward, if(busy) "停止" else "发送") }
                         }
                     }
                     1 -> {
-                        Row(Modifier.fillMaxWidth().padding(20.dp), verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text("工作区", fontSize = 24.sp); Text(session.title, color = Muted, fontSize = 12.sp) }; OutlinedButton(enabled = !vm.migrating, onClick = { importer.launch(arrayOf("*/*")) }) { Text("导入") } }
+                        Row(Modifier.fillMaxWidth().padding(20.dp), verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text("工作区", fontSize = 24.sp); Text(session.title, color = Muted, fontSize = 12.sp) }; OutlinedButton(enabled = !vm.migrating, onClick = { pickerChat = session.id; pickerAsInput = false; importer.launch(arrayOf("*/*")) }) { Text("导入") } }
                         Text("文件仅属于当前会话 · 点击预览，右侧导出", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 20.dp))
                         val files = vm.store.workspace.list(session.id)
                         if(files.isEmpty()) Empty("这里还没有文件", "导入资料，或让 Capri 为你创建。")

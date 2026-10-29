@@ -26,6 +26,7 @@ internal class ModelRequests(
             used++
             try { return block() }
             catch (cancel: CancellationException) { throw cancel }
+            catch (input: InputAttachmentFailure) { throw input }
             catch (context: ai.capri.app.model.ModelContextRejected) { throw context }
             catch (error: Exception) {
                 val category = when (error) {

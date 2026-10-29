@@ -71,9 +71,10 @@ internal object DebugSocketBridge {
                     val task = FutureTask {
                         try {
                             val bundle = Bundle().apply {
-                                for (key in listOf("text", "request_id", "chat_id", "epoch", "category", "query", "id", "skill_type", "action", "entry_id", "from_context", "context_id", "mode")) if (values.has(key)) putString(key, values.getString(key))
+                                for (key in listOf("text", "request_id", "chat_id", "epoch", "category", "query", "id", "skill_type", "action", "entry_id", "from_context", "context_id", "mode", "draft_id")) if (values.has(key)) putString(key, values.getString(key))
                                 for (key in listOf("offset", "before", "revision", "entry")) if (values.has(key)) putInt(key, values.getInt(key))
                             }
+                            if (values.has("input_ids")) bundle.putString("input_ids", values.getJSONArray("input_ids").toString())
                             if (values.has("history_revision")) bundle.putLong("history_revision", values.getLong("history_revision"))
                             if (values.has("payload")) bundle.putString("payload", values.getJSONObject("payload").toString())
                             when (method) {

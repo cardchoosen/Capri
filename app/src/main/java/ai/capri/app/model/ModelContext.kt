@@ -30,8 +30,10 @@ internal object ContextTokens {
     }
     fun message(message: JSONObject): Long {
         message.optJSONObject("_capri_wire")?.optJSONArray("payload")?.let { return text(it.toString()) + 12 }
-        val public = JSONObject(message.toString()); public.remove("_capri_scope")
-        return text(public.toString()) + 12
+        val public = JSONObject(message.toString()); public.keys().asSequence().filter { it.startsWith("_capri_") }.toList().forEach { public.remove(it) }
+        val inputs = message.optJSONArray(ai.capri.app.InputAttachments.KEY)
+        val vision = if (inputs == null) 0 else (0 until inputs.length()).count { inputs.getJSONObject(it).optInt("width") > 0 } * 4096L
+        return text(public.toString()) + 12 + vision
     }
     fun estimate(messages: JSONArray, tools: JSONArray): Long = 16 + text(tools.toString()) +
         (0 until messages.length()).sumOf { message(messages.getJSONObject(it)) }
