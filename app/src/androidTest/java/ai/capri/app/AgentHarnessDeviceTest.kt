@@ -44,15 +44,15 @@ class AgentHarnessDeviceTest {
     @Test fun newToolContractsAndDeferredSurfaceAreEnglish() {
         val discovery = ToolDiscovery()
         val specs = listOf(TaskState.specification()) + discovery.specifications()
-        assertEquals(3, specs.size)
+        assertEquals(4, specs.size)
         for (spec in specs) {
             val name = spec.getJSONObject("function").getString("name")
             assertFalse(spec.toString().any { it in '\u4e00'..'\u9fff' })
             assertFalse(toolLabel(name, null).any { it in '\u4e00'..'\u9fff' })
         }
         val all = JSONArray(specs).put(ai.capri.app.nativebridge.NativeCatalog.spec())
-        assertFalse(discovery.assemble(all).toString().contains("wifi_info"))
-        assertTrue(discovery.manifest().toString().contains("android"))
+        assertTrue(discovery.assemble(all).toString().contains("wifi_info"))
+        assertTrue(discovery.manifest().toString().contains("Android"))
         discovery.execute("tool_describe", JSONObject().put("names", JSONArray().put("android")))
         assertTrue(discovery.assemble(all).toString().contains("wifi_info"))
     }

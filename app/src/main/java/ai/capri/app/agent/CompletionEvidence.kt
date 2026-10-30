@@ -15,21 +15,21 @@ internal object CompletionEvidence {
     fun results(messages: JSONArray): List<JSONObject> {
         val calls = calls(messages)
         return (0 until messages.length()).map { messages.getJSONObject(it) }.filter {
-            it.optString("role") == "tool" && it.optString("tool_call_id") !in prior(messages) && calls[it.optString("tool_call_id")]?.getJSONObject("function")?.getString("name") !in bookkeeping
+            it.optString("role") == "tool" && it.optString("tool_call_id") !in prior(messages) && calls[it.optString("tool_call_id")]?.let { call -> runCatching { ToolRegistry.function(call).getString("name") }.getOrDefault("tool_invoke") } !in bookkeeping
         }
     }
     fun requiresConclusion(messages: JSONArray): Boolean {
         val state = TaskState.snapshot(messages)
         val request = state.optString("request") + "\n" + state.optJSONArray("user_context").toString()
         if (ai.capri.app.TurnCompletion.requiresEvidence(request) || (state.optJSONArray("steps")?.length() ?: 0) > 0) return true
-        return calls(messages).values.any { val f = it.getJSONObject("function"); f.getString("name") !in bookkeeping + reads }
+        return calls(messages).values.any { val f = runCatching { ToolRegistry.function(it) }.getOrDefault(it.getJSONObject("function")); f.getString("name") !in bookkeeping + reads }
     }
     fun unsuccessful(text: String): Boolean {
         if (text.startsWith("exit=")) return !text.startsWith("exit=0\n") && text != "exit=0"
         val root = runCatching { JSONObject(text) }.getOrNull() ?: return text.startsWith("工具失败")
         fun bad(obj: JSONObject, depth: Int): Boolean {
-            if (obj.optBoolean("result_incomplete")) return true
-            if (obj.optString("status") in setOf("error", "partial", "partial_failure", "project_rules_required", "timeout", "failed", "permission_required", "permission_denied", "execution_failed", "preparation_failed", "invalid_argument", "cancelled", "not_executed", "awaiting_user") || obj.optString("state") in setOf("running", "pending", "failed", "cancelled", "timeout")) return true
+            if (obj.optBoolean("result_incomplete") || obj.optBoolean("isError") || obj.optString("outcome") == "unknown") return true
+            if (obj.optString("status") in setOf("tool_error", "mcp_call_failed", "unavailable", "not_found", "error", "partial", "partial_failure", "project_rules_required", "timeout", "failed", "permission_required", "permission_denied", "execution_failed", "preparation_failed", "invalid_argument", "cancelled", "not_executed", "awaiting_user") || obj.optString("state") in setOf("running", "pending", "failed", "cancelled", "timeout")) return true
             if (obj.has("success") && obj.opt("success") == false || obj.has("exit_code") && !obj.isNull("exit_code") && obj.optInt("exit_code", -1) != 0 || obj.has("error") && !obj.isNull("error")) return true
             return depth < 3 && listOf("data", "command", "result").any { obj.optJSONObject(it)?.let { child -> bad(child, depth + 1) } == true }
         }

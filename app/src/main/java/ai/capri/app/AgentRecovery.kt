@@ -40,11 +40,15 @@ internal object RecoveryMessages {
             val calls = m.optJSONArray("tool_calls")
             if (calls != null) for (j in 0 until calls.length()) {
                 val call = calls.getJSONObject(j)
-                if (call.getJSONObject("function").optString("name") in setOf("profile_search", "knowledge", "context_history", "model_info", "personal_memory", "conversation_history")) {
+                val target = runCatching { ai.capri.app.agent.ToolRegistry.function(call).optString("name") }.getOrDefault(call.getJSONObject("function").optString("name"))
+                if (target in setOf("profile_search", "knowledge", "context_history", "model_info", "personal_memory", "conversation_history")) {
                     internalIds += call.getString("id")
                     m.remove("_capri_wire")
                     // Remember/index arguments may themselves contain private knowledge. Do not replay from archives.
-                    if (call.getJSONObject("function").optString("name") in setOf("knowledge", "personal_memory")) call.getJSONObject("function").put("arguments", "{}")
+                    if (target in setOf("knowledge", "personal_memory")) {
+                        val outer = call.getJSONObject("function")
+                        outer.put("arguments", if (outer.optString("name") == "tool_invoke") JSONObject().put("name", target).put("arguments", JSONObject()).toString() else "{}")
+                    }
                 }
             }
             if (m.optString("role") == "tool" && m.optString("tool_call_id") in internalIds)

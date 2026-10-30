@@ -18,7 +18,7 @@ internal class ProgressGuard(saved: JSONObject? = null) {
         else -> value.toString()
     }
     fun observe(call: JSONObject, result: String): String? {
-        val function = call.getJSONObject("function"); val name = function.getString("name")
+        val function = runCatching { ToolRegistry.function(call) }.getOrDefault(call.getJSONObject("function")); val name = function.getString("name")
         if (name in setOf("task_state", "ask_user")) return null
         val args = runCatching { JSONObject(function.optString("arguments")) }.getOrNull()
         val data = runCatching { JSONObject(result) }.getOrNull()

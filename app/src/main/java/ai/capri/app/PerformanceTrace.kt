@@ -10,7 +10,7 @@ internal class PerformanceTrace(private val file: File, private val clock: () ->
     private val origin = clock()
     private var closed = false
     companion object {
-        private val tools = setOf("ask_user", "task_state", "tool_search", "tool_describe", "extensions", "project", "apply_patch", "search_files", "edit_file", "model_info", "profile_search", "list_files", "read_file", "write_file", "send_file", "python_run", "environment", "environment_check", "python_env", "android", "terminal", "browser")
+        private val tools = setOf("ask_user", "task_state", "tool_search", "tool_describe", "tool_invoke", "extensions", "project", "apply_patch", "search_files", "edit_file", "model_info", "profile_search", "list_files", "read_file", "write_file", "send_file", "python_run", "environment", "environment_check", "python_env", "android", "terminal", "browser")
         private val usageFields = setOf("prompt_tokens", "completion_tokens", "total_tokens", "prompt_cache_hit_tokens", "prompt_cache_miss_tokens")
         fun now() = System.nanoTime()
         fun elapsed(start: Long) = ((System.nanoTime() - start) / 1_000_000).coerceAtLeast(0)
@@ -31,6 +31,15 @@ internal class PerformanceTrace(private val file: File, private val clock: () ->
             if (closed || file.length() >= 262144) return
             require(route in setOf("persona", "direct_exact_json"))
             file.parentFile!!.mkdirs(); file.appendText(JSONObject().put("schema", 1).put("stage", "delivery_route").put("route", route)
+                .put("offset_ms", ((clock() - origin) / 1_000_000).coerceAtLeast(0)).toString() + "\n")
+        }
+    }
+    @Synchronized fun toolSurface(report: JSONObject) {
+        runCatching {
+            if (closed || file.length() >= 262144) return
+            val clean = JSONObject()
+            listOf("available", "offered", "loaded", "loaded_schema_tokens", "schema_budget", "searches", "empty_searches", "evictions", "schema_changes", "invocations", "bridge_invocations", "used_unique", "rejected", "resolution_ms_total").forEach { clean.put(it, report.optLong(it).coerceAtLeast(0)) }
+            file.parentFile!!.mkdirs(); file.appendText(JSONObject().put("schema", 1).put("stage", "tool_surface").put("counts", clean)
                 .put("offset_ms", ((clock() - origin) / 1_000_000).coerceAtLeast(0)).toString() + "\n")
         }
     }

@@ -62,7 +62,7 @@ internal object FinalReply {
         val internalIds = (0 until execution.length()).flatMap { i ->
             val calls = execution.getJSONObject(i).optJSONArray("tool_calls") ?: JSONArray()
             (0 until calls.length()).map { calls.getJSONObject(it) }
-        }.filter { it.getJSONObject("function").optString("name") in bookkeeping }.map { it.getString("id") }.toSet()
+        }.filter { runCatching { ai.capri.app.agent.ToolRegistry.function(it).optString("name") }.getOrDefault("tool_invoke") in bookkeeping }.map { it.getString("id") }.toSet()
         val allResults = (0 until execution.length()).map { execution.getJSONObject(it) }
             .filter { it.optString("role") == "tool" && (ids == null || it.optString("tool_call_id") in ids) }
         val results = allResults.filterNot { it.optString("tool_call_id") in internalIds }

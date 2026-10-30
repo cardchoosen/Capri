@@ -12,7 +12,9 @@ internal object ToolsCatalog {
             return CatalogTool(name, if (remote) mcpTitle(name) else title(name), if (remote) mcpTitle(name).substringBefore(" / ") else "Capri 内置", remote,
                 f.optString("description"), JSONObject(f.getJSONObject("parameters").toString()))
         }
-        return (0 until builtins.length()).map { entry(builtins.getJSONObject(it), false) } + mcp.map { entry(it, true) }
+        val remoteNames = mcp.map { it.getJSONObject("function").getString("name") }.toSet()
+        val registry = ai.capri.app.agent.ToolRegistry(JSONArray(builtins.toString()).apply { mcp.forEach { put(it) } })
+        return registry.definitions.values.map { entry(it.contract, it.name in remoteNames) }
     }
     fun filter(tools: List<CatalogTool>, query: String): List<CatalogTool> = tools.filter {
             (query.isBlank() || "${it.name} ${it.title} ${it.source} ${it.description}".contains(query.trim(), ignoreCase = true))

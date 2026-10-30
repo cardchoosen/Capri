@@ -31,7 +31,7 @@ internal class KnowledgeTool(private val store: KnowledgeStore) {
         for (i in 0 until messages.length()) {
             val m = messages.getJSONObject(i)
             m.optJSONArray("tool_calls")?.let { array -> for (j in 0 until array.length()) {
-                val call = array.getJSONObject(j); val f = call.getJSONObject("function")
+                val call = array.getJSONObject(j); val f = runCatching { ai.capri.app.agent.ToolRegistry.function(call) }.getOrDefault(call.getJSONObject("function"))
                 if (f.optString("name") == "knowledge") calls[call.getString("id")] = runCatching { JSONObject(f.getString("arguments")) }.getOrDefault(JSONObject())
             } }
             val args = calls[m.optString("tool_call_id")] ?: continue

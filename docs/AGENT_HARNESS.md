@@ -26,14 +26,15 @@ Local reference snapshots and verification artifacts are in ignored `work/hermes
 
 ## Tool discovery
 
-Core file/coding/execution tools, Skill loading and extension activation stay directly available. Costly specialized built-ins and connected MCP schemas are deferred. A short manifest always advertises deferred tool names and purposes; large catalogs additionally advertise service domains. The manifest is discovery data, not permission.
+Core Android/browser/file/coding/execution tools, Skill loading and extension activation stay directly available. Costly specialized built-ins and connected MCP schemas are deferred. A short manifest always advertises deferred tool names and purposes; configured MCP services additionally advertise connection/credential state and next steps. The manifest is discovery data, not permission.
 
-- `tool_search(query, limit)` searches current names/descriptions using English keywords; default limit 4, maximum 8. It returns matching schemas and loads them for subsequent requests. No matches returns `not_found`.
-- `tool_describe(names)` loads up to eight known tool schemas without executing them.
-- Each request rebuilds availability from current built-ins and the session's connected MCP tools. Missing tools lose loaded status. Execution rejects unloaded/unavailable names before dispatch; underlying adapters still enforce activation, authorization and runtime restrictions.
+- `tool_search(query, limit)` searches names/descriptions with bounded multilingual aliases and word normalization; `queries` batches up to four alternatives. Default limit 4, maximum 8. Matching schemas load within a bounded working set. No match is not proof of absent capability.
+- `tool_describe(names)` loads up to eight known schemas within the working-set budget without execution.
+- `tool_invoke(name, arguments)` routes a known specialized/connected MCP tool through the existing execution path without a separate loading turn. Nested, control, core and unavailable targets are rejected; authorization is unchanged.
+- Each request rebuilds availability from current built-ins and the session's connected MCP tools. Missing tools lose loaded status. Direct execution rejects unloaded/unavailable names; the bridge checks current registration before entering the same dispatch path; underlying adapters still enforce activation, authorization and runtime restrictions.
 - The full Tools catalog remains visible on phone/web, including the discovery tools and task state tool.
 
-Schemas loaded earlier in a turn remain loaded until the turn ends, unless revoked. This first version does not evict active schemas or apply model-based capability routing. Discovery may add a model round trip; measure total task latency as well as schema savings.
+Deferred schemas use a bounded LRU working set and are revoked when definitions disappear or change. The registry does not infer model-based capability routing. Discovery may add a model round trip; measure total task latency as well as schema savings.
 
 ## Scheduling and recovery
 
@@ -47,7 +48,7 @@ Proposed calls are saved before dispatch. Each completed result is committed sep
 
 `task_state` stores a bounded plan and findings in the existing revision-scoped atomic checkpoint. Updates replace only supplied fields, can guard `expected_revision`, allow at most twenty steps and one in-progress step, and reject invalid updates without modifying the saved state. Simple tasks need no plan. A completed label is an agent assertion, not proof or authorization. A plan with pending work and no blocker gets one reconciliation opportunity before the harness reports incomplete work.
 
-The original task request and recent user context are retained separately from the mutable plan. Private `_capri_*` checkpoint metadata is removed from provider payloads; only explicit bounded task-state data enters requests. Model switches restore task metadata from the canonical checkpoint rather than relying on provider-specific payloads.
+The original task request and complete correction ledger are retained separately from the mutable plan. Private `_capri_*` checkpoint metadata is removed from provider payloads; only explicit bounded task-state data enters requests. Model switches restore task metadata from the canonical checkpoint rather than relying on provider-specific payloads.
 
 `ContextHistory` remains the revision-scoped source for full exchanges and result archives:
 
@@ -83,3 +84,7 @@ This version retains non-streaming model transport and separate persona delivery
 ## Turn control update — 2026-10-30
 
 The working implementation adds checkpointed phases, durable user steering at dispatch boundaries, `ask_user` clarification pauses, request-attempt accounting by purpose with delivery reservation, `task_state finish` evidence assessments, and typed repeated-progress feedback with bounded incomplete exits. User input does not broaden permissions; already-started operations are not rolled back. Completion assessments validate provenance and known failure signals, not arbitrary goal satisfaction. See [the detailed Chinese implementation and verification record](AGENT_TURN_CONTROL.zh-CN.md).
+
+## Capability discovery update — 2026-10-30
+
+A shared contract snapshot now backs catalog, discovery and pre-dispatch validation. Android/browser schemas are eager; deferred schemas use an LRU count/token budget with revocation on disappearance or contract change. Read-only configured-service states and numeric surface metrics are available. Bridge targets retain original checkpoint IDs, privacy filtering, cancellation and evidence semantics. Imported MCP schemas keep existing transport/server validation. See [the Chinese implementation and verification record](AGENT_DISCOVERY.zh-CN.md). Earlier fixture token counts describe the historical policy, not current performance.

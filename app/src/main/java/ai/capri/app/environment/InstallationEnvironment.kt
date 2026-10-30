@@ -111,7 +111,7 @@ internal class InstallationEnvironment private constructor(private val context: 
         for (i in 0 until messages.length()) {
             val message = messages.getJSONObject(i)
             message.optJSONArray("tool_calls")?.let { array -> for (j in 0 until array.length()) {
-                val call = array.getJSONObject(j); val function = call.getJSONObject("function")
+                val call = array.getJSONObject(j); val function = runCatching { ai.capri.app.agent.ToolRegistry.function(call) }.getOrDefault(call.getJSONObject("function"))
                 if (function.optString("name") in setOf("environment", "environment_check")) {
                     val args = runCatching { JSONObject(function.optString("arguments")) }.getOrNull()
                     if (args?.optString("action") in setOf("lookup", "document")) calls[call.getString("id")] = args!!

@@ -95,9 +95,9 @@ class AgentHarnessTest {
         val all = JSONArray().put(spec("read_file")).put(spec("android")).put(spec("mcp_device"))
         val discovery = ToolDiscovery()
         val first = discovery.assemble(all)
-        assertFalse(first.toString().contains("\"name\":\"android\""))
-        assertTrue(discovery.manifest().toString().contains("android"))
-        assertFalse(discovery.allowed("android"))
+        assertTrue(first.toString().contains("\"name\":\"android\""))
+        assertTrue(discovery.manifest().toString().contains("Android"))
+        assertTrue(discovery.allowed("android"))
         val found = JSONObject(discovery.execute("tool_search", JSONObject().put("query", "android").put("limit", 1)))
         assertEquals("android", found.getJSONArray("tools").getJSONObject(0).getJSONObject("function").getString("name"))
         assertTrue(discovery.assemble(all).toString().contains("\"name\":\"android\""))
@@ -105,7 +105,7 @@ class AgentHarnessTest {
         discovery.assemble(JSONArray().put(spec("read_file")))
         assertFalse(discovery.allowed("android"))
         assertEquals("partial", JSONObject(discovery.execute("tool_describe", JSONObject().put("names", JSONArray().put("android")))).getString("status"))
-        assertTrue(ContextTokens.text(first.toString()) < ContextTokens.text(all.toString()) + 700)
+        assertTrue(ContextTokens.text(first.toString()) < ContextTokens.text(all.toString()) + 1600)
     }
     @Test fun taskStateSurvivesRecoveryButNeverLeaksPrivateMetadataToProvider() {
         val messages = JSONArray().put(msg("system", "rules")).put(msg("user", "Keep the public API"))

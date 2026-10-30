@@ -9,6 +9,7 @@ internal fun toolLabel(name: String, args: JSONObject?): String = when (name) {
     "task_state" -> "Update task plan"
     "tool_search" -> "Find available tools"
     "tool_describe" -> "Load tool schemas"
+    "tool_invoke" -> "Invoke specialized tool"
     "project" -> "Inspect project"
     "apply_patch" -> "Apply code patch"
     "profile_search" -> "Search core profile"

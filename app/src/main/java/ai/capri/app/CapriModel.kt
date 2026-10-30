@@ -441,7 +441,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
         trace.event(PerformanceTrace.Stage.TURN_PREPARE, PerformanceTrace.elapsed(preparingTurn), PerformanceTrace.Status.OK)
         preparedTurn = true
         val requests = ModelRequests(MAX_MODEL_CALLS, reservedDelivery = 1)
-        val discovery = ToolDiscovery()
+        val discovery = ToolDiscovery(schemaBudget = (contextBudget.input / 4).coerceIn(256, 8000).toLong())
         val latestRequest = if (continuing) TaskState.snapshot(messages).optString("request", latestUser.text) else latestUser.text
         val previousToolIds = if (continuing) emptySet() else (0 until messages.length()).map { messages.getJSONObject(it) }
             .filter { it.optString("role") == "tool" }.map { it.optString("tool_call_id") }.toSet()
@@ -519,17 +519,23 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
             } catch (_: TurnState.Redirect) { /* Reassess persisted steering with the execution loop. */ }
         }
         suspend fun executeTool(call: JSONObject): String {
-            val function = call.getJSONObject("function")
-            val name = function.getString("name")
+            val originalFunction = call.getJSONObject("function")
+            var function = originalFunction
+            var name = originalFunction.getString("name")
             notices[session.id] = ToolPresentation.progress(name); refresh()
-            val displayName = if (name.startsWith("mcp_")) extensions.label(session.id, name) else name
             val toolStarted = PerformanceTrace.now()
             var toolStatus = PerformanceTrace.Status.RETURNED
             val rawResult = try {
-                require(discovery.allowed(name)) { "Tool schema is not loaded or no longer available; use tool_search or tool_describe first." }
+                // Dynamic/discovery calls refresh availability between calls; immutable built-ins reuse this turn's snapshot.
+                function = withContext(Dispatchers.IO) {
+                    if (name.startsWith("mcp_") || name in ai.capri.app.agent.ToolRegistry.discovery)
+                        discovery.refreshAndResolve(call, JSONArray(baseTools.toString()).apply { extensions.specifications(session.id).forEach { put(it) } }, extensions.capabilities(session.id))
+                    else discovery.resolve(call)
+                }
+                name = function.getString("name")
                 val args = JSONObject(function.getString("arguments"))
                 if (name == "python_env" && args.optString("action") in setOf("install", "uninstall")) runCatching { installationEnvironment.invalidate("session:${session.id}", "会话包管理可能改变依赖") }
-                if (!ToolPresentation.isInternal(name)) activeTools[session.id] = ToolActivity(call.getString("id"), if (name.startsWith("mcp_")) displayName else toolLabel(name, args))
+                if (!ToolPresentation.isInternal(name)) activeTools[session.id] = ToolActivity(call.getString("id"), if (name.startsWith("mcp_")) extensions.label(session.id, name) else toolLabel(name, args))
                 refresh()
                 val currentSnapshot = snapshot(session)
                 val personalSnapshot = snapshot(personalSession())
@@ -579,6 +585,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
             catch (e: Exception) { toolStatus = PerformanceTrace.Status.ERROR; JSONObject().put("status", "error").put("error", JSONObject().put("code", "tool_error").put("message", e.message ?: "Tool execution failed.")).toString() }
             finally {
                 trace.event(PerformanceTrace.Stage.TOOL, PerformanceTrace.elapsed(toolStarted), toolStatus, tool = name)
+                trace.toolSurface(discovery.report())
                 activeTools.computeIfPresent(session.id) { _, activity -> activity.takeUnless { it.id == call.getString("id") } }; refresh()
             }
             val result = if (name in setOf("terminal", "python_run")) runCatching {
@@ -614,7 +621,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                 var preparingStatus = PerformanceTrace.Status.ERROR
                 try {
                 val tools = withContext(Dispatchers.IO) {
-                    discovery.assemble(JSONArray(baseTools.toString()).apply { extensions.specifications(session.id).forEach { put(it) } })
+                    discovery.assemble(JSONArray(baseTools.toString()).apply { extensions.specifications(session.id).forEach { put(it) } }, extensions.capabilities(session.id))
                 }
                 val additions = listOf(discovery.manifest(), TaskState.message(messages), requests.message(), JSONObject().put("role", "system").put("content", TurnCompletion.guidance + "\n" + TaskState.guidance))
                 val reserve = contextBudget.tokens(additions.sumOf { ai.capri.app.model.ContextTokens.message(it) }).toInt()
@@ -636,6 +643,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                 val input = JSONArray((0 until messages.length()).map { messages.getJSONObject(it) })
                 additions.forEach(input::put)
                 trace.context(input, tools)
+                trace.toolSurface(discovery.report())
                 preparingStatus = PerformanceTrace.Status.OK
                 return AgentLoop.Input(input, tools, contextBudget.output)
                 } catch (cancel: CancellationException) { preparingStatus = PerformanceTrace.Status.CANCELLED; throw cancel }
@@ -660,7 +668,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
             override fun status(message: String) { session.messages.add(Entry("status", message)); persist() }
             override suspend fun execute(call: JSONObject) = executeTool(call)
             override suspend fun record(call: JSONObject, result: String) {
-                val name = call.getJSONObject("function").getString("name")
+                val name = runCatching { ai.capri.app.agent.ToolRegistry.function(call).getString("name") }.getOrDefault(call.getJSONObject("function").getString("name"))
                 val label = if (name.startsWith("mcp_")) extensions.label(session.id, name) else name
                 if (!ToolPresentation.isInternal(name)) {
                     session.messages.add(Entry("tool", "$label\n$result")); persist()
