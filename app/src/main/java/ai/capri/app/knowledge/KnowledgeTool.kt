@@ -54,7 +54,7 @@ internal class KnowledgeTool(private val store: KnowledgeStore) {
             只有用户明确要求记住/修改/删除记忆时才操作；remember必须含text，source_entry省略时来源为最新用户消息。默认scope=chat；只有用户明确要求跨会话共享才用global。不得保存凭据、臆测事实或把用户记忆当成人格。
             长期记忆不会自动塞入上下文，需要时先knowledge.search；引用返回的citation、source、行号/快照版本，未命中明确说明。
             文档索引仅解析UTF-8文本（txt/md/csv/json/jsonl/log/yaml/xml/html），2MB/份，PDF/Office/图片不支持。HTML/XML作为原始文本，不运行脚本。
-            context_history 可按query检索当前会话历史，或reference=e编号/c归档ID、offset分页读取。摘要为有来源的摘录，省略的历史必须查原文。
+            context_history searches current-chat history, or reads reference=e message number, c exchange archive ID or r result archive ID with offset pagination. Handoffs may omit details; read original evidence when needed.
             禁止因摘要省略旧结果而重做已记录的有副作用操作；先查归档并核验。对话及工具输入预算按当前模型上下文窗口自动适配，输出和安全空间由客户端预留；接近预算时归档历史，原文可查询。
         """.trimIndent()
         fun specification(): JSONObject = spec("knowledge", "Search and manage sourced memories/documents: search/list/remember/index/enable/disable/delete. Write memories only when requested; sharing requires explicit authorization.", JSONObject()
@@ -62,7 +62,7 @@ internal class KnowledgeTool(private val store: KnowledgeStore) {
             .put("query", string()).put("text", string()).put("id", string()).put("path", string())
             .put("scope", JSONObject().put("type", "string").put("enum", JSONArray(listOf("chat", "global"))))
             .put("source_entry", JSONObject().put("type", "integer").put("description", "Source user-message entry number for remember (1-based integer). Defaults to the latest user message; explicit references must identify an actual user message.")), listOf("action"))
-        fun historySpecification(): JSONObject = spec("context_history", "Search the current chat and its complete compressed tool archives. Supply query or reference; reference accepts e-prefixed message numbers or c-prefixed archive IDs. offset pages text in 8000-character chunks.", JSONObject()
+        fun historySpecification(): JSONObject = spec("context_history", "Search this chat and its archived exchanges or full offloaded tool results. Supply query or reference: e-prefixed message number, c-prefixed exchange ID, or r-prefixed result ID. offset pages text in 8000-character chunks. Reading does not repeat operations.", JSONObject()
             .put("query", string()).put("reference", string()).put("offset", JSONObject().put("type", "integer")), emptyList())
         private fun string() = JSONObject().put("type", "string")
         private fun spec(name: String, description: String, properties: JSONObject, required: List<String>) = JSONObject().put("type", "function").put("function", JSONObject()

@@ -75,6 +75,7 @@ internal object DebugWebBridge {
                 .put("deleting", actualChat in vm.deletingChats).put("deletion_error", vm.deletionError)
                 .put("notice", vm.notices[actualChat].orEmpty()).put("active_tool", vm.activeTools[actualChat]?.label.orEmpty())
                 .put("context_id",session.contextVersion).put("history_revision",session.historyVersion)
+                .put("run_state", vm.turnView(actualChat))
                 .put("selected_model", vm.store.models.selected(actualChat)?.let { (account, model) -> model.json().put("account", account.id).put("account_name", account.name).put("provider", account.provider) } ?: JSONObject.NULL)
                 .put("input_drafts", JSONArray(vm.pendingInputs(actualChat))).put("memory_revision", vm.memoryRevision).put("preparing", vm.migrating).put("total", session.messages.size).put("before", index)
                 .put("entries", JSONArray(entries.reversed())).put("sessions", JSONArray(vm.sessions.sortedBy { if (it.kind == SessionKind.PERSONAL) 0 else 1 }.map {

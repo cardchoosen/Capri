@@ -113,7 +113,8 @@ class ModelContextTest {
             assertTrue(fitted.toString().contains("消息99："))
             assertTrue(fitted.toString().contains("消息100："))
             val archive = java.io.File(root, "chat-a").listFiles()!!.first { it.extension == "json" && it.name.startsWith("c") }
-            assertTrue(history(root).query("chat-a", entries, JSONObject().put("reference", archive.nameWithoutExtension)).contains("消息1"))
+            assertTrue(fitted.toString().contains("消息1：")) // Original goal remains pinned in active context.
+            assertTrue(history(root).query("chat-a", entries, JSONObject().put("reference", archive.nameWithoutExtension)).contains("消息2"))
             assertTrue(engine.query("chat-a", entries, JSONObject().put("reference", "e1")).contains("消息1"))
 
             val tools = JSONArray().put(JSONObject().put("description", "说明".repeat(500)))

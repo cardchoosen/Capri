@@ -46,8 +46,10 @@ $('latest').onclick=()=>viewport.bottom();
 function pendingSet(value) { pending = value; if (value) sessionStorage.setItem('capri-pending', JSON.stringify(value)); else sessionStorage.removeItem('capri-pending'); controls(); }
 function controls() {
   window.CapriModelPicker?.controls();
+  $('send').textContent=state?.busy?'补充要求 ↑':'发送 ↑';
+  $('input').placeholder=state?.busy?'补充要求，将在安全边界接入…':state?.run_state?.question?'回答以上问题以继续…':'从这里继续对话…';
   $('uncertain').hidden = !pending || dispatching;
-  $('send').disabled = !connected || dispatching || !!pending || !state || state.busy || state.deleting || state.preparing || !!window.CapriInputs?.blocking || !!window.CapriModelPicker?.blocking;
+  $('send').disabled = !connected || dispatching || !!pending || !state || state.deleting || state.preparing || !!window.CapriInputs?.blocking || !!window.CapriModelPicker?.blocking;
   $('create').disabled = !connected || dispatching || !!pending || !state || state.preparing;
   $('catalog-open').disabled=!connected||!state;
   $('run-open').disabled=!connected||!state;
@@ -198,6 +200,9 @@ function renderMessages(data, initial, older=false) {
 }
 function render(data,initial=false){
   state=data;epoch=data.epoch;chat=data.chat_id;sessionStorage.setItem('capri-chat',chat);
+  const task=data.run_state;const budget=task?.budget;$('task-state').textContent=(task?.label||'')+(budget?` · 请求 ${budget.used}/${budget.maximum}`:'');
+  const question=$('task-question'),qs=JSON.stringify(task?.question||null);
+  if(question.dataset.question!==qs){question.dataset.question=qs;question.replaceChildren();for(const option of task?.question?.options||[]){const b=document.createElement('button');b.type='button';b.textContent=option;b.onclick=()=>{$('input').value=option;$('input').focus();};question.append(b);}}
   $('title').textContent=data.title;$('connection').textContent='已连接手机 · 会话同步';
   const signature=JSON.stringify(data.sessions)+chat;
   const available=new Set(data.sessions.map(s=>s.chat_id));for(const id of views.keys())if(!available.has(id))views.delete(id);

@@ -249,6 +249,14 @@ class MainActivity : ComponentActivity() {
                                 modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp))
                         }
                         notice?.takeUnless { vm.activeTools.containsKey(session.id) }?.let { Text(it, color = Green, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp)) }
+                        val turnState = vm.turnView(session.id)
+                        val requestBudget = turnState.optJSONObject("budget")
+                        if (turnState.optString("label").isNotBlank()) Text(turnState.optString("label") + (requestBudget?.let { " · 请求 ${it.optInt("used")}/${it.optInt("maximum")}" } ?: ""), color = Muted, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 3.dp))
+                        turnState.optJSONObject("question")?.optJSONArray("options")?.let { options ->
+                            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp)) {
+                                for (i in 0 until options.length()) TextButton(onClick = { input = options.getString(i) }) { Text(options.getString(i), fontSize = 12.sp) }
+                            }
+                        }
                         ai.capri.app.model.ModelPicker(vm, session.id) { settings = true }
                         if (importing) Text("正在导入附件…", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 16.dp))
                         if (pendingInputs.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -270,8 +278,9 @@ class MainActivity : ComponentActivity() {
                                     DropdownMenuItem(text = { Text("选择文件") }, onClick = { inputMenu = false; pickerChat = session.id; pickerAsInput = true; importer.launch(arrayOf("*/*")) })
                                 }
                             }
-                            TextField(value = input, onValueChange = { input = it }, modifier = Modifier.weight(1f), placeholder = { Text(if (session.kind == SessionKind.PERSONAL) "跟 Capri 说点什么…" else "下达你的指令…", fontSize = 14.sp) }, maxLines = 5, colors = TextFieldDefaults.colors(focusedContainerColor = Panel, unfocusedContainerColor = Panel, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent))
-                            FilledIconButton(shape = RoundedCornerShape(2.dp), onClick = { if (busy) vm.stop() else if(!importing && (input.isNotBlank() || pendingInputs.isNotEmpty())) { if(vm.send(input)) { chatPosition.followLatest = true; input = ""; focusManager.clearFocus(force = true); keyboard?.hide() } } }, colors = IconButtonDefaults.filledIconButtonColors(containerColor = if(busy) Red else Green, contentColor = Ink), modifier = Modifier.padding(bottom = 4.dp)) { Icon(if(busy) Icons.Outlined.Stop else Icons.Outlined.ArrowUpward, if(busy) "停止" else "发送") }
+                            TextField(value = input, onValueChange = { input = it }, modifier = Modifier.weight(1f), placeholder = { Text(if (busy) "补充要求，将在安全边界接入…" else if (turnState.optJSONObject("question") != null) "回答以上问题以继续…" else if (session.kind == SessionKind.PERSONAL) "跟 Capri 说点什么…" else "下达你的指令…", fontSize = 14.sp) }, maxLines = 5, colors = TextFieldDefaults.colors(focusedContainerColor = Panel, unfocusedContainerColor = Panel, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent))
+                            if (busy) IconButton(onClick = { vm.stop() }) { Icon(Icons.Outlined.Stop, "停止", tint = Red) }
+                            FilledIconButton(shape = RoundedCornerShape(2.dp), onClick = { if(!importing && (input.isNotBlank() || pendingInputs.isNotEmpty())) { if(vm.send(input)) { chatPosition.followLatest = true; input = ""; focusManager.clearFocus(force = true); keyboard?.hide() } } }, colors = IconButtonDefaults.filledIconButtonColors(containerColor = Green, contentColor = Ink), modifier = Modifier.padding(bottom = 4.dp)) { Icon(Icons.Outlined.ArrowUpward, if(busy) "补充要求" else "发送") }
                         }
                     }
                     1 -> {
