@@ -17,5 +17,5 @@ Android 原生个人 AI Agent，在手机上执行任务。
 
 ## 相关文档
 
-- [电脑网页与 USB 自动连接](docs/USB_WEB.md)：登录自启、设备检测和断线恢复
+- [电脑网页与 USB 自动连接](docs/USB_WEB.md)：登录自启、设备检测、断线恢复和对话模型选择
 - [文件与图片输入](docs/INPUT_ATTACHMENTS.md)：两端附件草稿、图片视觉输入与统一工具折叠

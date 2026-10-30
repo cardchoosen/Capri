@@ -139,8 +139,10 @@ internal object DebugWebRuntime {
                 .put("selected", vm.store.models.selected(chat)?.let { JSONObject().put("account", it.first.id).put("model", it.second.id) } ?: JSONObject.NULL)
             "model_options" -> {
                 val a = vm.store.models.all().first { it.id == p.getString("id") }; val offset = p.optInt("offset", 0); require(offset >= 0)
-                val items = a.models.drop(offset).take(50)
-                JSONObject().put("models", JSONArray(items.map { it.json() })).put("next", offset + items.size).put("has_more", offset + items.size < a.models.size)
+                val query = p.optString("query").trim(); require(query.length <= 300) { "Model search query is too long." }
+                val matches = a.models.filter { query.isBlank() || (a.name + " " + it.id + " " + it.name).contains(query, ignoreCase = true) }
+                val items = matches.drop(offset).take(50)
+                JSONObject().put("models", JSONArray(items.map { it.json() })).put("next", offset + items.size).put("has_more", offset + items.size < matches.size)
             }
             "mcp_config" -> withContext(Dispatchers.IO) { JSONObject().put("config", vm.extensions.store.config(p.getString("id"))) }
             "native" -> vm.androidTools.capabilities()
@@ -195,7 +197,7 @@ internal object DebugWebRuntime {
                 val id = UUID.randomUUID().toString(); val file = File(directory, id); check(file.createNewFile()); android.system.Os.chmod(file.path, 384)
                 uploads[id] = Upload(chat, kind, file, size); result(id)
             }
-            "model_select" -> { check(!vm.jobs.containsKey(chat)); vm.store.models.select(chat, p.getString("account"), p.getString("model")); result() }
+            "model_select" -> { vm.store.models.select(chat, p.getString("account"), p.getString("model")); result() }
             "model_save", "model_discover" -> {
                 idle(vm)
                 val old = vm.store.models.all().firstOrNull { it.id == p.optString("id") }

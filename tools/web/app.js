@@ -45,8 +45,9 @@ const viewport=new ChatViewport($('messages'),pinned=>{$('latest').hidden=pinned
 $('latest').onclick=()=>viewport.bottom();
 function pendingSet(value) { pending = value; if (value) sessionStorage.setItem('capri-pending', JSON.stringify(value)); else sessionStorage.removeItem('capri-pending'); controls(); }
 function controls() {
+  window.CapriModelPicker?.controls();
   $('uncertain').hidden = !pending || dispatching;
-  $('send').disabled = !connected || dispatching || !!pending || !state || state.busy || state.deleting || state.preparing || !!window.CapriInputs?.blocking;
+  $('send').disabled = !connected || dispatching || !!pending || !state || state.busy || state.deleting || state.preparing || !!window.CapriInputs?.blocking || !!window.CapriModelPicker?.blocking;
   $('create').disabled = !connected || dispatching || !!pending || !state || state.preparing;
   $('catalog-open').disabled=!connected||!state;
   $('run-open').disabled=!connected||!state;
@@ -216,7 +217,7 @@ function render(data,initial=false){
     }
   }
   if(data.deletion_error)failure(data.deletion_error);
-  window.CapriInputs?.render(data);renderMessages(data,initial);const progress=$('progress'),label=data.busy?(data.active_tool||data.notice||'思考中'):'';if(progress.dataset.label!==label){progress.dataset.label=label;progress.replaceChildren();if(data.busy){const spin=document.createElement('span');spin.className='spinner';progress.append(spin,document.createTextNode(label));}}
+  window.CapriModelPicker?.render(data);window.CapriInputs?.render(data);renderMessages(data,initial);const progress=$('progress'),label=data.busy?(data.active_tool||data.notice||'思考中'):'';if(progress.dataset.label!==label){progress.dataset.label=label;progress.replaceChildren();if(data.busy){const spin=document.createElement('span');spin.className='spinner';progress.append(spin,document.createTextNode(label));}}
   if(viewport.pinned)viewport.bottom();
   controls();if($('catalog-dialog').open&&catalogScope!==chat+'|'+epoch){catalogId='';loadCatalog();}
 }
