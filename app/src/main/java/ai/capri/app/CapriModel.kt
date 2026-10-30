@@ -96,7 +96,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
         return JSONObject().put("phase", phase).put("label", runCatching { TurnState.Phase.valueOf(phase).label }.getOrDefault(""))
             .put("question", raw.optJSONObject("question") ?: JSONObject.NULL).put("budget", raw.optJSONObject("budget") ?: JSONObject.NULL)
     }
-    private val http = OkHttpClient.Builder().followRedirects(false).followSslRedirects(false).retryOnConnectionFailure(false)
+    private val http = OkHttpClient.Builder().addInterceptor(ai.capri.app.agent.ModelTransport.QueueTiming()).followRedirects(false).followSslRedirects(false).retryOnConnectionFailure(false)
         .connectTimeout(15, TimeUnit.SECONDS).readTimeout(120, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS).callTimeout(120, TimeUnit.SECONDS).build()
     var runtimeBusy = false
@@ -380,6 +380,8 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
         val trace = PerformanceTrace(File(store.workspace.root(session.id), "metrics/${java.util.UUID.randomUUID()}.jsonl"))
         var outcome = PerformanceTrace.Status.ERROR
         var currentMessages: JSONArray? = null
+        val preparingTurn = PerformanceTrace.now()
+        var preparedTurn = false
         try {
         val savedRaw = withContext(Dispatchers.IO) { recovery.load(conversation) }
         val savedFinal = FinalReply.pending(savedRaw)
@@ -436,6 +438,8 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
 
         withContext(Dispatchers.IO) { extensions.restore(session.id) }
         val baseTools = builtinTools()
+        trace.event(PerformanceTrace.Stage.TURN_PREPARE, PerformanceTrace.elapsed(preparingTurn), PerformanceTrace.Status.OK)
+        preparedTurn = true
         val requests = ModelRequests(MAX_MODEL_CALLS, reservedDelivery = 1)
         val discovery = ToolDiscovery()
         val latestRequest = if (continuing) TaskState.snapshot(messages).optString("request", latestUser.text) else latestUser.text
@@ -444,15 +448,15 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
         suspend fun requestModel(modelMessages: JSONArray, modelTools: JSONArray, outputTokens: Int, finalOnly: Boolean = false, purpose: ModelRequests.Purpose = ModelRequests.Purpose.EXECUTION): JSONObject = requests.execute(purpose = purpose, onRetry = { attempt, category ->
                 notices[session.id] = "模型连接重试 $attempt/2"; refresh()
                 Log.w("CapriModelRequest", "retry=$attempt used=${requests.used} category=$category")
-            }, onBackoff = { elapsed -> trace.event(PerformanceTrace.Stage.MODEL_BACKOFF, elapsed, PerformanceTrace.Status.RETURNED) }) {
+            }, onBackoff = { elapsed -> trace.event(PerformanceTrace.Stage.MODEL_BACKOFF, elapsed, PerformanceTrace.Status.RETURNED, purpose = purpose) }) {
                 val attemptStarted = PerformanceTrace.now()
                 val attempt = requests.used
                 var requestStatus = PerformanceTrace.Status.ERROR
                 try {
-                    ai.capri.app.agent.ModelTransport(http) { inputAttachments.hydrate(session.id, it) }.request(config, modelMessages, modelTools, outputTokens, trace, attempt, finalOnly)
+                    ai.capri.app.agent.ModelTransport(http) { inputAttachments.hydrate(session.id, it) }.request(config, modelMessages, modelTools, outputTokens, trace, attempt, finalOnly, purpose)
                         .also { requestStatus = PerformanceTrace.Status.OK }
                 } catch (cancel: CancellationException) { requestStatus = PerformanceTrace.Status.CANCELLED; throw cancel }
-                finally { trace.event(PerformanceTrace.Stage.MODEL_REQUEST, PerformanceTrace.elapsed(attemptStarted), requestStatus, attempt = attempt) }
+                finally { trace.event(PerformanceTrace.Stage.MODEL_REQUEST, PerformanceTrace.elapsed(attemptStarted), requestStatus, attempt = attempt, purpose = purpose) }
             }
         suspend fun deliverFinal(state: JSONObject) {
             notices[session.id] = "整理回复中"; refresh()
@@ -460,11 +464,19 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
             var status = PerformanceTrace.Status.ERROR
             trace.event(PerformanceTrace.Stage.FINAL_REPLY, 0, PerformanceTrace.Status.STARTED)
             try {
+                val routeStarted = PerformanceTrace.now()
+                val direct = ai.capri.app.agent.DeliveryPolicy.exactJson(state, messages)
+                trace.event(PerformanceTrace.Stage.DELIVERY_PREPARE, PerformanceTrace.elapsed(routeStarted), PerformanceTrace.Status.OK)
+                trace.deliveryRoute(if (direct == null) "persona" else "direct_exact_json")
+                var text = direct.orEmpty()
+                if (direct == null) {
                 val core = getApplication<Application>().assets.open("persona/core.txt").bufferedReader().use { it.readText() }
                 var adjustments = 0
-                var text: String
                 while (true) {
-                    val input = FinalReply.messages(core, session.kind, java.time.ZonedDateTime.now().toString(), recalled, state, messages, contextBudget)
+                    val inputStarted = PerformanceTrace.now()
+                    var inputStatus = PerformanceTrace.Status.ERROR
+                    val input = try { FinalReply.messages(core, session.kind, java.time.ZonedDateTime.now().toString(), recalled, state, messages, contextBudget).also { inputStatus = PerformanceTrace.Status.OK } }
+                    finally { trace.event(PerformanceTrace.Stage.DELIVERY_PREPARE, PerformanceTrace.elapsed(inputStarted), inputStatus) }
                     trace.context(input, JSONArray())
                     val estimate = ai.capri.app.model.ContextTokens.estimate(input, JSONArray())
                     val response = try { requestModel(input, JSONArray(), contextBudget.output, finalOnly = true, purpose = ModelRequests.Purpose.DELIVERY) }
@@ -476,6 +488,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                     withContext(Dispatchers.IO) { modelContexts.observe(config, estimate, response.optJSONObject("usage")?.optInt("prompt_tokens", 0) ?: 0) }
                     text = FinalReply.text(response, state.getString("request"))
                     break
+                }
                 }
                 if (TurnState.pending(messages, session.messages.toList()).isNotEmpty()) {
                     FinalReply.discardDraft(messages, state)
@@ -597,6 +610,9 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
             override fun saveProgress(value: JSONObject) { messages.getJSONObject(0).getJSONObject(TurnState.KEY).put("progress", value) }
             override fun completeOutcome() = TaskState.snapshot(messages).optJSONObject("conclusion")?.optString("outcome", "completed") !in setOf("partial", "blocked")
             override suspend fun prepare(): AgentLoop.Input {
+                val preparingContext = PerformanceTrace.now()
+                var preparingStatus = PerformanceTrace.Status.ERROR
+                try {
                 val tools = withContext(Dispatchers.IO) {
                     discovery.assemble(JSONArray(baseTools.toString()).apply { extensions.specifications(session.id).forEach { put(it) } })
                 }
@@ -620,7 +636,10 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                 val input = JSONArray((0 until messages.length()).map { messages.getJSONObject(it) })
                 additions.forEach(input::put)
                 trace.context(input, tools)
+                preparingStatus = PerformanceTrace.Status.OK
                 return AgentLoop.Input(input, tools, contextBudget.output)
+                } catch (cancel: CancellationException) { preparingStatus = PerformanceTrace.Status.CANCELLED; throw cancel }
+                finally { trace.event(PerformanceTrace.Stage.CONTEXT_PREPARE, PerformanceTrace.elapsed(preparingContext), preparingStatus) }
             }
             override suspend fun infer(input: AgentLoop.Input) = requestModel(input.messages, input.tools, input.output)
             override suspend fun rebudget(error: ai.capri.app.model.ModelContextRejected, input: AgentLoop.Input) {
@@ -693,6 +712,9 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                 withContext(Dispatchers.IO) { recovery.save(conversation, m) }
             } }
             throw error
-        } finally { trace.finish(outcome) }
+        } finally {
+            if (!preparedTurn) trace.event(PerformanceTrace.Stage.TURN_PREPARE, PerformanceTrace.elapsed(preparingTurn), outcome)
+            trace.finish(outcome)
+        }
     }
 }

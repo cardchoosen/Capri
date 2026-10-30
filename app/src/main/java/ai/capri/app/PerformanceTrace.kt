@@ -5,7 +5,7 @@ import java.io.File
 
 /** Numeric operational metadata only. Never pass prompts, arguments, outputs, URLs or exception text. */
 internal class PerformanceTrace(private val file: File, private val clock: () -> Long = System::nanoTime) {
-    enum class Stage { TURN, FINAL_REPLY, MODEL_REQUEST, MODEL_HEADERS, MODEL_BODY, MODEL_PARSE, MODEL_BACKOFF, TOOL, PREPARE, EXECUTE, STEP, ENVIRONMENT }
+    enum class Stage { TURN, FINAL_REPLY, MODEL_REQUEST, MODEL_PREPARE, MODEL_QUEUE, MODEL_HEADERS, MODEL_BODY, MODEL_PARSE, MODEL_BACKOFF, TOOL, PREPARE, EXECUTE, STEP, ENVIRONMENT, TURN_PREPARE, CONTEXT_PREPARE, DELIVERY_PREPARE }
     enum class Status { STARTED, OK, RETURNED, ERROR, CANCELLED, TIMEOUT, BUDGET, INCOMPLETE, WAITING }
     private val origin = clock()
     private var closed = false
@@ -23,6 +23,14 @@ internal class PerformanceTrace(private val file: File, private val clock: () ->
             val clean = JSONObject()
             listOf("maximum", "used", "remaining", "execution_remaining", "reserved_delivery", "retries").forEach { clean.put(it, budget.optInt(it).coerceAtLeast(0)) }
             file.parentFile!!.mkdirs(); file.appendText(JSONObject().put("schema", 1).put("stage", "task_phase").put("phase", phase.lowercase()).put("budget", clean)
+                .put("offset_ms", ((clock() - origin) / 1_000_000).coerceAtLeast(0)).toString() + "\n")
+        }
+    }
+    @Synchronized fun deliveryRoute(route: String) {
+        runCatching {
+            if (closed || file.length() >= 262144) return
+            require(route in setOf("persona", "direct_exact_json"))
+            file.parentFile!!.mkdirs(); file.appendText(JSONObject().put("schema", 1).put("stage", "delivery_route").put("route", route)
                 .put("offset_ms", ((clock() - origin) / 1_000_000).coerceAtLeast(0)).toString() + "\n")
         }
     }
@@ -53,7 +61,7 @@ internal class PerformanceTrace(private val file: File, private val clock: () ->
         }
     }
     @Synchronized fun event(stage: Stage, durationMs: Long, status: Status, attempt: Int? = null,
-                            tool: String? = null, step: Int? = null, http: Int? = null, usage: JSONObject? = null, details: JSONObject? = null) {
+                            tool: String? = null, step: Int? = null, http: Int? = null, usage: JSONObject? = null, details: JSONObject? = null, purpose: ModelRequests.Purpose? = null) {
         // Diagnostics must never break a user task. Bounded per-turn append, scoped under the chat.
         runCatching {
             if (closed) return
@@ -61,6 +69,7 @@ internal class PerformanceTrace(private val file: File, private val clock: () ->
             val event = JSONObject().put("schema", 1).put("stage", stage.name.lowercase())
                 .put("offset_ms", ((clock() - origin) / 1_000_000).coerceAtLeast(0))
                 .put("duration_ms", durationMs.coerceAtLeast(0)).put("status", status.name.lowercase())
+            purpose?.let { event.put("purpose", it.name.lowercase()) }
             attempt?.let { event.put("attempt", it) }; step?.let { event.put("step", it) }
             http?.let { event.put("http", it) }
             tool?.let { event.put("tool", if (it in tools) it else "unknown") }

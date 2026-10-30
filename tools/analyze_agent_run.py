@@ -7,6 +7,10 @@ import argparse
 from collections import Counter
 import json
 from pathlib import Path
+if __package__:
+    from .agent_timing import summarize as summarize_timing
+else:
+    from agent_timing import summarize as summarize_timing
 
 
 def summarize(entries):
@@ -60,11 +64,13 @@ def summarize_trace(data):
         if stage in ('prepare', 'environment'):
             for key, value in event.get('detail_ms', {}).items():
                 if isinstance(value, (int, float)): details[key] += value
+    attribution = summarize_timing(events)
     wall = end.get('duration_ms') if end else None
     return {'complete': end is not None, 'status': end.get('status') if end else 'incomplete',
             'total_ms': wall, 'by_stage_ms': dict(totals), 'stage_counts': dict(counts),
             'environment_detail_ms': dict(details), 'tokens': dict(tokens), 'failure_events': failures,
-            'other_ms': max(0, wall-totals['model_request']-totals['tool']-totals['model_backoff']) if wall is not None else None,
+            'other_ms': attribution['wall_ms']['other'] if wall is not None else None,
+            'attribution': attribution,
             'limits': 'Headers/body/parse are nested in model_request; prepare/execute/step/environment are nested in tool. Do not sum nested stages. Model headers are not streaming first-token latency. Package operations combine resolution/download/install; terminal tools may return before background commands end. Missing turn-end means interrupted or still running.'}
 
 
@@ -76,6 +82,8 @@ def main():
     parser.add_argument('--last-turn', action='store_true')
     parser.add_argument('--output', type=Path)
     args = parser.parse_args()
+    if args.trace and args.file.stat().st_size > 4 * 1024 * 1024:
+        parser.error('Trace exceeds 4 MiB.')
     text = args.file.read_text()
     if args.trace:
         try: data = json.loads(text)

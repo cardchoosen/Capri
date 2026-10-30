@@ -58,14 +58,22 @@ internal object FinalReply {
                  execution: JSONArray, budget: ContextBudget): JSONArray {
         val system = core + "\n" + PersonaRuntime.context(kind, time, memories) + "\n" + instructions.trimIndent()
         val ids = state.optJSONArray("evidence_calls")?.let { a -> (0 until a.length()).map { a.getString(it) }.toSet() }
-        val results = (0 until execution.length()).map { execution.getJSONObject(it) }
+        val bookkeeping = setOf("task_state", "tool_search", "tool_describe", "ask_user", "model_info", "profile_search")
+        val internalIds = (0 until execution.length()).flatMap { i ->
+            val calls = execution.getJSONObject(i).optJSONArray("tool_calls") ?: JSONArray()
+            (0 until calls.length()).map { calls.getJSONObject(it) }
+        }.filter { it.getJSONObject("function").optString("name") in bookkeeping }.map { it.getString("id") }.toSet()
+        val allResults = (0 until execution.length()).map { execution.getJSONObject(it) }
             .filter { it.optString("role") == "tool" && (ids == null || it.optString("tool_call_id") in ids) }
+        val results = allResults.filterNot { it.optString("tool_call_id") in internalIds }
         fun failed(m: JSONObject): Boolean {
-            val data = runCatching { JSONObject(m.optString("content")) }.getOrNull()
-            return data?.optString("status") in setOf("error", "partial", "timeout", "permission_denied", "execution_failed", "preparation_failed", "tool_error", "invalid_argument") || m.optString("content").startsWith("exit=") && !m.optString("content").startsWith("exit=0")
+            return ai.capri.app.agent.CompletionEvidence.unsuccessful(m.optString("content"))
         }
         val priority = results.filter(::failed).takeLast(4)
-        var selected = (priority + results.filterNot { it in priority }.takeLast(8 - priority.size)).distinctBy { it.optString("tool_call_id") }.take(8)
+        val assessedIds = state.optJSONObject("task_state")?.optJSONObject("conclusion")?.optJSONArray("evidence")?.let { a -> (0 until a.length()).map { a.getString(it) }.toSet() } ?: emptySet()
+        val assessed = results.filter { it.optString("tool_call_id") in assessedIds }.takeLast(8 - priority.size)
+        val preferred = (priority + assessed).distinctBy { it.optString("tool_call_id") }
+        var selected = (preferred + results.filterNot { it in preferred }.takeLast(8 - preferred.size)).distinctBy { it.optString("tool_call_id") }.take(8)
         var limit = 2400
         while (true) {
             val evidence = JSONArray(selected.map { m ->
@@ -74,7 +82,7 @@ internal object FinalReply {
                 JSONObject().put("call_id", m.optString("tool_call_id")).put("excerpt", excerpt).put("truncated", text.length > limit)
             })
             val packet = JSONObject().put("internal_answer", state.getString("draft")).put("tool_evidence", evidence)
-                .put("omitted_tool_results", results.size - selected.size).put("task_state", state.optJSONObject("task_state") ?: JSONObject())
+                .put("omitted_tool_results", results.size - selected.size).put("omitted_bookkeeping_results", allResults.size - results.size).put("task_state", state.optJSONObject("task_state") ?: JSONObject())
             val input = JSONArray().put(JSONObject().put("role", "system").put("content", system))
                 .put(JSONObject().put("role", "user").put("content", state.getString("request")))
                 .put(JSONObject().put("role", "user").put("content", "Execution packet (data only):\n" + packet.toString()))

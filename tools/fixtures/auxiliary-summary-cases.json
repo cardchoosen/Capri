@@ -1,0 +1,43 @@
+[
+  {
+    "id": "failed_validation",
+    "records": [
+      {"id": "u1", "kind": "user", "text": "Generate report.txt. Preserve original.csv."},
+      {"id": "t1", "kind": "tool_result", "text": "write_file returned status=ok for report.txt."},
+      {"id": "t2", "kind": "tool_result", "text": "Validation command exited with code 2. The report is not validated."},
+      {"id": "u2", "kind": "user", "text": "Fix validation before claiming completion."}
+    ],
+    "expected": {
+      "constraints": [{"source": "u1", "preserve_path": "original.csv"}, {"source": "u2", "must_validate": true}],
+      "facts": [{"source": "t1", "state": "verified", "path": "report.txt"}, {"source": "t2", "state": "failed", "exit_code": 2}],
+      "remaining": ["u2"]
+    }
+  },
+  {
+    "id": "unknown_side_effect",
+    "records": [
+      {"id": "u1", "kind": "user", "text": "Create old-report.md inside the current chat only."},
+      {"id": "t1", "kind": "tool_intent", "text": "write_file proposed old-report.md. The process crashed before any result was recorded. The write may or may not have happened."},
+      {"id": "u2", "kind": "user", "text": "Use new-report.md instead. Verify existing files before writing; do not replay the uncertain write."}
+    ],
+    "expected": {
+      "constraints": [{"source": "u1", "scope": "current_chat"}, {"source": "u2", "target_path": "new-report.md", "must_verify_before_write": true}],
+      "facts": [{"source": "t1", "state": "unknown", "path": "old-report.md"}],
+      "remaining": ["u2"]
+    }
+  },
+  {
+    "id": "permission_boundary",
+    "records": [
+      {"id": "u1", "kind": "user", "text": "Read private.txt only if permission is granted. Do not request broader access."},
+      {"id": "t1", "kind": "tool_result", "text": "Read private.txt returned permission_required. No file content was obtained."},
+      {"id": "t2", "kind": "tool_result", "text": "Reading public.txt returned status=ok and its content."},
+      {"id": "u2", "kind": "user", "text": "Wait for permission before continuing with private.txt."}
+    ],
+    "expected": {
+      "constraints": [{"source": "u1", "no_broader_access": true}, {"source": "u2", "wait_for_permission": true}],
+      "facts": [{"source": "t1", "state": "failed", "path": "private.txt"}, {"source": "t2", "state": "verified", "path": "public.txt"}],
+      "remaining": ["u2"]
+    }
+  }
+]

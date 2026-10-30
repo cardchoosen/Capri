@@ -23,3 +23,5 @@ Android 原生个人 AI Agent，在手机上执行任务。
 - [Agent 内核架构](docs/AGENT_HARNESS.zh-CN.md)：执行循环、工具调度与可恢复上下文
 - [Agent 优化待办](docs/AGENT_OPTIMIZATION_TODO.zh-CN.md)：十个方向、60 个子项
 - [执行循环与任务控制](docs/AGENT_TURN_CONTROL.zh-CN.md)：阶段、补充要求、澄清、预算、交付证据与停滞处理
+
+- [响应耗时与人物收尾](docs/AGENT_LATENCY.zh-CN.md)：请求用途与耗时归因、纯 JSON 直接交付、辅助摘要离线评测
