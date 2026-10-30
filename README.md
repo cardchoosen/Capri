@@ -25,3 +25,5 @@ Android 原生个人 AI Agent，在手机上执行任务。
 - [执行循环与任务控制](docs/AGENT_TURN_CONTROL.zh-CN.md)：阶段、补充要求、澄清、预算、交付证据与停滞处理
 
 - [响应耗时与人物收尾](docs/AGENT_LATENCY.zh-CN.md)：请求用途与耗时归因、纯 JSON 直接交付、辅助摘要离线评测
+
+- [上下文管理](docs/AGENT_CONTEXT.zh-CN.md)：约束原文保护、完整交互归档、类型化预览与微压缩实验

@@ -35,13 +35,13 @@ internal object TurnState {
         if (changes.isEmpty()) return false
         val s = state(messages); val ids = s.getJSONArray("applied")
         changes.forEach { entry ->
-            messages.put(JSONObject().put("role", "user").put("content", entry.text + ai.capri.app.InputAttachments.manifest(entry.inputs?.let { raw -> JSONArray(raw).let { a -> (0 until a.length()).map { a.getJSONObject(it) } } } ?: emptyList())).apply {
+            messages.put(JSONObject().put("role", "user").put("_capri_user_entry", entry.id).put("content", entry.text + ai.capri.app.InputAttachments.manifest(entry.inputs?.let { raw -> JSONArray(raw).let { a -> (0 until a.length()).map { a.getJSONObject(it) } } } ?: emptyList())).apply {
                 entry.inputs?.let { put(ai.capri.app.InputAttachments.KEY, JSONArray(it)) }
             })
             ids.put(entry.id)
         }
         s.remove("question"); s.remove("progress")
-        TaskState.userChanges(messages, changes.map { it.text })
+        TaskState.userChanges(messages, changes.map { it.text }, changes.map { it.id })
         return true
     }
     fun waitForUser(messages: JSONArray, args: JSONObject): String {

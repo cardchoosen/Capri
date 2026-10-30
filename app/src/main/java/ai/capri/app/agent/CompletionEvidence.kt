@@ -28,6 +28,7 @@ internal object CompletionEvidence {
         if (text.startsWith("exit=")) return !text.startsWith("exit=0\n") && text != "exit=0"
         val root = runCatching { JSONObject(text) }.getOrNull() ?: return text.startsWith("工具失败")
         fun bad(obj: JSONObject, depth: Int): Boolean {
+            if (obj.optBoolean("result_incomplete")) return true
             if (obj.optString("status") in setOf("error", "partial", "partial_failure", "project_rules_required", "timeout", "failed", "permission_required", "permission_denied", "execution_failed", "preparation_failed", "invalid_argument", "cancelled", "not_executed", "awaiting_user") || obj.optString("state") in setOf("running", "pending", "failed", "cancelled", "timeout")) return true
             if (obj.has("success") && obj.opt("success") == false || obj.has("exit_code") && !obj.isNull("exit_code") && obj.optInt("exit_code", -1) != 0 || obj.has("error") && !obj.isNull("error")) return true
             return depth < 3 && listOf("data", "command", "result").any { obj.optJSONObject(it)?.let { child -> bad(child, depth + 1) } == true }

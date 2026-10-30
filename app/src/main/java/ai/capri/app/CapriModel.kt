@@ -418,7 +418,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
             messages.getJSONObject(0).put("content", rules)
             val instruction = if (continuing) "接续检查点，已记录的工具不得因网络重试重复执行。"
                 else "这是新请求；先前记录仅用于核验现存资源，不要自行继续先前目标。"
-            if (pendingFinal == null && latestUser.control == null) messages.put(JSONObject().put("role", "user").put("content", latestUser.text + InputAttachments.manifest(latestUser.inputs?.let { raw -> JSONArray(raw).let { a -> (0 until a.length()).map { a.getJSONObject(it) } } } ?: emptyList()) + "；" + instruction).apply { latestUser.inputs?.let { put(InputAttachments.KEY, JSONArray(it)) } })
+            if (pendingFinal == null && latestUser.control == null) messages.put(JSONObject().put("role", "user").put("_capri_user_entry", latestUser.id).put("content", latestUser.text + InputAttachments.manifest(latestUser.inputs?.let { raw -> JSONArray(raw).let { a -> (0 until a.length()).map { a.getJSONObject(it) } } } ?: emptyList()) + "；" + instruction).apply { latestUser.inputs?.let { put(InputAttachments.KEY, JSONArray(it)) } })
         } else {
             val history = session.messages.toList()
             val nextUser = (history.indexOfFirst { it.id == latestUser.id } + 1 until history.size).firstOrNull { history[it].role == "user" } ?: history.size
