@@ -131,6 +131,9 @@ internal object CapabilitySearch {
         listOf("history","conversation","聊天","历史","对话"),listOf("model","models","模型"),
         listOf("profile","persona","身份","人格"),listOf("search","find","lookup","搜索","查找","查询"),
         listOf("file","files","directory","folder","文件","目录"),listOf("git","github","repository","repositories","commit","仓库","提交"),
+        listOf("coding","code","diagnostic","diagnostics","lint","syntax","lsp","代码","诊断","语法","报错"),
+        listOf("snapshot","restore","rollback","version","快照","回滚","恢复文件","版本"),
+        listOf("reference","diff","range","引用","差异","对比"),
         listOf("database","sql","数据库"),listOf("calendar","schedule","日历","日程"))
     private fun words(text:String)=text.lowercase().split(Regex("[^\\p{L}\\p{N}_]+|_")).filter { it.isNotBlank() }.map { when { it.length>4 && it.endsWith("ies") -> it.dropLast(3)+"y"; it.length>4 && it.endsWith("s") -> it.dropLast(1); else -> it } }.toSet()
     fun score(queries:List<String>,name:String,description:String):Int {

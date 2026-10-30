@@ -1,0 +1,44 @@
+{
+  "before": {
+    "status": "checked",
+    "diagnostics": [
+      {
+        "line": 1,
+        "column": 7,
+        "message": "undefined name 'existing_missing'",
+        "source": "pyflakes",
+        "code": "diagnostic",
+        "severity": "error",
+        "anchor": "print(existing_missing)"
+      }
+    ],
+    "truncated": false
+  },
+  "after": {
+    "status": "checked",
+    "diagnostics": [
+      {
+        "line": 2,
+        "column": 7,
+        "message": "undefined name 'existing_missing'",
+        "source": "pyflakes",
+        "code": "diagnostic",
+        "severity": "error",
+        "anchor": "print(existing_missing)"
+      },
+      {
+        "line": 3,
+        "column": 7,
+        "message": "undefined name 'new_missing'",
+        "source": "pyflakes",
+        "code": "diagnostic",
+        "severity": "error",
+        "anchor": "print(new_missing)"
+      }
+    ],
+    "truncated": false
+  },
+  "seconds": 4.834,
+  "server_version": "1.15.0",
+  "device_used": false
+}

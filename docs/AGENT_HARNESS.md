@@ -71,7 +71,7 @@ The 2026-10-29 suite above is historical validation, not a required routine full
 
 JVM tests exercise the actual loop through scripted inference, execution intent/result checkpoints, malformed/truncated calls, parallel read barriers, cancellation, tool revocation, task-state validation, final handoff constraints, result archive isolation, structured compaction and HTTPS transport. The tool-surface comparison uses the same built-in definitions for eager schemas versus deferred schemas plus manifest; it measures estimated context cost, not task quality or wall-clock speed.
 
-This version retains non-streaming model transport and separate persona delivery. It does not introduce automatic model switching, subagent execution, LSP services, semantic memory indexing or autonomous Skill rewriting. Those require their own task-quality and resource measurements. The Skill content/lifecycle work continues through its existing interfaces.
+This version retains non-streaming model transport and separate persona delivery. It does not introduce automatic model switching, subagent execution, general multi-language LSP services, semantic memory indexing or autonomous Skill rewriting. Those require their own task-quality and resource measurements. The Skill content/lifecycle work continues through its existing interfaces.
 
 ## Recorded validation: 2026-10-29
 
@@ -92,3 +92,7 @@ A shared contract snapshot now backs catalog, discovery and pre-dispatch validat
 ## Program execution update — 2026-10-30
 
 program_run adds bounded tool RPC, selective output, revision-scoped volatile Python kernels, read-only batches and shared disk/network/execution permits. Child intents/results are durable scoped receipts rather than nested provider tool messages; recovery never replays programs. Existing runtime authority and permissions remain unchanged; RPC is not a Python security sandbox. See [the Chinese implementation and verification record](AGENT_PROGRAMS.zh-CN.md).
+
+## Coding update — 2026-10-30
+
+File mutations retain independent bounded snapshots and version-guarded restoration. Immediate JSON/XML checks, asynchronous Python AST/optional pylsp analysis, baseline-aware finding diffs and structured file/directory/snapshot references are integrated. Analysis states are version/environment-scoped and never stand in for build/test proof. Host validation used a real Python language server; device integration remains unverified because the user requested no phone access. See [the Chinese coding record](AGENT_CODING.zh-CN.md).

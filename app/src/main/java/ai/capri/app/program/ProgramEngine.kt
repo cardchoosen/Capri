@@ -37,6 +37,7 @@ internal class ProgramEngine(
     }
     private class Kernel(val chat:String,val process:Process,val host:Host,val fingerprint:String,val generation:String=UUID.randomUUID().toString()) {
         val input=process.inputStream.buffered();val frame=ByteArrayOutputStream();val errors=ByteArrayOutputStream()
+        @Volatile var dirty=false
         val closed=AtomicBoolean();var timer:Job?=null
     }
     private val scope=CoroutineScope(SupervisorJob()+Dispatchers.IO)
@@ -51,6 +52,7 @@ internal class ProgramEngine(
         if(!k.closed.compareAndSet(false,true))return
         kernels.remove(key,k);k.timer?.cancel();k.host.stop(k.process);slots.release()
     }
+    fun invalidateChat(chat:String) {kernels.values.filter{it.chat==chat}.forEach{it.dirty=true}}
     fun closeChat(chat:String) { kernels.entries.filter { it.value.chat==chat }.forEach { close(it.key,it.value) } }
     fun closeAll() { kernels.entries.toList().forEach { close(it.key,it.value) } }
     fun dispose() { closeAll();scope.cancel() }
@@ -84,7 +86,7 @@ internal class ProgramEngine(
         if(action in setOf("status","reset")) return@withContext mutex.withLock {
             val k=kernels[key]
             if(action=="reset") { if(k!=null)close(key,k);return@withLock JSONObject().put("status","ok").put("kernel_state","reset").put("notice","Variables/imports discarded; workspace files and prior side effects remain.").toString() }
-            val usable=k!=null && k.process.isAlive && k.fingerprint==host.fingerprint(chat)
+            val usable=k!=null && k.process.isAlive && !k.dirty && k.fingerprint==host.fingerprint(chat)
             if(!usable && k!=null)close(key,k)
             val recent=directory(key).listFiles().orEmpty().filter { it.extension=="json" }.sortedByDescending { it.lastModified() }.take(8).map { f ->
                 val r=JSONObject(read(f));JSONObject().put("run_id",r.getString("run_id")).put("status",r.optString("status")).put("parent_call_id",r.optString("parent_call_id"))
@@ -148,7 +150,7 @@ internal class ProgramEngine(
                         kernels.entries.filter { it.value.chat==chat && it.key!=key }.forEach { close(it.key,it.value) }
                         var k=kernels[key];var reused=k!=null;var reason=""
                         val fingerprint=host.fingerprint(chat)
-                        if(k!=null && (!k.process.isAlive || k.fingerprint!=fingerprint)) { reason="environment_changed_or_kernel_exited";close(key,k);k=null;reused=false }
+                        if(k!=null && (!k.process.isAlive || k.dirty || k.fingerprint!=fingerprint)) { reason=if(k.dirty)"workspace_source_changed" else "environment_changed_or_kernel_exited";close(key,k);k=null;reused=false }
                         if(k==null) {
                             check(slots.tryAcquire()) { "Kernel capacity reached; reset an idle kernel or wait for expiry." }
                             var process:Process?=null
@@ -177,6 +179,7 @@ internal class ProgramEngine(
                             }
                             if(done.optString("error").isBlank())done.remove("error")
                             done.remove("kind");done.put("kernel_id",kernel.generation).put("reused",reused).put("invalidation_reason",reason)
+                            if(kernel.dirty)done.put("reusable",false).put("invalidation_reason","workspace_source_changed")
                             if(!done.optBoolean("reusable") || done.optString("status")!="ok")close(key,kernel)
                             else kernel.timer=scope.launch { delay(idleMs);mutex.withLock { close(key,kernel) } }
                             done

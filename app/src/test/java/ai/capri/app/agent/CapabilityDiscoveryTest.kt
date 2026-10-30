@@ -46,6 +46,14 @@ class CapabilityDiscoveryTest {
             assertEquals(query,setOf(expected),names(found.getJSONArray("tools")))
         }
     }
+    @Test fun codingCapabilitiesAreDiscoverableByLocalizedIntent() {
+        val all=JSONArray(ai.capri.app.coding.CodingContract.specifications()).put(ai.capri.app.coding.CodingAssistContract.specification())
+        val d=ToolDiscovery();d.assemble(all)
+        for((query,expected) in listOf("代码诊断" to "coding_diagnostics","回滚" to "coding_restore","文件差异" to "coding_reference")) {
+            val found=JSONObject(d.execute("tool_search",JSONObject().put("query",query).put("limit",1)))
+            assertEquals(query,setOf(expected),names(found.getJSONArray("tools")))
+        }
+    }
     @Test fun configuredDisconnectedCapabilityIsVisibleWithoutBecomingCallable() {
         val service=JSONObject().put("id","github").put("name","GitHub").put("description","Repository service").put("availability","credentials_required").put("next_action","Configure credentials in Run settings.")
         val d=ToolDiscovery();d.assemble(JSONArray(),JSONArray().put(service))

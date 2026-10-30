@@ -86,6 +86,16 @@ class ProgramEngineTest {
         assertTrue(read.getString("text").contains("pending"));assertEquals(1,h.dispatched.size)
         e.execute("chat",JSONObject().put("action","status"),h);assertEquals(1,h.dispatched.size)
     }
+    @Test fun sourceInvalidationWaitsForTheActiveCellAndDoesNotReplayWrites()=fixture { e,h,_ ->
+        e.execute("chat",execute("value=123"),h);e.invalidateChat("chat")
+        val fresh=JSONObject(e.execute("chat",execute("capri.emit(globals().get('value','absent'))"),h))
+        assertEquals("absent",fresh.getJSONArray("emitted").getString(0));assertFalse(fresh.getBoolean("reused"))
+        h.callback={e.invalidateChat("chat");"{\"status\":\"ok\"}"}
+        val during=JSONObject(e.execute("chat",execute("capri.call('write_file',{})\ncapri.emit('cell finished')"),h))
+        assertEquals("ok",during.getString("status"));assertEquals("cell finished",during.getJSONArray("emitted").getString(0))
+        assertFalse(during.getBoolean("reusable"));assertEquals("workspace_source_changed",during.getString("invalidation_reason"));assertEquals(1,h.dispatched.size)
+        assertEquals("absent",JSONObject(e.execute("chat",JSONObject().put("action","status"),h)).getString("kernel_state"))
+    }
     @Test fun outputAndCallBudgetsCannotBeHiddenByCatchingExceptions()=fixture { e,h,_ ->
         val output=JSONObject(e.execute("chat",execute("try:\n print('x'*3000)\nexcept Exception:\n pass").put("max_output_chars",1024),h))
         assertEquals("error",output.getString("status"))

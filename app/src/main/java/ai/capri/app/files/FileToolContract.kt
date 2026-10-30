@@ -5,7 +5,7 @@ import org.json.JSONObject
 
 /** One source for model schemas and runtime argument boundaries. */
 internal object FileToolContract {
-    const val guidance = "Use list_files/search_files to locate workspace text, read_file for relevant ranges, and edit_file for precise changes. Use write_file for new files or complete replacement. Reuse sha256 to guard edits and paginated reads. File tools need no runtime preparation. Use execution tools for unsupported formats or advanced search. Use send_file to deliver artifacts."
+    const val guidance = "Use list_files/search_files to locate workspace text, read_file for relevant ranges, and edit_file for precise changes. Use write_file for new files or complete replacement. Reuse sha256 to guard edits and paginated reads. File tools need no runtime preparation. Use execution tools for unsupported formats or advanced search. Use send_file to deliver artifacts. Writes may return coding_snapshots, quick diagnostics and Python job IDs; applied writes are not rolled back on diagnostics. Use coding_diagnostics for versioned results, coding_reference for exact ranges/diffs, and coding_restore only for an authorized matching-version restore. These are not build/test proof."
     private data class Field(val schema: JSONObject, val required: Boolean = false)
     private fun text(description: String, max: Int, required: Boolean = false) = Field(JSONObject().put("type", "string").put("description", description).put("maxLength", max), required)
     private fun integer(description: String, min: Int, max: Int, default: Int) = Field(JSONObject().put("type", "integer").put("description", description).put("minimum", min).put("maximum", max).put("default", default))

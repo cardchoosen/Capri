@@ -16,14 +16,14 @@ internal class ToolScheduler(private val concurrency: Int = 4) {
         private val disk = Semaphore(4)
         private val network = Semaphore(2)
         private val cpu = Semaphore(1)
-        private val reads = setOf("read_file", "list_files", "search_files", "project", "web_search", "web_read")
+        private val reads = setOf("read_file", "list_files", "search_files", "project", "coding_reference", "web_search", "web_read")
         suspend fun <T> withCpu(block: suspend () -> T): T = cpu.withPermit { block() }
         private suspend fun limited(call: JSONObject, execute: suspend (JSONObject) -> String, canExecute: () -> Boolean): String {
             suspend fun dispatch() = if(canExecute())execute(call) else JSONObject().put("status","not_executed").put("reason","user_input_or_waiting").toString()
             val name=call.getJSONObject("function").getString("name")
             return when(name) {
                 "web_search","web_read" -> network.withPermit { dispatch() }
-                "read_file","list_files","search_files","project","write_file","edit_file","apply_patch" -> disk.withPermit { dispatch() }
+                "read_file","list_files","search_files","project","coding_reference","coding_restore","write_file","edit_file","apply_patch" -> disk.withPermit { dispatch() }
                 "python_run" -> withCpu { dispatch() }
                 else -> dispatch()
             }

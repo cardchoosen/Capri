@@ -31,3 +31,5 @@ Android 原生个人 AI Agent，在手机上执行任务。
 - [工具发现与能力感知](docs/AGENT_DISCOVERY.zh-CN.md)：能力状态、核心工具直供、检索、受控桥接和定义工作集
 
 - [程序化调用与运行效率](docs/AGENT_PROGRAMS.zh-CN.md)：受控 RPC、热内核、批处理、共享并发与可恢复回执
+
+- [Coding 能力](docs/AGENT_CODING.zh-CN.md)：写后检查、Python LSP 试点、异步诊断、版本快照与精确引用

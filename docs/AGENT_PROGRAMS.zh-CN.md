@@ -55,3 +55,5 @@ ToolScheduler 的资源信号量由普通模型工具批次和程序 RPC 共用�
 一项原生用例 `ProgramDeviceTest#persistentKernelRpcIsolationLimitsAndReceipts` 通过真实 venv／PRoot、文件工具和 AtomicFile 路径，覆盖状态复用、筛选后输出、只读批次部分失败、384 MiB 上限、超时销毁、回执与跨会话隔离。首次发现 Android 不提供所依赖的 proc 子进程文件，现改用不消费退出状态的 waitid 检查。通过报告：`work/verify/20261030-173945-648065/report.json`。
 
 固定真机样本首次执行含新 venv 准备 9523 ms，热复用执行 21 ms，供应商请求 0；整项夹具 11137 ms。它不是模型端到端提速或费用基准，不能据此承诺所有任务更快。新增工具定义也有上下文成本，适合有组合与复用价值的任务。程序工具耗时包含子 RPC 的等待，分析日志时应使用区间归因，不能将父子耗时直接相加。提交候选日志：`work/input-ui/program-commit-build.log`、`work/input-ui/program-final-build.log`。
+
+2026-10-30 Coding 衔接更新：通过文件工具改动 Python／pyi 源码会标记当前内核失效，正在执行的单元安全结束后丢弃缓存，不在写入 RPC 中途杀掉调用者。后续运行会重新加载；同一单元内及外部源修改仍需显式 reload/reset。见[Coding 能力](AGENT_CODING.zh-CN.md)。

@@ -29,7 +29,24 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
     companion object { const val MAX_MODEL_CALLS = 50 }
     internal val gitAccounts = ai.capri.app.git.GitAccounts(app)
     val store = Store(app)
-    private val workspaceFiles = ai.capri.app.files.WorkspaceFileTools(store.workspace)
+    private val codingStore = ai.capri.app.coding.CodingStore(File(app.filesDir,"coding-history"))
+    private val workspaceFiles: ai.capri.app.files.WorkspaceFileTools = ai.capri.app.files.WorkspaceFileTools(store.workspace,codingStore) { scope,record ->
+        if(record.getString("path").substringAfterLast('.',"").lowercase() in setOf("py","pyi"))programs.invalidateChat(HistoryEditing.scope(scope).first)
+        codingDiagnostics.enqueue(scope,record)
+    }
+    private val codingProbe: ai.capri.app.coding.CodingProbeRuntime by lazy { ai.capri.app.coding.CodingProbeRuntime(app,runtime,programRuntime::fingerprint) }
+    private val codingDiagnostics: ai.capri.app.coding.CodingDiagnostics by lazy {
+        ai.capri.app.coding.CodingDiagnostics(File(app.filesDir,"coding-jobs"),codingStore,codingProbe::probe,workspaceFiles::currentVersion,programRuntime::fingerprint, { scope,record ->
+            withContext(Dispatchers.Main) {
+                sessions.firstOrNull { HistoryEditing.actualContextKey(it)==scope }?.let { session ->
+                    session.messages.add(Entry("status","代码诊断${if(record.optString("state")=="ready")"就绪" else "已过期"}：${record.optString("path").take(160)} · ${record.optString("sha256").take(12)}；可查询任务 ${record.optString("job_id")}"));persist()
+                }
+            }
+        }, source={chat,path ->
+            val lease=RuntimeGate.beginFiles(app,chat,"Coding analysis source")
+            try{workspaceFiles.diagnosticSource(chat,path)}finally{RuntimeGate.endFiles(lease)}
+        })
+    }
     private val sessionDeletion = SessionDeletion(app.filesDir)
     private val pendingDeletions = sessionDeletion.pending()
     internal val deletingChats = mutableStateListOf<String>()
@@ -187,7 +204,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
             finally { runtimeBusy = false; refresh() }
         }
     }
-    override fun onCleared() { programs.dispose(); browser.dispose(); extensions.dispose(); super.onCleared() }
+    override fun onCleared() { codingDiagnostics.dispose(); programs.dispose(); browser.dispose(); extensions.dispose(); super.onCleared() }
     fun refresh() { tick.value++ }
     fun current() = sessions.first { it.id == selected }
     internal fun personalSession() = sessions.first { it.kind == SessionKind.PERSONAL }
@@ -218,7 +235,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
             var committed = false
             try {
                 runtime.environment.sessionLock(chat) {
-                    withContext(Dispatchers.IO) { programs.closeChat(chat); sessionDeletion.validate(chat); terminals.deleteChat(chat) }
+                    withContext(Dispatchers.IO) { codingDiagnostics.cancelChat(chat); programs.closeChat(chat); sessionDeletion.validate(chat); terminals.deleteChat(chat) }
                     extensions.deleteChat(chat)
                     browser.deleteChat(chat)
                     RuntimeGate.beginChatDeletion(getApplication(), chat)
@@ -255,6 +272,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
             try {
                 // Cancellation cannot leave UI/model writes running across the destructive commit.
                 withContext(Dispatchers.IO + NonCancellable) {
+                    codingDiagnostics.cancelAll()
                     programs.closeAll()
                     SharedMemoryReset.begin(getApplication())
                     SharedMemoryReset.resume(getApplication(), store)
@@ -282,6 +300,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
         require(next.isNotBlank() && (text == null || next.toByteArray().size <= 32000)) { "编辑内容须为1–32000 UTF-8字节" }
         val config = store.config(chat)
         require(session.kind == SessionKind.TASK && IdentityReply.matches(next) || config.model.isNotBlank() && config.key.isNotBlank()) { "请先添加 API 并选择模型" }
+        codingDiagnostics.invalidate(chat)
         programs.closeChat(chat)
         val saved = HistoryEditing.copy(session)
         session.messages.forEach { it.reveal?.finish() }
@@ -366,6 +385,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
             .put(ai.capri.app.knowledge.ConversationHistory.specification())
             .put(ShortTaskContract.specification())
             .put(ai.capri.app.program.ProgramContract.specification())
+            .put(ai.capri.app.coding.CodingAssistContract.specification())
             .put(CapabilityContract.specification())
             .put(androidTools.specification())
             .put(ai.capri.app.terminal.TerminalContract.specification())
@@ -540,7 +560,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                 }
                 name = function.getString("name")
                 val args = JSONObject(function.getString("arguments"))
-                if (name in setOf("environment","environment_check","python_env") && args.optString("action") in setOf("prepare","install","uninstall","refresh")) programs.closeChat(session.id)
+                if (name in setOf("environment","environment_check","python_env") && args.optString("action") in setOf("prepare","install","uninstall","refresh")) { codingDiagnostics.cancelChat(session.id);programs.closeChat(session.id) }
                 if (name == "python_env" && args.optString("action") in setOf("install", "uninstall")) runCatching { installationEnvironment.invalidate("session:${session.id}", "会话包管理可能改变依赖") }
                 if (!ToolPresentation.isInternal(name)) activeTools[session.id] = ToolActivity(call.getString("id"), if (name.startsWith("mcp_")) extensions.label(session.id, name) else toolLabel(name, args))
                 refresh()
@@ -581,9 +601,10 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                             if (lease == null) ai.capri.app.files.WorkspaceFileTools.failure("busy", "Workspace unavailable during deletion or maintenance.")
                             else try {
                                 val context = currentCoroutineContext()
-                                workspaceFiles.execute(session.id, name, args) { context.ensureActive() }
+                                workspaceFiles.executeScoped(session.id, conversation,name,args,call.getString("id")) { context.ensureActive() }
                             } finally { RuntimeGate.endFiles(lease) }
                         }
+                        "coding_diagnostics" -> codingDiagnostics.execute(conversation,args,call.getString("id"))
                         "program_run" -> programs.execute(conversation,args,object:ai.capri.app.program.ProgramEngine.Host {
                             override suspend fun launch(chat:String)=programRuntime.launch(chat)
                             override fun stop(process:Process)=OwnedProcesses.stop(process)
@@ -642,7 +663,8 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                 val tools = withContext(Dispatchers.IO) {
                     discovery.assemble(JSONArray(baseTools.toString()).apply { extensions.specifications(session.id).forEach { put(it) } }, extensions.capabilities(session.id))
                 }
-                val additions = listOf(discovery.manifest(), TaskState.message(messages), requests.message(), JSONObject().put("role", "system").put("content", TurnCompletion.guidance + "\n" + TaskState.guidance))
+                val diagnosticsContext=withContext(Dispatchers.IO){codingDiagnostics.manifest(conversation)}
+                val additions = listOf(discovery.manifest(), TaskState.message(messages), requests.message(), diagnosticsContext, JSONObject().put("role", "system").put("content", TurnCompletion.guidance + "\n" + TaskState.guidance))
                 val reserve = contextBudget.tokens(additions.sumOf { ai.capri.app.model.ContextTokens.message(it) }).toInt()
                 val fitBudget = contextBudget.copy(safety = contextBudget.safety + reserve)
                 messages = withContext(Dispatchers.IO) {
