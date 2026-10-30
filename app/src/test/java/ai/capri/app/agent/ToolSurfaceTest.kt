@@ -13,7 +13,7 @@ class ToolSurfaceTest {
         val all = JSONArray((FileToolContract.specifications() + ai.capri.app.coding.CodingContract.specifications() + listOf(
             FileToolContract.sendSpecification(), ai.capri.app.model.ModelInfoTool.specification(), KnowledgeTool.specification(),
             KnowledgeTool.historySpecification(), PersonalMemory.specification(), ConversationHistory.specification(),
-            ShortTaskContract.specification(), CapabilityContract.specification(), ai.capri.app.nativebridge.NativeCatalog.spec(),
+            ShortTaskContract.specification(), ai.capri.app.program.ProgramContract.specification(), CapabilityContract.specification(), ai.capri.app.nativebridge.NativeCatalog.spec(),
             ai.capri.app.terminal.TerminalContract.specification(), ai.capri.app.browser.BrowserContract.specification(),
             ai.capri.app.extensions.ExtensionInstall.specification(),
             ai.capri.app.retrieval.WebContract.search(), ai.capri.app.retrieval.WebContract.read(), TaskState.specification())))

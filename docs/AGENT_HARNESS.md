@@ -88,3 +88,7 @@ The working implementation adds checkpointed phases, durable user steering at di
 ## Capability discovery update — 2026-10-30
 
 A shared contract snapshot now backs catalog, discovery and pre-dispatch validation. Android/browser schemas are eager; deferred schemas use an LRU count/token budget with revocation on disappearance or contract change. Read-only configured-service states and numeric surface metrics are available. Bridge targets retain original checkpoint IDs, privacy filtering, cancellation and evidence semantics. Imported MCP schemas keep existing transport/server validation. See [the Chinese implementation and verification record](AGENT_DISCOVERY.zh-CN.md). Earlier fixture token counts describe the historical policy, not current performance.
+
+## Program execution update — 2026-10-30
+
+program_run adds bounded tool RPC, selective output, revision-scoped volatile Python kernels, read-only batches and shared disk/network/execution permits. Child intents/results are durable scoped receipts rather than nested provider tool messages; recovery never replays programs. Existing runtime authority and permissions remain unchanged; RPC is not a Python security sandbox. See [the Chinese implementation and verification record](AGENT_PROGRAMS.zh-CN.md).

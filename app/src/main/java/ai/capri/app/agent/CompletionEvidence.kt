@@ -7,6 +7,11 @@ import org.json.JSONObject
 internal object CompletionEvidence {
     private val bookkeeping = setOf("task_state", "tool_search", "tool_describe", "ask_user", "model_info", "profile_search", "skill")
     private val reads = setOf("read_file", "list_files", "search_files", "project", "web_search", "web_read", "context_history", "conversation_history", "personal_memory", "knowledge")
+    private fun administrative(call: JSONObject): Boolean {
+        val f=runCatching { ToolRegistry.function(call) }.getOrDefault(call.getJSONObject("function"))
+        return f.optString("name") in bookkeeping || f.optString("name")=="program_run" &&
+            runCatching { JSONObject(f.optString("arguments")).optString("action") in setOf("status","reset","read") }.getOrDefault(false)
+    }
     private fun prior(messages: JSONArray): Set<String> = TurnState.snapshot(messages).optJSONArray("prior_calls")?.let { a -> (0 until a.length()).map { a.getString(it) }.toSet() } ?: emptySet()
     private fun calls(messages: JSONArray): Map<String, JSONObject> = (0 until messages.length()).flatMap { i ->
         val a = messages.getJSONObject(i).optJSONArray("tool_calls") ?: JSONArray()
@@ -15,14 +20,14 @@ internal object CompletionEvidence {
     fun results(messages: JSONArray): List<JSONObject> {
         val calls = calls(messages)
         return (0 until messages.length()).map { messages.getJSONObject(it) }.filter {
-            it.optString("role") == "tool" && it.optString("tool_call_id") !in prior(messages) && calls[it.optString("tool_call_id")]?.let { call -> runCatching { ToolRegistry.function(call).getString("name") }.getOrDefault("tool_invoke") } !in bookkeeping
+            it.optString("role") == "tool" && it.optString("tool_call_id") !in prior(messages) && calls[it.optString("tool_call_id")]?.let(::administrative) != true
         }
     }
     fun requiresConclusion(messages: JSONArray): Boolean {
         val state = TaskState.snapshot(messages)
         val request = state.optString("request") + "\n" + state.optJSONArray("user_context").toString()
         if (ai.capri.app.TurnCompletion.requiresEvidence(request) || (state.optJSONArray("steps")?.length() ?: 0) > 0) return true
-        return calls(messages).values.any { val f = runCatching { ToolRegistry.function(it) }.getOrDefault(it.getJSONObject("function")); f.getString("name") !in bookkeeping + reads }
+        return calls(messages).values.filterNot(::administrative).any { val f = runCatching { ToolRegistry.function(it) }.getOrDefault(it.getJSONObject("function")); f.getString("name") !in bookkeeping + reads }
     }
     fun unsuccessful(text: String): Boolean {
         if (text.startsWith("exit=")) return !text.startsWith("exit=0\n") && text != "exit=0"

@@ -61,6 +61,8 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
     internal val installationEnvironment = ai.capri.app.environment.InstallationEnvironment.get(app)
     internal val capabilityTool = CapabilityTool(app, runtime)
     internal val shortTasks = ShortTaskTool(runtime, capabilityTool)
+    private val programs = ai.capri.app.program.ProgramEngine(File(app.filesDir,"agent-programs"))
+    private val programRuntime = ai.capri.app.program.ProgramRuntime(app,runtime,store.workspace)
     internal val pythonEnvironment = ai.capri.app.pythonenv.PythonEnvironmentTool(terminals)
     internal val extensions = ai.capri.app.extensions.ExtensionManager(app, runtime, store.workspace)
     val androidTools = ai.capri.app.nativebridge.AndroidTool(app)
@@ -131,6 +133,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                 startPreparationService(selected, true)
                 runtime.environment.ensureBase()
                 runtime.environment.publish("preparing", "正在清理旧会话环境，保留全局配置")
+                programs.closeAll()
                 terminals.resetForNewEnvironment()
                 withContext(Dispatchers.IO) { LegacySessionReset.clear(getApplication()) }
                 sessions.clear(); SessionCatalog.ensurePersonal(sessions); selected = personalSession().id
@@ -184,7 +187,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
             finally { runtimeBusy = false; refresh() }
         }
     }
-    override fun onCleared() { browser.dispose(); extensions.dispose(); super.onCleared() }
+    override fun onCleared() { programs.dispose(); browser.dispose(); extensions.dispose(); super.onCleared() }
     fun refresh() { tick.value++ }
     fun current() = sessions.first { it.id == selected }
     internal fun personalSession() = sessions.first { it.kind == SessionKind.PERSONAL }
@@ -215,7 +218,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
             var committed = false
             try {
                 runtime.environment.sessionLock(chat) {
-                    withContext(Dispatchers.IO) { sessionDeletion.validate(chat); terminals.deleteChat(chat) }
+                    withContext(Dispatchers.IO) { programs.closeChat(chat); sessionDeletion.validate(chat); terminals.deleteChat(chat) }
                     extensions.deleteChat(chat)
                     browser.deleteChat(chat)
                     RuntimeGate.beginChatDeletion(getApplication(), chat)
@@ -252,6 +255,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
             try {
                 // Cancellation cannot leave UI/model writes running across the destructive commit.
                 withContext(Dispatchers.IO + NonCancellable) {
+                    programs.closeAll()
                     SharedMemoryReset.begin(getApplication())
                     SharedMemoryReset.resume(getApplication(), store)
                 }
@@ -278,6 +282,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
         require(next.isNotBlank() && (text == null || next.toByteArray().size <= 32000)) { "编辑内容须为1–32000 UTF-8字节" }
         val config = store.config(chat)
         require(session.kind == SessionKind.TASK && IdentityReply.matches(next) || config.model.isNotBlank() && config.key.isNotBlank()) { "请先添加 API 并选择模型" }
+        programs.closeChat(chat)
         val saved = HistoryEditing.copy(session)
         session.messages.forEach { it.reveal?.finish() }
         try {
@@ -360,6 +365,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
             .put(ai.capri.app.knowledge.PersonalMemory.specification())
             .put(ai.capri.app.knowledge.ConversationHistory.specification())
             .put(ShortTaskContract.specification())
+            .put(ai.capri.app.program.ProgramContract.specification())
             .put(CapabilityContract.specification())
             .put(androidTools.specification())
             .put(ai.capri.app.terminal.TerminalContract.specification())
@@ -534,6 +540,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                 }
                 name = function.getString("name")
                 val args = JSONObject(function.getString("arguments"))
+                if (name in setOf("environment","environment_check","python_env") && args.optString("action") in setOf("prepare","install","uninstall","refresh")) programs.closeChat(session.id)
                 if (name == "python_env" && args.optString("action") in setOf("install", "uninstall")) runCatching { installationEnvironment.invalidate("session:${session.id}", "会话包管理可能改变依赖") }
                 if (!ToolPresentation.isInternal(name)) activeTools[session.id] = ToolActivity(call.getString("id"), if (name.startsWith("mcp_")) extensions.label(session.id, name) else toolLabel(name, args))
                 refresh()
@@ -577,6 +584,18 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                                 workspaceFiles.execute(session.id, name, args) { context.ensureActive() }
                             } finally { RuntimeGate.endFiles(lease) }
                         }
+                        "program_run" -> programs.execute(conversation,args,object:ai.capri.app.program.ProgramEngine.Host {
+                            override suspend fun launch(chat:String)=programRuntime.launch(chat)
+                            override fun stop(process:Process)=OwnedProcesses.stop(process)
+                            override fun fingerprint(chat:String)=programRuntime.fingerprint(chat)
+                            override suspend fun canExecute()=withContext(Dispatchers.Main) { TurnState.question(messages)==null && TurnState.pending(messages,session.messages.toList()).isEmpty() }
+                            override suspend fun call(child:JSONObject)=withContext(Dispatchers.Main) {
+                                try { executeTool(child) } finally {
+                                    activeTools[session.id]=ToolActivity(call.getString("id"),toolLabel("program_run",args))
+                                    notices[session.id]=ToolPresentation.progress("program_run");refresh()
+                                }
+                            }
+                        },call.getString("id"))
                         "python_run" -> shortTasks.execute(session.id, args, trace)
                         else -> if (name.startsWith("mcp_")) extensions.call(session.id, name, args) else error("Unknown tool.")
                     }
