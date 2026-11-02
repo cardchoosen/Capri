@@ -19,6 +19,7 @@ class SupervisorTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix='capri-terminal-')
         self.base = Path(self.temp.name)
+        self.terminal_id = str(uuid.uuid4())
         self.workspace = self.base / 'workspace'
         self.workspace.mkdir()
         (self.base / 'commands').mkdir()
@@ -61,12 +62,16 @@ class SupervisorTest(unittest.TestCase):
         folder = self.base / 'commands' / identifier
         folder.mkdir()
         (folder / 'main.sh').write_text(code + '\n')
-        self.publish('request.json', json.dumps(dict(id=identifier, timeout_seconds=timeout)))
+        self.publish('request.json', json.dumps(dict(id=identifier, terminal_id=self.terminal_id, timeout_seconds=timeout)))
         return folder
 
     def result(self, folder):
         self.wait(lambda: (folder / 'result.json').exists())
-        return json.loads((folder / 'result.json').read_text())
+        result = json.loads((folder / 'result.json').read_text())
+        self.assertEqual(folder.name, result['command_id'])
+        self.assertEqual(self.terminal_id, result['terminal_id'])
+        self.assertGreater(result['finished_at'], 0)
+        return result
 
     def test_directory_export_and_shell_functions_survive_many_commands(self):
         folder = self.submit('mkdir nested; cd nested; export CAPRI_TOKEN=kept; counter=7; helper() { echo function-ok; }')

@@ -96,3 +96,7 @@ program_run adds bounded tool RPC, selective output, revision-scoped volatile Py
 ## Coding update — 2026-10-30
 
 File mutations retain independent bounded snapshots and version-guarded restoration. Immediate JSON/XML checks, asynchronous Python AST/optional pylsp analysis, baseline-aware finding diffs and structured file/directory/snapshot references are integrated. Analysis states are version/environment-scoped and never stand in for build/test proof. Host validation used a real Python language server; device integration remains unverified because the user requested no phone access. See [the Chinese coding record](AGENT_CODING.zh-CN.md).
+
+## Execution lifecycle
+
+Local runtime launchers now share a bounded process ledger with durable intents/results and frozen file output, chat ownership, cancellation and event-driven terminal waiting. `terminal.await` resumes its waiting turn without repeated model polling; stopping a wait does not close its command. Restart marks unfinished launchers unknown and never reattaches PIDs or replays effects. The backend interface supports local PRoot and installer host processes; SSH remains explicitly unavailable pending remote receipts and cancellation. Small watched environment files include bounded content hashes; opaque commands conservatively invalidate dependency evidence. See [execution lifecycle and verification limits](AGENT_EXECUTION.zh-CN.md). Android lifecycle/resource checks remain pending while the phone is unavailable.

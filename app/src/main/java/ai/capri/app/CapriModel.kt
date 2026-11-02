@@ -354,7 +354,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
         if (session.title == "新会话") session.title = submittedText.take(20)
         persist()
         if (inputIds.isNotEmpty()) runCatching { inputAttachments.consume(chat, inputIds.toSet()) }
-        if (busy) { notices[chat] = "补充要求已保存，将在安全边界接入；已开始的操作不会自动回滚。"; refresh(); return true }
+        if (busy) { terminals.interruptWaiters(chat); notices[chat] = "补充要求已保存，将在安全边界接入；已开始的操作不会自动回滚。"; refresh(); return true }
         val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
             taskModels[chat] = config
             try { respond(session, config) }
@@ -664,7 +664,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                     discovery.assemble(JSONArray(baseTools.toString()).apply { extensions.specifications(session.id).forEach { put(it) } }, extensions.capabilities(session.id))
                 }
                 val diagnosticsContext=withContext(Dispatchers.IO){codingDiagnostics.manifest(conversation)}
-                val additions = listOf(discovery.manifest(), TaskState.message(messages), requests.message(), diagnosticsContext, JSONObject().put("role", "system").put("content", TurnCompletion.guidance + "\n" + TaskState.guidance))
+                val additions = listOf(discovery.manifest(), TaskState.message(messages), requests.message(), diagnosticsContext, terminals.completionContext(session.id), JSONObject().put("role", "system").put("content", TurnCompletion.guidance + "\n" + TaskState.guidance))
                 val reserve = contextBudget.tokens(additions.sumOf { ai.capri.app.model.ContextTokens.message(it) }).toInt()
                 val fitBudget = contextBudget.copy(safety = contextBudget.safety + reserve)
                 messages = withContext(Dispatchers.IO) {

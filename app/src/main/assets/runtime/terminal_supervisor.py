@@ -17,8 +17,16 @@ LIMIT = 2_000_000
 
 def atomic(path, value):
     temporary = path.with_suffix('.tmp')
-    temporary.write_text(json.dumps(value))
+    with temporary.open('w') as stream:
+        stream.write(json.dumps(value))
+        stream.flush()
+        os.fsync(stream.fileno())
     temporary.replace(path)
+    descriptor = os.open(str(path.parent), os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 # An interactive shell can abort the rest of a command line on Ctrl+C, so an inline trailing
@@ -65,9 +73,12 @@ def finish(exit_code=None, reason=None):
     global active, output, interrupt_reason, interrupt_at
     if active:
         if output:
+            output.flush()
+            os.fsync(output.fileno())
             output.close()
         atomic(BASE / 'commands' / active['id'] / 'result.json',
-               dict(exit_code=exit_code, reason=reason or 'exited'))
+               dict(command_id=active['id'], terminal_id=active.get('terminal_id', 'legacy'),
+                    finished_at=int(time.time()*1000), exit_code=exit_code, reason=reason or 'exited'))
         active = None
         output = None
         interrupt_reason = None

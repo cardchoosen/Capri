@@ -50,6 +50,19 @@ class TerminalContractTest {
 
     }
 
+    @Test fun completionWaitingAndUnifiedProcessActionsAreClosedAndBounded() {
+        assertEquals("processes",TerminalContract.validate(JSONObject().put("action","processes")).first)
+        val await=JSONObject().put("action","await").put("terminal_id",id).put("command_id",id).put("wait_seconds",300)
+        assertEquals("await",TerminalContract.validate(await).first)
+        rejects { TerminalContract.validate(JSONObject(await.toString()).put("wait_seconds",301)) }
+        rejects { TerminalContract.validate(JSONObject(await.toString()).put("wait_ms",10)) }
+        rejects { TerminalContract.validate(JSONObject().put("action","await").put("terminal_id",id)) }
+        val read=JSONObject().put("action","process_read").put("process_id",id).put("offset",3).put("limit",4)
+        assertEquals("process_read",TerminalContract.validate(read).first)
+        rejects { TerminalContract.validate(JSONObject(read.toString()).put("process_id","../../other")) }
+        rejects { TerminalContract.validate(JSONObject(read.toString()).put("pid",123)) }
+        rejects { TerminalContract.validate(JSONObject().put("action","process_cancel").put("process_id",id).put("chat_id","other")) }
+    }
     @Test fun flatArgumentsAndLegacyNestedRequestsHaveTheSameClosedValidation() {
         val flat = JSONObject().put("action", "read").put("terminal_id", id).put("command_id", id).put("offset", 120).put("wait_ms", 10000)
         val normalized = TerminalContract.validate(flat).second

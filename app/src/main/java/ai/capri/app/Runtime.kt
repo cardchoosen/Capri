@@ -45,7 +45,7 @@ class PythonRuntime(private val context: Context, private val workspace: Workspa
                 val marker = File(home, ".capri-session-ready")
                 if (!marker.isFile || !java.nio.file.Files.exists(File(home, ".venv/bin/python3").toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
                     environment.chatState(id, LinuxState("preparing", "正在准备会话环境"))
-                    val run = workspace.folder(id, "runs").resolve("setup").apply { mkdirs() }
+                    val run = workspace.folder(id, "runs").resolve("setup-${java.util.UUID.randomUUID()}").apply { mkdirs() }
                     val output = File(run, "output.txt")
                     val process = startProcess(id, run, listOf("/bin/true"), output, "会话准备")
                     try {
@@ -53,6 +53,7 @@ class PythonRuntime(private val context: Context, private val workspace: Workspa
                             while (!process.waitFor(100, TimeUnit.MILLISECONDS)) currentCoroutineContext().ensureActive()
                             true
                         }
+                        if (completed != true) ai.capri.app.execution.ProcessLedger.markStopping(process,"timeout")
                         check(completed == true) { "Session preparation timed out after 60 seconds; retry after checking the state." }
                         check(process.exitValue() == 0) { "Session preparation failed: " + output.readText().takeLast(1500) }
                         marker.writeText("ubuntu-noble-v1")
@@ -74,10 +75,11 @@ class PythonRuntime(private val context: Context, private val workspace: Workspa
             val completed = withTimeoutOrNull(60_000) {
                 while (!process.waitFor(100, TimeUnit.MILLISECONDS)) {
                     kotlin.coroutines.coroutineContext.ensureActive()
-                    check(output.length() < 2_000_000) { "Output exceeded 2 MB; execution stopped." }
+                    check(output.length() <= 2_000_000) { "Output exceeded 2 MB; execution stopped." }
                 }
                 true
             }
+            if (completed != true) ai.capri.app.execution.ProcessLedger.markStopping(process,"timeout")
             check(completed == true) { "Execution timed out after 60 seconds and was stopped." }
             check(output.length() <= 2_000_000) { "Output exceeds 2 MB." }
             "exit=${process.exitValue()}\n" + output.bufferedReader().use { reader ->
@@ -85,25 +87,28 @@ class PythonRuntime(private val context: Context, private val workspace: Workspa
                 val count = reader.read(buffer)
                 if (count < 0) "" else String(buffer, 0, count)
             }
-        } finally { stop(process); script.setReadOnly() }
+        } catch (cancel: kotlinx.coroutines.CancellationException) { ai.capri.app.execution.ProcessLedger.markStopping(process,"cancelled"); throw cancel }
+        finally { stop(process); script.setReadOnly() }
     }
-    internal suspend fun runCommand(id: String, command: List<String>, timeout: Long = 60, exclusive: Boolean = false, resultLimit: Int = 30_000): String = withContext(Dispatchers.IO) {
+    internal suspend fun runCommand(id: String, command: List<String>, timeout: Long = 60, exclusive: Boolean = false, resultLimit: Int = 30_000, mutates: Boolean = false): String = withContext(Dispatchers.IO) {
         ensureSession(id)
         val run = workspace.folder(id, "runs").resolve(java.util.UUID.randomUUID().toString()).apply { mkdirs() }
         val output = File(run, "output.txt")
-        val launch = { OwnedProcesses.start(processBuilder(id, run, command).redirectErrorStream(true).redirectOutput(output), run) }
+        val launch = { ai.capri.app.execution.ProcessLedger.get(context).launch(id, if (exclusive) "system_dependencies" else "environment_check", command, output, changesEnvironment = exclusive || mutates) { OwnedProcesses.start(processBuilder(id, run, command).redirectErrorStream(true).redirectOutput(output), run) } }
         val process = if (exclusive) RuntimeGate.startExclusive(context, id, launch) else RuntimeGate.start(context, id, "环境检查", launch)
         try {
             val completed = withTimeoutOrNull(timeout * 1000) {
                 while (!process.waitFor(100, TimeUnit.MILLISECONDS)) {
                     currentCoroutineContext().ensureActive()
-                    check(output.length() < 2_000_000) { "Environment operation output exceeds 2 MB." }
+                    check(output.length() <= 2_000_000) { "Environment operation output exceeds 2 MB." }
                 }
                 true
             }
+            if (completed != true) ai.capri.app.execution.ProcessLedger.markStopping(process,"timeout")
             check(completed == true) { "Environment operation timed out after ${timeout} seconds and was stopped. Partial changes may remain; inspect before retrying." }
             "exit=${process.exitValue()}\n" + output.readText().takeLast(resultLimit)
-        } finally { stop(process) }
+        } catch (cancel: kotlinx.coroutines.CancellationException) { ai.capri.app.execution.ProcessLedger.markStopping(process,"cancelled"); throw cancel }
+        finally { stop(process) }
     }
     private fun stop(process: Process) = OwnedProcesses.stop(process)
     /** MCP uses raw pipes, no PTY, bootstrap, Git broker, or global SSH mounts. */
@@ -124,14 +129,14 @@ class PythonRuntime(private val context: Context, private val workspace: Workspa
                 listOfNotNull(tokenEnvironment?.let { "${it.first}=${it.second}" }) +
                 command.map { it.replace("\${extension}", "/extension").replace("\${workspace}", "/workspace") }
             val builder = ProcessBuilder(args).apply { environment().apply { clear(); put("PROOT_LOADER", loader.path); put("PROOT_TMP_DIR", tmp.path) } }
-            OwnedProcesses.start(builder, run)
+            ai.capri.app.execution.ProcessLedger.get(context).launch(id, "extension", listOf(command.firstOrNull().orEmpty()), null) { OwnedProcesses.start(builder, run) }
         }
     /** Shared launch configuration; both short Python and persistent terminals use the same mappings. */
     internal fun startProcess(id: String, run: File, command: List<String>, output: File? = null, kind: String = "脚本"): Process =
         RuntimeGate.start(context, id, kind) {
             val builder = processBuilder(id, run, command)
             if (output != null) builder.redirectErrorStream(true).redirectOutput(output)
-            OwnedProcesses.start(builder, run)
+            ai.capri.app.execution.ProcessLedger.get(context).launch(id, kind, command, output, changesEnvironment = kind == "脚本") { OwnedProcesses.start(builder, run) }
         }
     private fun processBuilder(id: String, run: File, command: List<String>): ProcessBuilder {
         check(ready) { status() }

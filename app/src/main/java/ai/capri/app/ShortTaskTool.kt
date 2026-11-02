@@ -126,7 +126,7 @@ internal class ShortTaskTool(private val runtime: PythonRuntime, private val env
                             val start = PerformanceTrace.now()
                             var status = PerformanceTrace.Status.ERROR
                             try {
-                                val result = ShortTaskContract.outcome(runtime.runCommand(chat, (0 until argv.length()).map { argv.getString(it) }), 3000)
+                                val result = ShortTaskContract.outcome(runtime.runCommand(chat, (0 until argv.length()).map { argv.getString(it) }, mutates = true), 3000)
                                     .put("name", step.getString("name")).put("index", i).put("duration_ms", PerformanceTrace.elapsed(start))
                                 results.put(result)
                                 if (result.getInt("exit_code") != 0) return@withTimeoutOrNull result

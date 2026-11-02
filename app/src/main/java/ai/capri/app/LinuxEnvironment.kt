@@ -113,7 +113,9 @@ internal class LinuxEnvironment(private val context: Context) {
     }
     private suspend fun runHost(args: List<String>, timeout: Long, phase: String) {
         val log = File(context.cacheDir, "ubuntu-setup.log")
-        val process = ProcessBuilder(args).redirectErrorStream(true).redirectOutput(log).start()
+        val process = ai.capri.app.execution.ProcessLedger.get(context).launch("installation", "base_extract", args, log, changesEnvironment=true, backend=ai.capri.app.execution.LocalHostExecutionBackend) {
+            OwnedProcesses.start(ProcessBuilder(args).redirectErrorStream(true).redirectOutput(log), context.cacheDir)
+        }
         waitFor(process, log, timeout, phase)
     }
     private suspend fun runGuest(directory: File, command: List<String>, timeout: Long, phase: String) {
@@ -123,9 +125,12 @@ internal class LinuxEnvironment(private val context: Context) {
             "-b", "/dev", "-b", "/proc", "-w", "/", "/usr/bin/env", "-i", "HOME=/root", "TMPDIR=/tmp",
             "PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C.UTF-8", "DEBIAN_FRONTEND=noninteractive") + command
         val log = File(context.cacheDir, "ubuntu-setup.log")
-        val process = ProcessBuilder(args).apply {
-            environment().apply { clear(); put("PROOT_LOADER", "$libraries/libproot-loader.so"); put("PROOT_TMP_DIR", tmp.path) }
-        }.redirectErrorStream(true).redirectOutput(log).start()
+        val process = ai.capri.app.execution.ProcessLedger.get(context).launch("installation", "base_setup", command, log, changesEnvironment=true) {
+            val builder = ProcessBuilder(args).apply {
+                environment().apply { clear(); put("PROOT_LOADER", "$libraries/libproot-loader.so"); put("PROOT_TMP_DIR", tmp.path) }
+            }.redirectErrorStream(true).redirectOutput(log)
+            OwnedProcesses.start(builder, context.cacheDir)
+        }
         waitFor(process, log, timeout, phase)
     }
     private suspend fun waitFor(process: Process, log: File, timeout: Long, phase: String) {
@@ -134,9 +139,10 @@ internal class LinuxEnvironment(private val context: Context) {
                 while (!process.waitFor(100, TimeUnit.MILLISECONDS)) currentCoroutineContext().ensureActive()
                 true
             }
+            if (completed != true) ai.capri.app.execution.ProcessLedger.markStopping(process,"timeout")
             check(completed == true) { "$phase 超时，可重试恢复" }
             check(process.exitValue() == 0) { "$phase 未完成：" + log.readOrEmpty().takeLast(2500) }
-        } finally { process.destroyForcibly() }
+        } finally { OwnedProcesses.stop(process) }
     }
     private fun File.readOrEmpty() = if (isFile) readText().trim() else ""
 }

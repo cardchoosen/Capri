@@ -41,6 +41,7 @@ internal object OwnedProcesses {
         } finally { pidFile.delete() }
     }
     fun stop(process: Process) {
+        if (process.isAlive) ai.capri.app.execution.ProcessLedger.markStopping(process,"interrupted")
         val captured = owned[process]
         if (process.isAlive && captured != null) {
             val current = identity(captured.pid)
@@ -48,6 +49,6 @@ internal object OwnedProcesses {
         }
         process.destroyForcibly()
         process.waitFor(2, TimeUnit.SECONDS)
-        if (!process.isAlive) owned.remove(process)
+        if (!process.isAlive) { owned.remove(process); ai.capri.app.execution.ProcessLedger.processStopped(process) }
     }
 }

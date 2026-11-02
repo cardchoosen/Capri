@@ -26,7 +26,8 @@ internal fun toolLabel(name: String, args: JSONObject?): String = when (name) {
     "personal_memory" -> "Recall personal memories"
     "android" -> args?.optString("action")?.let { ai.capri.app.nativebridge.NativeCatalog.find(it)?.title } ?: "Android tools"
     "terminal" -> when (args?.optString("action")) {
-        "open" -> "Open terminal"; "list", "attach" -> "Inspect terminals"; "run" -> "Run command"; "read" -> "Read terminal output"
+        "open" -> "Open terminal"; "list", "attach" -> "Inspect terminals"; "run" -> "Run command"; "read" -> "Read terminal output"; "await" -> "Wait for command completion"
+        "processes" -> "Inspect process receipts"; "process_read" -> "Read process output"; "process_cancel" -> "Cancel owned process"
         "input" -> "Send terminal input"; "cancel" -> "Cancel command"; "close" -> "Close terminal"
         "clear_history", "delete" -> "Clear terminal history"; else -> "Terminal"
     }

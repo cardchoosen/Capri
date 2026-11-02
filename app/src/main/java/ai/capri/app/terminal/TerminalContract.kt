@@ -6,20 +6,24 @@ import org.json.JSONObject
 /** A closed protocol. IDs are always resolved against the caller's chat, never supplied paths/PIDs. */
 internal object TerminalContract {
     const val DEFAULT_RUN_WAIT_MS = 5000
-    val actions = listOf("open", "list", "attach", "run", "read", "input", "cancel", "close", "clear_history", "delete")
+    val actions = listOf("open", "list", "attach", "run", "read", "await", "processes", "process_read", "process_cancel", "input", "cancel", "close", "clear_history", "delete")
     private val fields = mapOf(
-        "open" to setOf("title"), "list" to emptySet(),
+        "open" to setOf("title"), "list" to emptySet(), "processes" to emptySet(),
+        "process_read" to setOf("process_id", "offset", "limit", "wait_ms"), "process_cancel" to setOf("process_id"),
+        "await" to setOf("terminal_id", "command_id", "offset", "limit", "wait_seconds"),
         "attach" to setOf("terminal_id"), "run" to setOf("terminal_id", "command", "timeout_seconds", "wait_ms"),
         "read" to setOf("terminal_id", "command_id", "offset", "limit", "wait_ms"),
         "input" to setOf("terminal_id", "command_id", "text"), "cancel" to setOf("terminal_id", "command_id"),
         "close" to setOf("terminal_id"), "clear_history" to setOf("terminal_id"), "delete" to setOf("terminal_id"))
     fun specification(): JSONObject = JSONObject().put("type", "function").put("function", JSONObject()
         .put("name", "terminal")
-        .put("description", "Persistent, chat-scoped PTY shell. open creates; list/attach recover existing IDs. run returns bounded output, command state, complete/has_more and next_offset. Resume running/unread output with read and next_offset; completed commands need no extra read. input sends text, cancel interrupts one command, close stops the terminal and its children, clear_history requires idle, delete requires closed. Shell cwd/exports persist; commands can outlive a reply. Stopping chat does not close terminals. Use python_run for short tasks. POSIX /bin/sh; use bash -c explicitly when needed. Python already uses the chat venv. No host Root or strong sandbox is provided. Arguments are flat, not nested in params.")
+        .put("description", "Persistent, chat-scoped PTY shell. open creates; list/attach recover existing IDs. For long builds/downloads, await(command_id, wait_seconds=300) suspends until completion or deadline without repeated model polling; cancellation of waiting leaves the command alive. Completed results are delivered to the waiting turn, never automatically replayed after restart. processes lists all current-chat runtime receipts (scripts, dependencies, kernels, terminals); process_read pages retained file output, process_cancel stops only a live owned launcher. Pipe output is unavailable here. SSH is unavailable; local transport exit cannot establish remote completion. run returns bounded output, command state, complete/has_more and next_offset. Resume running/unread output with read and next_offset; completed commands need no extra read. input sends text, cancel interrupts one command, close stops the terminal and its children, clear_history requires idle, delete requires closed. Shell cwd/exports persist; commands can outlive a reply. Stopping chat does not close terminals. Use python_run for short tasks. POSIX /bin/sh; use bash -c explicitly when needed. Python already uses the chat venv. No host Root or strong sandbox is provided. Arguments are flat, not nested in params.")
         .put("parameters", schema()))
 
     private fun required(action: String) = when (action) {
-        "open", "list" -> emptyList()
+        "open", "list", "processes" -> emptyList()
+        "process_read", "process_cancel" -> listOf("process_id")
+        "await" -> listOf("terminal_id", "command_id")
         "run" -> listOf("terminal_id", "command")
         "input" -> listOf("terminal_id", "command_id", "text")
         "cancel" -> listOf("terminal_id", "command_id")
@@ -31,6 +35,8 @@ internal object TerminalContract {
         fun id(description: String) = string(36, description).put("pattern", "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
         val properties = JSONObject()
             .put("terminal_id", id("Copy a terminal UUID returned for the current chat."))
+            .put("process_id", id("Copy a process UUID returned by processes in the current chat."))
+            .put("wait_seconds", integer(1, 300, "await only: completion event deadline, default 300 seconds. No extra model calls while waiting."))
             .put("command_id", id("Copy a returned command UUID; omit on read for aggregate terminal output."))
             .put("title", string(80, "Optional terminal title."))
             .put("command", string(128000, "Nonempty shell script; use for persistent state, interaction or background work."))
@@ -52,9 +58,9 @@ internal object TerminalContract {
         require(!args.has("params") || top.isEmpty()) { "Do not mix flat arguments with legacy params. Put action arguments at the top level." }
         val params = if (args.has("params")) args.getJSONObject("params") else JSONObject().apply { top.forEach { put(it, args.get(it)) } }
         require(params.keys().asSequence().all { it in fields.getValue(action) }) { "Unknown $action argument. Allowed: ${fields.getValue(action).sorted().joinToString()}. Use flat arguments." }
-        if (action !in setOf("open", "list")) id(params, "terminal_id")
+        if (action !in setOf("open", "list", "processes", "process_read", "process_cancel")) id(params, "terminal_id")
         if (params.has("command_id")) id(params, "command_id")
-        if (action in setOf("input", "cancel")) id(params, "command_id")
+        if (action in setOf("input", "cancel", "await")) id(params, "command_id")
         if (action == "run") {
             text(params, "command", 128_000)
             integer(params, "timeout_seconds", 60, 1, 86_400)
@@ -64,7 +70,9 @@ internal object TerminalContract {
             }
         }
         if (action == "input") require(text(params, "text", 4096, blankAllowed = true).toByteArray().size <= 4096) { "Input exceeds 4096 UTF-8 bytes." }
-        if (action == "read") {
+        if (action in setOf("process_read", "process_cancel")) id(params, "process_id")
+        if (action == "await") integer(params, "wait_seconds", 300, 1, 300)
+        if (action in setOf("read", "process_read", "await")) {
             integer(params, "offset", 0, 0, 2_000_000)
             integer(params, "limit", 16_000, 4, 32_000)
             integer(params, "wait_ms", 0, 0, 20_000)

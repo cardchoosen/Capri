@@ -28,7 +28,7 @@ internal class InstallationEnvironment private constructor(private val context: 
     private val receipts = linkedMapOf<String, Receipt>()
     init { runCatching { archive.initialize(); seed() } } // A damaged profile must not disable the Agent or its tools.
     private fun short(text: String, max: Int = 1200) = text.replace(Regex("[\\p{Cntrl}]+"), " ").take(max)
-    private fun stat(file: File): String = try { "${file.canonicalPath}:${file.exists()}:${file.length()}:${file.lastModified()}" } catch (_: Exception) { "${file.path}:unknown" }
+    private fun stat(file: File): String = EnvironmentStamp.of(file)
     private fun boot() = runCatching { File("/proc/sys/kernel/random/boot_id").readText().trim() }.getOrDefault("unreadable-boot:${android.os.Process.myPid()}")
     private fun system() = "${Build.FINGERPRINT}|${Build.VERSION.SECURITY_PATCH}|${System.getProperty("os.version")}"
     fun fingerprint(scope: String, validity: String): String {
