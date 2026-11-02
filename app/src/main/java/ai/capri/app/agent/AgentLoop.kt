@@ -35,6 +35,7 @@ internal class AgentLoop(private val host: Host) {
         suspend fun record(call: JSONObject, result: String)
         fun completionIssue(): String? = null
         suspend fun deliver(draft: String)
+        suspend fun deliverIncomplete(reason: String) { status(reason) }
     }
     suspend fun run(): Outcome = try { runLoop() }
     catch (cancel: kotlinx.coroutines.CancellationException) {
@@ -105,8 +106,10 @@ internal class AgentLoop(private val host: Host) {
                 check(content.isNotBlank()) { "Model returned an empty answer; the checkpoint is preserved." }
                 val issue = host.completionIssue()
                 if (issue != null) {
-                    if (planCorrections++ >= 1) {
-                        host.status("任务的完成状态或验证依据尚未核实；结果和检查点已保留，可发送“继续”。")
+                    if (planCorrections++ >= 1 || host.used >= host.maximum - 1) {
+                        host.phase(TurnState.Phase.DELIVERING); host.checkpoint()
+                        try { host.deliverIncomplete("Completion assessment could not be reconciled after a repair attempt. The task remains partial; summarize verified existing results, unresolved work and any concrete blocker. Do not claim completion or repeat operations. " + issue) }
+                        catch (_: TurnState.Redirect) { progress.reset(); planCorrections = 0; completion = TurnCompletion(); continue }
                         host.phase(TurnState.Phase.INCOMPLETE); host.checkpoint()
                         return Outcome.INCOMPLETE
                     }

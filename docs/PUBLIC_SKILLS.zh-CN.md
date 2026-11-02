@@ -45,3 +45,9 @@ PR 运行只读权限校验；维护者审核合并后，main 的工作流自动
 ## 验证边界
 
 验证包括聚焦 JVM 文件／协议检查、公共仓库校验工具的 Python 回归、独立提交副本构建及现有 Skill 专项集成检查。精确提交副本构建及 27 个相关 JVM 检查通过；包含渐进 Skill 专项改动的当前工作区构建及 18 个集成检查通过；7 个 Python 校验回归通过。公共仓库已初始化并运行 GitHub Actions；未用真实用户 Skill 创建测试 PR，避免为了测试公开私人内容。手机没有被连接、安装或操作，Android 后台唤醒、原生确认与 Keystore 授权的完整真机链路仍需定点验收。
+
+## 手机部署核对（2026-11-02）
+
+排查时确认手机 Skills 页中的 skill-creator 存在，但实际全文不包含公共贡献段落；项目源码及本地 APK 已包含该段落。能力开发完成不能替代安装和运行时内容核对，也不能仅凭 Tools 搜索结果判断 Skill 是否存在。
+
+按用户要求使用保留数据的 APK 更新，安装成功并重新打开 Capri。更新后手机 `files/extensions/skills/skill-creator/SKILL.md` 的 SHA-256 与构建 APK 内资源一致：`1eca9226c1db97d3119058a9ccbb71865d1cfcbc07e4f8179064d4263468a6f8`，包含 `cardchoosen/capri-skills`、公开确认与 PR 流程。手机 Web Tools 目录已显示 `skill_hub`，网页重新连接成功。没有清空用户数据、发送代用户消息、提交公开贡献或调用真实模型；本次核对不等于 PR 发布流程的线上验收。

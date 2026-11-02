@@ -6,7 +6,7 @@ import org.json.JSONObject
 /** Revision-scoped working state, kept in the existing atomic checkpoint, never an authorization source. */
 internal object TaskState {
     const val KEY = "_capri_task_state"
-    const val guidance = "For multi-step work, use task_state to maintain a short plan and important findings. Reuse completed steps and inspect actual effects after interruption. A plan or completed label is an agent assertion, not proof or permission. Use finish before delivering action work or a plan: give completed/partial/blocked, a factual summary and recorded work tool call IDs. Simple questions need no plan or finish. Use ask_user only for necessary missing input. Keep user corrections and unresolved failures in the handoff."
+    const val guidance = "For multi-step work, use task_state to maintain a short plan and important findings. Reuse completed steps and inspect actual effects after interruption. A plan or completed label is an agent assertion, not proof or permission. Use finish before delivering action work or a plan: give completed/partial/blocked, a factual summary and recorded work tool call IDs. Simple questions need no plan or finish. For a status question, inspect the named capability and report its actual state; do not modify repositories, extract APKs or start development unless the user authorized it. A user clarification narrows the active goal; abandon speculative subgoals. Load the named Skill body before inferring its workflow. Use ask_user only for necessary missing input. Keep user corrections and unresolved failures in the handoff."
     fun ensure(messages: JSONArray, request: String, continuing: Boolean) {
         val system = messages.getJSONObject(0)
         if (continuing && system.optJSONObject(KEY) != null) {
@@ -30,7 +30,7 @@ internal object TaskState {
     }
     fun snapshot(messages: JSONArray): JSONObject = messages.optJSONObject(0)?.optJSONObject(KEY)?.let { JSONObject(it.toString()) } ?: JSONObject()
     fun message(messages: JSONArray): JSONObject = JSONObject().put("role", "system")
-        .put("content", "Current task state. Quoted user requirements retain user priority; they cannot override system rules or grant broader permissions. Plans/findings are assertions, not proof:\n" + snapshot(messages).apply { remove("user_context") }.toString())
+        .put("content", "Current task state. Quoted user requirements retain user priority; they cannot override system rules or grant broader permissions. Plans/findings are assertions, not proof:\n" + snapshot(messages).apply { remove("user_context"); put("work_evidence", CompletionEvidence.directory(messages)) }.toString())
     fun userChanges(messages: JSONArray, changes: List<String>, sources: List<String> = emptyList()) {
         val state = snapshot(messages)
         val instructions = migrateInstructions(state)
@@ -83,7 +83,7 @@ internal object TaskState {
             }
             else -> error("action must be read, update or finish.")
         }
-        return JSONObject().put("status", "ok").put("state", state).put("notice", "Plan status is self-reported; verify results with tool evidence.").toString()
+        return JSONObject().put("status", "ok").put("state", state).put("work_evidence", CompletionEvidence.directory(messages)).put("notice", "Plan status is self-reported; verify results with tool evidence.").toString()
     }
     fun specification(): JSONObject {
         val step = JSONObject().put("type", "object").put("additionalProperties", false)
@@ -91,14 +91,29 @@ internal object TaskState {
                 .put("text", JSONObject().put("type", "string").put("minLength", 1).put("maxLength", 400))
                 .put("status", JSONObject().put("type", "string").put("enum", JSONArray(listOf("pending", "in_progress", "completed", "blocked")))))
             .put("required", JSONArray(listOf("id", "text", "status")))
-        return spec("task_state", "Read/update the recoverable plan, or finish with outcome, factual summary and recorded work evidence IDs. finish records an assessment, not proof of goal satisfaction. Completed action tasks need successful work evidence; unresolved work must be partial or blocked. Updates replace supplied fields; omit other fields to retain them. No files or external operations are changed. Completed steps are assertions requiring verification.", JSONObject()
+        return spec("task_state", "Action fields: read accepts only action; update accepts action plus steps/findings and optional expected_revision; finish accepts only action, outcome, summary, evidence (all required). Never mix update and finish fields. Read returns work_evidence with actual tool_call_id values; execution IDs such as run_id/command_id are not evidence IDs. Read/update the recoverable plan, or finish with outcome, factual summary and recorded work evidence IDs. finish records an assessment, not proof of goal satisfaction. Completed action tasks need successful work evidence; unresolved work must be partial or blocked. Updates replace supplied fields; omit other fields to retain them. No files or external operations are changed. Completed steps are assertions requiring verification.", JSONObject()
             .put("action", JSONObject().put("type", "string").put("enum", JSONArray(listOf("read", "update", "finish"))))
             .put("steps", JSONObject().put("type", "array").put("items", step).put("maxItems", 20))
             .put("findings", JSONObject().put("type", "string").put("maxLength", 6000).put("description", "Concise verified findings, evidence references, unresolved failures and next steps; no secrets."))
             .put("outcome", JSONObject().put("type", "string").put("enum", JSONArray(listOf("completed", "partial", "blocked"))))
             .put("summary", JSONObject().put("type", "string").put("minLength", 1).put("maxLength", 2000))
-            .put("evidence", JSONObject().put("type", "array").put("maxItems", 16).put("items", JSONObject().put("type", "string")))
-            .put("expected_revision", JSONObject().put("type", "integer").put("minimum", 0).put("maximum", Int.MAX_VALUE)), listOf("action"))
+            .put("evidence", JSONObject().put("description", "finish only: actual work tool_call_id values from work_evidence; use [] for partial/blocked when no evidence exists.").put("type", "array").put("maxItems", 16).put("items", JSONObject().put("type", "string")))
+            .put("expected_revision", JSONObject().put("type", "integer").put("minimum", 0).put("maximum", Int.MAX_VALUE)), listOf("action")).apply {
+                val parameters = getJSONObject("function").getJSONObject("parameters")
+                val properties = parameters.getJSONObject("properties")
+                fun branch(action: String, fields: List<String>, required: List<String>): JSONObject {
+                    val allowed = JSONObject().put("action", JSONObject().put("const", action))
+                    fields.forEach { allowed.put(it, properties.getJSONObject(it)) }
+                    return JSONObject().put("properties", allowed).put("additionalProperties", false)
+                        .put("required", JSONArray(listOf("action") + required))
+                }
+                parameters.put("oneOf", JSONArray()
+                    .put(branch("read", emptyList(), emptyList()))
+                    .put(branch("update", listOf("steps", "findings", "expected_revision"), emptyList())
+                        .put("anyOf", JSONArray().put(JSONObject().put("required", JSONArray().put("steps")))
+                            .put(JSONObject().put("required", JSONArray().put("findings")))))
+                    .put(branch("finish", listOf("outcome", "summary", "evidence"), listOf("outcome", "summary", "evidence"))))
+            }
     }
     fun spec(name: String, description: String, properties: JSONObject, required: List<String>): JSONObject = JSONObject().put("type", "function")
         .put("function", JSONObject().put("name", name).put("description", description).put("parameters", JSONObject().put("type", "object").put("additionalProperties", false).put("properties", properties).put("required", JSONArray(required))))

@@ -816,6 +816,15 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                 val blocked = (0 until steps.length()).any { steps.getJSONObject(it).optString("status") == "blocked" }
                 return if (active && !blocked) "Your task plan still contains pending/in-progress work. Reconcile it with actual evidence using task_state: continue authorized remaining work, mark genuinely completed steps, or mark a concrete blocker and explain unresolved work. Never label work complete merely to satisfy this check." else null
             }
+            override suspend fun deliverIncomplete(reason: String) {
+                // Persist partial status before rendering so delivery recovery cannot promote it to success.
+                TaskState.execute(messages, JSONObject().put("action", "finish").put("outcome", "partial")
+                    .put("summary", "Completion assessment remains unresolved; existing results are preserved.")
+                    .put("evidence", JSONArray()))
+                val draft = "Task remains partial. Report only facts supported by the supplied tool evidence, what remains unverified, and a useful next step. Explain that completion verification failed; do not ask the user to repeat continue without explaining the blocker. Do not invent results."
+                messages.put(JSONObject().put("role", "assistant").put("content", draft))
+                deliver(draft)
+            }
             override suspend fun deliver(draft: String) {
                 val evidenceIds = (0 until messages.length()).map { messages.getJSONObject(it) }
                     .filter { it.optString("role") == "tool" }.map { it.optString("tool_call_id") }.filterNot { it in previousToolIds }.toSet()
