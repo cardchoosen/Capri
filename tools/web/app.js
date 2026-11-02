@@ -129,6 +129,9 @@ function attachmentView(body, entry, record) {
     image=document.createElement('img');image.alt=item.caption||item.name||'Capri 图片';image.decoding='async';frame.append(image,status);figure.append(frame);
   }else figure.append(status);
   figure.append(caption,name,download);
+  if(/\.(md|markdown)$/i.test(item.name||'')||item.mime==='text/markdown'){
+    const view=document.createElement('button');view.type='button';view.className='attachment-view';view.textContent='查看';view.onclick=()=>window.CapriDocuments?window.CapriDocuments.open(entry,item):failure('文档预览组件尚未就绪，请刷新页面');figure.append(view);
+  }
   async function load(){
     if(started||controller.signal.aborted)return;started=true;
     try{
@@ -149,6 +152,7 @@ function attachmentView(body, entry, record) {
 function resetMessages() { historyLoad++;historyTarget=null;historyEditor=null;generation++;for(const record of nodes.values()){record.finish?.();record.cancel?.();}entries.clear();nodes.clear();$('entries').replaceChildren();olderCursor=0; }
 function requestRefresh(){clearTimeout(pollTimer);if(polling){refreshAgain=true;return;}void refresh();}
 function switchChat(id){
+  window.CapriDocuments?.beforeSwitch();
   if(state){views.set(chat,{state:{...state,entries:[...entries.values()],before:olderCursor},top:$('messages').scrollTop,pinned:viewport.pinned});if(views.size>5)views.delete(views.keys().next().value);}
   chat=id;sessionStorage.setItem('capri-chat',chat);state=null;resetMessages();
   const cached=views.get(chat);if(cached){render(cached.state,true);$('messages').scrollTop=cached.top;viewport.lastTop=cached.top;viewport.pinned=cached.pinned;$('latest').hidden=cached.pinned;}
@@ -199,6 +203,7 @@ function renderMessages(data, initial, older=false) {
   if(older)viewport.restore({...reading,pinned:false});else if(initial)viewport.bottom();else viewport.restore(reading);
 }
 function render(data,initial=false){
+  window.CapriDocuments?.sync(data);
   state=data;epoch=data.epoch;chat=data.chat_id;sessionStorage.setItem('capri-chat',chat);
   const task=data.run_state;const budget=task?.budget;$('task-state').textContent=(task?.label||'')+(budget?` · 请求 ${budget.used}/${budget.maximum}`:'');
   const question=$('task-question'),qs=JSON.stringify(task?.question||null);

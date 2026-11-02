@@ -94,3 +94,7 @@ python3 tools/capri_web.py --serial DEVICE_SERIAL --open-browser
 ## 大文件输入
 
 普通文件现支持单个最大 512 MiB，网页采用 1 MiB 二进制分块、校验与进度核对；图片保留原限制。文件落到手机当前会话工作区，发送时只提供元数据与路径。详情、恢复边界及 100 MiB 真机实传记录见 [Web 大文件输入](LARGE_FILES.zh-CN.md)。
+
+## Markdown 附件预览
+
+Markdown 附件新增“查看”，在当前会话打开可关闭的文档子标签，保留对话阅读位置。支持标题、表格、代码块；预览安全边界、大小限制和定稿交付机制见 [报告定稿交付与 Markdown 预览](ARTIFACT_DELIVERY.zh-CN.md)。

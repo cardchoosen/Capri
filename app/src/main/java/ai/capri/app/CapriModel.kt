@@ -478,6 +478,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
         TaskState.ensure(messages, latestUser.text, continuing)
         if (continuing) savedRaw?.optJSONObject(0)?.optJSONObject(TurnState.KEY)?.let { messages.getJSONObject(0).put(TurnState.KEY, it) }
         TurnState.ensure(messages, latestUser, continuing)
+        if(!continuing) ArtifactDelivery.clear(messages)
         ai.capri.app.agent.rules.RuleContext.attach(messages,ruleSnapshot)
         if (continuing && pendingFinal == null) messages.getJSONObject(0).optJSONObject(TaskState.KEY)?.remove("conclusion")
         if (continuing) TurnState.apply(messages, session.messages.toList())
@@ -551,8 +552,22 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                     TurnState.apply(messages, session.messages.toList()); checkpoint()
                     throw TurnState.Redirect()
                 }
+                val artifacts = try { withContext(Dispatchers.IO) {
+                    val lease=RuntimeGate.beginFiles(getApplication(),session.id,"Finalize artifact delivery")
+                    try { ArtifactDelivery.prepare(messages,store.workspace,session.id) } finally { RuntimeGate.endFiles(lease) }
+                } } catch (_: ArtifactDelivery.Changed) {
+                    FinalReply.discardDraft(messages,state)
+                    messages.getJSONObject(0).optJSONObject(TaskState.KEY)?.remove("conclusion")
+                    messages.put(JSONObject().put("role","system").put("content",ArtifactDelivery.Changed().message))
+                    checkpoint();throw TurnState.Redirect()
+                }
+                if(TurnState.pending(messages,session.messages.toList()).isNotEmpty()) {
+                    FinalReply.discardDraft(messages,state);TurnState.apply(messages,session.messages.toList());checkpoint();throw TurnState.Redirect()
+                }
                 val complete = TaskState.snapshot(messages).optJSONObject("conclusion")?.optString("outcome", "completed") !in setOf("partial", "blocked")
                 TurnState.phase(messages, if (complete) TurnState.Phase.COMPLETED else TurnState.Phase.INCOMPLETE); updateView()
+                ArtifactDelivery.publish(session.messages,artifacts)
+                ArtifactDelivery.clear(messages)
                 FinalReply.complete(messages, state, text)
                 session.messages.add(Entry("assistant", text, FinalReplyReveal())); persist()
                 val completed = snapshot(session)
@@ -632,14 +647,22 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                         }
                         "ask_user" -> TurnState.waitForUser(messages, args)
                         "send_file" -> {
-                            val item = Attachments.inspect(store.workspace, session.id, args.getString("path"), args.optString("caption"))
-                            withContext(Dispatchers.Main) {
-                                if (!Attachments.existing(session.messages, item)) {
-                                    require(session.messages.drop(session.messages.indexOfLast { it.role == "user" }.coerceAtLeast(0)).count { it.role == "attachment" } < 8) { "本轮最多8个附件" }
-                                    session.messages.add(Entry("attachment", item.toString())); persist()
+                            val delivery=args.optString("delivery","final")
+                            require(delivery in setOf("final","preview")) { "delivery must be final or preview." }
+                            val lease=RuntimeGate.beginFiles(getApplication(),session.id,"Stage artifact delivery")
+                            try {
+                            if(delivery=="final") ArtifactDelivery.stage(messages,store.workspace,session.id,args.getString("path"),args.optString("caption")).toString()
+                            else {
+                                val staged=JSONArray().put(JSONObject().put("role","system").put("content",""))
+                                ArtifactDelivery.stage(staged,store.workspace,session.id,args.getString("path"),args.optString("caption"))
+                                val items=ArtifactDelivery.prepare(staged,store.workspace,session.id)
+                                withContext(Dispatchers.Main){
+                                    require(session.messages.drop(session.messages.indexOfLast{it.role=="user"}.coerceAtLeast(0)).count{it.role=="attachment"}<8){"At most eight preview attachments may be delivered per turn."}
+                                    ArtifactDelivery.publish(session.messages,items);persist()
                                 }
+                                JSONObject().put("status","ok").put("attached",true).put("delivery","requested_preview").put("file",items.single()).toString()
                             }
-                            JSONObject().put("status", "ok").put("attached", true).put("file", item).toString()
+                            } finally { RuntimeGate.endFiles(lease) }
                         }
                         "web_search" -> retrieval.search(session.id, args)
                         "web_read" -> retrieval.read(session.id, args)
@@ -809,6 +832,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                 checkpoint()
             }
             override fun completionIssue(): String? {
+                ArtifactDelivery.issue(messages,store.workspace,session.id)?.let{return it}
                 CompletionEvidence.issue(messages)?.let { return it }
                 if (TaskState.snapshot(messages).optJSONObject("conclusion")?.optString("outcome") in setOf("partial", "blocked")) return null
                 val steps = TaskState.snapshot(messages).optJSONArray("steps") ?: return null

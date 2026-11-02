@@ -303,6 +303,7 @@ def server_for(bridge, port=DEFAULT_PORT, token=None):
                      '/run.js': ('run.js', 'text/javascript; charset=utf-8'),
                      '/models.js': ('models.js', 'text/javascript; charset=utf-8'),
                      '/inputs.js': ('inputs.js', 'text/javascript; charset=utf-8'),
+                     '/documents.js': ('documents.js', 'text/javascript; charset=utf-8'),
                      '/chat-layout.js': ('chat-layout.js', 'text/javascript; charset=utf-8'),
                      '/style.css': ('style.css', 'text/css; charset=utf-8')}
             asset = files.get(self.path)

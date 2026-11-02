@@ -78,7 +78,7 @@ def main():
     RUNTIME.mkdir(parents=True, exist_ok=True, mode=0o700)
     changed = False
     restart_needed = False
-    for relative in ('capri_web.py', 'web/index.html', 'web/app.js', 'web/run.js', 'web/inputs.js', 'web/models.js', 'web/chat-layout.js', 'web/style.css'):
+    for relative in ('capri_web.py', 'web/index.html', 'web/app.js', 'web/run.js', 'web/inputs.js', 'web/documents.js', 'web/models.js', 'web/chat-layout.js', 'web/style.css'):
         source = ROOT / 'tools' / relative
         destination = RUNTIME / relative
         destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
