@@ -11,7 +11,7 @@ Handle only clearly authorized targets (owned devices, labs, written authorizati
 
 ## Relationship to skill-creator
 
-This skill reuses skill-creator conventions to produce skills: SKILL.md structure, frontmatter, `scripts/`/`references/`/`assets/` layout, installation and verification flow. Before forging a weapon, `load_skill(skill-creator)` and follow its conventions, then layer weapon-specific steps on top without repeating skill-creator's already-specified general rules.
+This skill reuses skill-creator conventions to produce skills: SKILL.md structure, frontmatter, `scripts/`/`references/`/`assets/` layout, installation and verification flow. Before forging a weapon, `skill({"id":"skill-creator"})` and follow its conventions, then layer weapon-specific steps on top without repeating skill-creator's already-specified general rules.
 
 ## Forging workflow
 
