@@ -1,6 +1,6 @@
 package ai.capri.app.environment
 
-import ai.capri.app.CapriModel
+import ai.capri.app.*
 import ai.capri.app.MarkdownReply
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -36,8 +36,8 @@ import org.json.JSONObject
     }
     ai.capri.app.SettingsRow("安装环境档案", "本安装共享 · 查看已观察与验证的能力") { open = true; load(0) }
     if (open) ai.capri.app.DetailPage(onDismissRequest = { open = false }, title = { Text("安装环境档案") }, text = {
-        Column(Modifier.fillMaxSize()) {
-            Text("本安装共享 · 自动维护Markdown · 观察、验证与适用环境分开记录", style = MaterialTheme.typography.bodySmall)
+        Column(Modifier.fillMaxSize(),verticalArrangement=Arrangement.spacedBy(16.dp)) {
+            ConfigIntro("本安装共享 · 环境档案", "观察、验证与适用环境分别记录，不自动发起硬件扫描。")
             OutlinedTextField(query, { query = it }, label = { Text("筛选主题或能力") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
             Row {
                 TextButton(enabled = !busy, onClick = { load(0) }) { Text("查询 / 重新读取") }
@@ -45,7 +45,7 @@ import org.json.JSONObject
                 TextButton(enabled = !busy && next != null, onClick = { next?.let(::load) }) { Text("下一页") }
             }
             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-            Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) { MarkdownReply(text) }
+            Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) { ConfigGroup("档案内容") { MarkdownReply(text.ifBlank{"暂无匹配内容"}) } }
         }
     })
 }

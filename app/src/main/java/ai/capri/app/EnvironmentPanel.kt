@@ -21,20 +21,19 @@ import kotlinx.coroutines.launch
             confirmButton = { TextButton(onClick = { pending = null; vm.maintainEnvironment(chat, action) }, enabled = !vm.runtimeBusy) { Text("确认执行") } },
             dismissButton = { TextButton(onClick = { pending = null }) { Text("取消") } })
     }
-    var diagnostics by remember { mutableStateOf(initiallyExpanded) }
-    Spacer(Modifier.height(12.dp))
-    Text(state.message, fontSize = 14.sp, color = if (state.phase == "error") Color(0xFFFF514F) else Color(0xFFA5FF75))
-    if (state.phase == "preparing" || vm.migrating) LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical = 8.dp))
-    if (state.phase == "error") {
-        Text(state.error, fontSize = 11.sp)
-        TextButton(onClick = { vm.prepareSession(vm.selected) }) { Text("重试准备") }
+    ConfigGroup("环境状态") {
+        ConfigFact("当前状态",state.message)
+        if (state.phase == "preparing" || vm.migrating) LinearProgressIndicator(Modifier.fillMaxWidth())
+        if (state.phase == "error") {
+            ConfigNotice(state.error,true)
+            OutlinedButton(onClick = { vm.prepareSession(vm.selected) }) { Text("重试准备") }
+        }
     }
-    TextButton(onClick = { diagnostics = !diagnostics }) { Text(if (diagnostics) "收起诊断与维护" else "诊断与维护") }
-    if (diagnostics) {
-        Text("共享 Linux 环境；任务依赖按需准备。会话文件与依赖独立保存。", fontSize = 11.sp)
-        OutlinedButton(onClick = { vm.inspectPythonEnvironment() }, enabled = !vm.runtimeBusy && !vm.migrating) { Text("检查执行环境") }
+    ConfigHelp("诊断与维护", initiallyExpanded) {
+        ConfigIntro("当前对话 · ${vm.current().title}", "共享 Linux 环境，任务依赖按需准备。维护操作会先显示影响范围。")
+        OutlinedButton(onClick = { vm.inspectPythonEnvironment() }, enabled = !vm.runtimeBusy && !vm.migrating, modifier=Modifier.fillMaxWidth()) { Text("检查执行环境") }
         EnvironmentMaintenance.Action.entries.forEach { action ->
-            TextButton(onClick = {
+            SettingsRow(action.label, action.scope, onClick = {
                 val chat = vm.selected
                 pending = chat to action; estimate = "正在估算…"
                 scope.launch {
@@ -43,9 +42,9 @@ import kotlinx.coroutines.launch
                         { "目标文件内容约 ${EnvironmentMaintenance.formatBytes(it)}（不是磁盘可用空间，执行时重新核算）" },
                         { "无法估算：${it.message}" })
                 }
-            }, enabled = !vm.runtimeBusy && !vm.migrating && vm.jobs.isEmpty() && vm.runtime.ready && state.phase != "preparing") { Text(action.label) }
+            }, enabled = !vm.runtimeBusy && !vm.migrating && vm.jobs.isEmpty() && vm.runtime.ready && state.phase != "preparing")
         }
         if (vm.runtimeBusy) LinearProgressIndicator(Modifier.fillMaxWidth())
-        if (vm.runtimeResult.isNotBlank()) Text(vm.runtimeResult, fontSize = 11.sp)
+        if (vm.runtimeResult.isNotBlank()) ConfigGroup("最近维护结果") { Text(vm.runtimeResult, style=MaterialTheme.typography.bodySmall) }
     }
 }

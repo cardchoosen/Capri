@@ -347,21 +347,21 @@ class MainActivity : ComponentActivity() {
 @Composable private fun Empty(title: String, subtitle: String) { Column(Modifier.fillMaxWidth().padding(36.dp)) { Text(title, color = White); Spacer(Modifier.height(8.dp)); Text(subtitle, color = Muted, fontSize = 13.sp) } }
 
 @Composable private fun NativeCapabilities(vm: CapriModel, onDismiss: () -> Unit) {
-    val capabilities = vm.androidTools.capabilities()
-    val actions = capabilities.getJSONArray("actions")
-    DetailPage(onDismissRequest = onDismiss, title = { Text("Android 权限与能力") }, text = {
-        Column {
-            Text("${actions.length()} 项已接入动作 · 可选宿主Root后端；不依赖ADB / Shizuku。授权按任务需要申请，系统开关和厂商限制仍可能影响结果。", color = Muted, fontSize = 12.sp)
-            Spacer(Modifier.height(12.dp))
-            LazyColumn(Modifier.heightIn(max = 400.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                items(actions.length()) { index ->
-                    val action = actions.getJSONObject(index)
-                    Column {
-                        Text(action.getString("title"), fontSize = 14.sp)
-                        Text(when(action.getString("status")) { "available" -> "已接入"; "permission_required" -> "需要授权"; "root_authorization_required" -> "需要Root授权"; else -> "设备不支持" }, color = if(action.getString("status") == "available") Green else Muted, fontSize = 11.sp)
-                    }
-                }
+    val actions = vm.androidTools.capabilities().getJSONArray("actions")
+    var query by remember { mutableStateOf("") }
+    DetailPage(onDismissRequest=onDismiss,title={Text("Android 权限与能力")},text={
+        Column(Modifier.fillMaxSize(),verticalArrangement=Arrangement.spacedBy(16.dp)) {
+            ConfigIntro("设备能力 · 系统授权", "权限按任务需要申请，系统与厂商限制可能影响实际结果。")
+            OutlinedTextField(query,{query=it},label={Text("搜索设备能力")},singleLine=true,modifier=Modifier.fillMaxWidth())
+            val matches=(0 until actions.length()).map{actions.getJSONObject(it)}.filter{query.isBlank()||it.toString().contains(query,true)}
+            Text("${matches.size} 项能力",style=MaterialTheme.typography.labelMedium,color=Muted)
+            LazyColumn(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(12.dp)) {
+                items(matches) { action -> ConfigGroup(action.getString("title")) {
+                    Text(when(action.getString("status")){"available"->"已接入";"permission_required"->"需要系统授权";"root_authorization_required"->"需要 Root 授权";else->"设备不支持"},style=MaterialTheme.typography.bodyMedium)
+                    if(action.optString("description").isNotBlank())Text(action.optString("description"),style=MaterialTheme.typography.bodySmall,color=Muted)
+                } }
+                if(matches.isEmpty())item{ConfigGroup("没有匹配的能力","换一个名称或关键词试试。") {}}
             }
         }
-    }, confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } })
+    })
 }

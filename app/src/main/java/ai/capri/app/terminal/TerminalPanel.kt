@@ -1,5 +1,6 @@
 package ai.capri.app.terminal
 
+import ai.capri.app.*
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -49,11 +50,16 @@ import org.json.JSONObject
     val commands = chosen?.optJSONArray("commands")
     val latest = if (commands != null && commands.length() > 0) commands.getJSONObject(commands.length() - 1) else null
     ai.capri.app.DetailPage(onDismissRequest = onDismiss, title = { Text("持续终端") }, text = {
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()),verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            ConfigIntro("当前对话 · 持续终端", "保留目录与环境，返回后已有任务继续运行。")
+            ConfigHelp("后台电池设置") {
             Text("保留目录与环境 · 关闭面板不停止任务", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
             Text("后台可能被系统暂停，可在应用电池设置中允许运行。", fontSize = 11.sp)
             TextButton(onClick = { TerminalBackgroundPolicy.openSettings(context) }) { Text("后台电池设置", fontSize = 11.sp) }
-            Column(Modifier.fillMaxWidth().heightIn(max = 120.dp).verticalScroll(rememberScrollState())) {
+            }
+            ConfigGroup("终端会话") {
+            if(terminals.isEmpty())Text("暂无终端，可新建一个会话。",style=MaterialTheme.typography.bodySmall)
+            Column(Modifier.fillMaxWidth().heightIn(max = 180.dp).verticalScroll(rememberScrollState())) {
                 terminals.forEach { terminal ->
                     val id = terminal.getString("terminal_id")
                     Text("${if (id == selected) ">" else " "} ${terminal.getString("title")} · ${id.take(8)} · ${terminal.getString("state")}",
@@ -67,6 +73,8 @@ import org.json.JSONObject
                 TextButton(onClick = { selected?.let { invoke("read", JSONObject().put("terminal_id", it)) } }, enabled = !working && selected != null) { Text("读取输出") }
                 TextButton(onClick = { selected?.let { invoke("close", JSONObject().put("terminal_id", it)) } }, enabled = !working && chosen?.optString("state") in setOf("ready", "running")) { Text("关闭终端") }
             }
+            }
+            ConfigGroup("命令执行",chosen?.optString("title").orEmpty()) {
             OutlinedTextField(command, { command = it }, label = { Text("Shell 命令") }, maxLines = 3, modifier = Modifier.fillMaxWidth())
             Row {
                 TextButton(onClick = { selected?.let { invoke("run", JSONObject().put("terminal_id", it).put("command", command).put("timeout_seconds", 3600)) } },
@@ -74,12 +82,13 @@ import org.json.JSONObject
                 TextButton(onClick = { selected?.let { id -> latest?.let { invoke("cancel", JSONObject().put("terminal_id", id).put("command_id", it.getString("command_id"))) } } },
                     enabled = !working && latest?.optString("state") == "running") { Text("中断", color = MaterialTheme.colorScheme.error) }
             }
+            }
             if (chosen?.optString("state") !in setOf("starting", "ready", "running") && chosen != null)
                 TextButton(onClick = { invoke("delete", JSONObject().put("terminal_id", selected)) }, enabled = !working) { Text("删除终端历史", color = MaterialTheme.colorScheme.error) }
-            if (result.isNotEmpty()) SelectionContainer {
+            if (result.isNotEmpty()) ConfigGroup("终端输出") { SelectionContainer {
                 Text(result, fontFamily = FontFamily.Monospace, fontSize = 11.sp,
                     modifier = Modifier.fillMaxWidth().heightIn(max = 160.dp).verticalScroll(rememberScrollState()))
-            }
+            } }
         }
     }, confirmButton = { TextButton(onClick = onDismiss) { Text("返回") } })
 }

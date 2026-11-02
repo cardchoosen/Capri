@@ -1,6 +1,6 @@
 package ai.capri.app.extensions
 
-import ai.capri.app.CapriModel
+import ai.capri.app.*
 import ai.capri.app.toolLabel
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -22,6 +22,7 @@ import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.*
 import org.json.JSONObject
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable internal fun ExtensionsPanel(vm: CapriModel, initialCategory: Int = 2, onDismiss: () -> Unit) {
     val manager = vm.extensions
     val chat = remember { vm.selected }
@@ -74,12 +75,10 @@ import org.json.JSONObject
     LaunchedEffect(chat) { while (isActive) { delay(2000); revision++ } }
     ai.capri.app.DetailPage(onDismissRequest = { if (!busy) onDismiss() }, title = { Text("能力与扩展") }, text = {
             Column(Modifier.fillMaxSize()) {
-                Row(Modifier.padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(selected = category == 2, onClick = { category = 2 }, label = { Text("Tools · ${tools.size}") })
-                    FilterChip(selected = category == 0, onClick = { category = 0 }, label = { Text("MCP · ${configs.size}") })
-                    FilterChip(selected = category == 1, onClick = { category = 1 }, label = { Text("Skills · ${skills.size}") })
+                TabRow(selectedTabIndex=when(category){2->0;0->1;else->2}) {
+                    listOf(Triple(2,"Tools",tools.size),Triple(0,"MCP",configs.size),Triple(1,"Skills",skills.size)).forEach { (value,name,count) -> Tab(selected=category==value,onClick={category=value},text={Text("$name · $count")}) }
                 }
-                Column(Modifier.weight(1f).verticalScroll(when (category) { 0 -> mcpScroll; 1 -> skillsScroll; else -> toolsScroll })) {
+                Column(Modifier.weight(1f).verticalScroll(when (category) { 0 -> mcpScroll; 1 -> skillsScroll; else -> toolsScroll }),verticalArrangement=Arrangement.spacedBy(16.dp)) {
                     if (category == 0) {
                         Text("默认模板尚未连接；启用后可由Capri按任务激活。支持stdio / Streamable HTTP；协议2025-03-26、2024-11-05。", fontSize = 12.sp)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -88,7 +87,7 @@ import org.json.JSONObject
                         }
                         configs.forEach { config ->
                             val id = config.getString("id")
-                            HorizontalDivider()
+                            ConfigGroup("") {
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                 Column(Modifier.weight(1f).padding(top = 12.dp)) {
                                     Text(config.getString("name"), color = MaterialTheme.colorScheme.primary)
@@ -104,6 +103,7 @@ import org.json.JSONObject
                                 TextButton(enabled = !busy && config.optBoolean("enabled"), onClick = { action { manager.activate(chat, id); manager.state(chat, id) } }) { Text("连接测试") }
                                 TextButton(enabled = !busy, onClick = { action { manager.deactivate(chat, id); "已断开当前会话" } }) { Text("断开") }
                             }
+                            }
                         }
                     } else if (category == 1) {
                         ai.capri.app.extensions.hub.PublicSkillSettings(vm.publicSkills,chat)
@@ -114,13 +114,13 @@ import org.json.JSONObject
                             SkillCategory.entries.forEach { type -> FilterChip(selected = skillCategory == type, onClick = { skillCategory = type }, label = { Text(type.title) }) }
                         }
                         skills.filter { skillCategory == null || manager.store.category(it) == skillCategory }.forEach { skill ->
-                            HorizontalDivider()
+                            ConfigGroup("") {
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                 Column(Modifier.weight(1f).padding(top = 12.dp)) { Text(skill.name, color = MaterialTheme.colorScheme.primary); Text("${manager.store.category(skill).title} · ${if (skill.builtin) "内置" else "用户导入"}", fontSize = 11.sp, color = if (manager.store.category(skill) == SkillCategory.WEAPON) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant) }
                                 Switch(checked = manager.store.enabled(skill), enabled = !busy && vm.jobs.isEmpty(), onCheckedChange = { manager.store.enable(skill, it); revision++ })
                             }
-                            Text(skill.description, fontSize = 12.sp)
-                            Row {
+                            Text(skill.description,style=MaterialTheme.typography.bodySmall,maxLines=3,overflow=TextOverflow.Ellipsis)
+                            FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                                 TextButton(onClick = { detailTitle = "Skill 指令"; skillBody = skill.directory.resolve("SKILL.md").readText() }) { Text("查看指令") }
                                 TextButton(enabled = !busy && vm.jobs.isEmpty(), onClick = { action {
                                     manager.store.setCategory(skill, if (manager.store.category(skill) == SkillCategory.WEAPON) SkillCategory.GENERAL else SkillCategory.WEAPON)
@@ -128,13 +128,14 @@ import org.json.JSONObject
                                 } }) { Text(if (manager.store.category(skill) == SkillCategory.WEAPON) "Move to General" else "Move to Weapon") }
                                 if (!skill.builtin) TextButton(enabled = !busy && vm.jobs.isEmpty(), onClick = { action { manager.store.removeSkill(skill.id); "已删除技能，已生成的会话产物保留" } }) { Text("删除") }
                             }
+                            }
                         }
                     } else {
                         OutlinedTextField(toolQuery, { toolQuery = it }, label = { Text("搜索工具") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                         val matches = ToolsCatalog.filter(tools, toolQuery)
                         if (matches.isEmpty()) Text("没有匹配的工具。", Modifier.padding(vertical = 12.dp), fontSize = 12.sp)
                         matches.forEach { item ->
-                            HorizontalDivider()
+                            ConfigGroup("") {
                             Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
                                     Text(item.title, Modifier.weight(1f, fill = false), color = MaterialTheme.colorScheme.primary, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -144,12 +145,13 @@ import org.json.JSONObject
                                 }
                                 TextButton(onClick = { toolDetail = item }) { Text("详情") }
                             }
-                            Text(item.description, Modifier.padding(bottom = 12.dp), fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            Text(item.description,style=MaterialTheme.typography.bodySmall,maxLines=2,overflow=TextOverflow.Ellipsis)
+                            }
                         }
 
                     }
                 }
-                if (status.isNotBlank()) Text(status, Modifier.padding(vertical = 8.dp), fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+                ConfigNotice(status)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     if (busy) TextButton(onClick = { job?.cancel() }) { Text("取消操作") }
                     TextButton(enabled = !busy, onClick = onDismiss) { Text("关闭") }
@@ -164,9 +166,20 @@ import org.json.JSONObject
         var saving by remember(original) { mutableStateOf(false) }
         val originalId = original.getString("id")
         ai.capri.app.DetailPage(onDismissRequest = { if (!saving) editing = null }, title = { Text("MCP 配置") }, text = {
-                Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-                    Text("command为参数数组；本地路径可用\${extension}、\${workspace}。依赖按需安装到扩展专属目录。tools可选，用原工具名筛选。", fontSize = 11.sp)
-                    OutlinedTextField(value = text, onValueChange = { text = it }, modifier = Modifier.fillMaxWidth().heightIn(min = 200.dp), label = { Text("配置 JSON") }, enabled = !saving)
+                Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(16.dp)) {
+                    ConfigIntro("全局 · MCP 服务", "修改连接后，需要在当前对话重新连接；原有额外配置保留。")
+                    val draft=runCatching{JSONObject(text)}.getOrNull()
+                    ConfigGroup("基本信息") {
+                        OutlinedTextField(draft?.optString("name").orEmpty(),{text=JSONObject(text).put("name",it).toString(2)},label={Text("服务名称")},singleLine=true,enabled=!saving&&draft!=null,modifier=Modifier.fillMaxWidth())
+                        OutlinedTextField(draft?.optString("id").orEmpty(),{text=JSONObject(text).put("id",it).toString(2)},label={Text("服务 ID")},singleLine=true,enabled=!saving&&!editingExisting&&draft!=null,modifier=Modifier.fillMaxWidth())
+                        if(draft?.optString("type")=="remote")OutlinedTextField(draft.optString("url"),{text=JSONObject(text).put("url",it).toString(2)},label={Text("服务地址")},singleLine=true,enabled=!saving,modifier=Modifier.fillMaxWidth())
+                        ConfigFact("连接方式",if(draft?.optString("type")=="local")"本地 · stdio" else "远端 · HTTP")
+                    }
+                    ConfigHelp(if(draft?.optString("type")=="local")"启动命令与高级配置" else "高级配置") {
+                        Text("command 使用参数数组；可配置依赖、超时与工具筛选。保留 JSON 中已有字段，凭据请在独立输入框填写。",style=MaterialTheme.typography.bodySmall)
+                        OutlinedTextField(value=text,onValueChange={text=it},modifier=Modifier.fillMaxWidth().heightIn(min=200.dp),label={Text("配置 JSON")},enabled=!saving)
+                    }
+                    ConfigGroup("身份认证", "留空保留原凭据；可明确移除或引用全局 GitHub 账号。") {
                     OutlinedTextField(value = token, onValueChange = { token = it; replaceSecret = true }, label = { Text("Token / API Key（留空保留原值）") }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth(), enabled = !saving)
                     Row {
                         TextButton(enabled = !saving, onClick = { token = ""; replaceSecret = true }) { Text("移除已存凭据") }
@@ -174,9 +187,13 @@ import org.json.JSONObject
                             if (vm.gitAccounts.list().none { it.host == "github.com" }) error = "尚无GitHub全局账号" else { runCatching { text = JSONObject(text).put("credential", "github-account").toString(2); token = ""; replaceSecret = false; error = "已选择全局GitHub凭据引用；更新账号后自动使用新Token" }.onFailure { error = "请先修正配置JSON" } }
                         }) { Text("使用全局GitHub账号") }
                     }
-                    Text(error, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
-                    Row {
-                        TextButton(enabled = !saving, onClick = {
+                    }
+                    ConfigNotice(error,error.isNotBlank())
+
+                }
+        },confirmButton={
+                    FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                        Button(enabled = !saving, onClick = {
                             scope.launch { saving = true
                                 try { withContext(Dispatchers.IO) {
                                     val raw = JSONObject(text); if (replaceSecret) raw.put("credential", "stored")
@@ -196,7 +213,6 @@ import org.json.JSONObject
                         TextButton(enabled = !saving, onClick = { editing = null }) { Text("取消") }
                         TextButton(enabled = !saving && editingExisting, onClick = { action { manager.disconnectConfig(originalId); manager.store.removeConfig(originalId); "已删除配置" }; editing = null }) { Text("删除配置") }
                     }
-                }
         })
     }
     skillBody?.let { body -> ai.capri.app.DetailPage(onDismissRequest = { skillBody = null }, title = { Text(detailTitle) }, text = { Text(body, Modifier.fillMaxSize().verticalScroll(rememberScrollState()), fontSize = 12.sp) }, confirmButton = { TextButton(onClick = { skillBody = null }) { Text("关闭") } }) }
@@ -204,11 +220,9 @@ import org.json.JSONObject
         ai.capri.app.DetailPage(onDismissRequest = { toolDetail = null }, title = { Text(item.title) }, text = {
                 Column(Modifier.fillMaxSize()) {
                     Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-                        Text(item.name, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
-                        Text(item.source, fontSize = 12.sp)
-                        Text(item.description, Modifier.padding(vertical = 12.dp), fontSize = 13.sp)
-                        Text("参数定义", fontSize = 16.sp)
-                        Text(item.parameters.toString(2), fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+                        ConfigIntro(item.source,item.description)
+                        ConfigGroup("工具标识"){Text(item.name,fontFamily=FontFamily.Monospace,style=MaterialTheme.typography.bodyMedium)}
+                        ConfigHelp("参数定义"){Text(item.parameters.toString(2),fontFamily=FontFamily.Monospace,style=MaterialTheme.typography.bodySmall)}
                     }
                     TextButton(onClick = { toolDetail = null }) { Text("返回工具列表") }
                 }

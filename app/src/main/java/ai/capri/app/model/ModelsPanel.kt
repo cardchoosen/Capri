@@ -1,6 +1,6 @@
 package ai.capri.app.model
 
-import ai.capri.app.CapriModel
+import ai.capri.app.*
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.Image
@@ -76,10 +76,10 @@ import kotlinx.coroutines.launch
     }
 }
 
-@Composable private fun ModelDialog(title: String, onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+@Composable private fun ModelDialog(title: String, onDismiss: () -> Unit, actions: (@Composable () -> Unit)? = null, content: @Composable ColumnScope.() -> Unit) {
     ai.capri.app.DetailPage(onDismissRequest = onDismiss, title = { Text(title) }, text = {
-        Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp), content = content)
-    })
+        Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(16.dp), content = content)
+    }, confirmButton = { actions?.invoke() })
 }
 
 @Composable internal fun ModelsPanel(vm: CapriModel, onDismiss: () -> Unit) {
@@ -95,17 +95,18 @@ import kotlinx.coroutines.launch
     if (creating || editing != null) {
         AccountEditor(store, onChange, editing, onDismiss = { creating = false; editing = null })
     } else ModelDialog("模型 API", onDismiss) {
-        TextButton(onClick = { creating = true }) { Icon(Icons.Outlined.Add, null); Text("添加 API") }
-        LazyColumn(Modifier.heightIn(max = 480.dp)) {
+        ConfigIntro("全局 · 模型账号", "管理 API 连接；对话中的模型选择从下一轮生效。")
+        FilledTonalButton(onClick = { creating = true }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Outlined.Add, null); Spacer(Modifier.width(8.dp)); Text("添加 API") }
+        LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             items(accounts, key = { it.id }) { account ->
-                Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    ProviderLogo(account.provider); Spacer(Modifier.width(10.dp))
+                ConfigGroup("", "") { Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    ProviderLogo(account.provider); Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) { Text(account.name); Text("${account.models.size} 个模型 · ${Providers.get(account.provider).name}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     IconButton(onClick = { editing = account }) { Icon(Icons.Outlined.Edit, "编辑 ${account.name}", Modifier.size(18.dp)) }
                     IconButton(onClick = { deleting = account }) { Icon(Icons.Outlined.DeleteOutline, "删除 ${account.name}", Modifier.size(18.dp)) }
-                }
+                } }
             }
-            if (accounts.isEmpty()) item { Text("选择厂商，填入 API Key，即可获取模型。", Modifier.padding(vertical = 20.dp)) }
+            if (accounts.isEmpty()) item { ConfigGroup("还没有模型账号", "添加服务商与 API Key 后，即可获取可用模型。") {} }
         }
     }
     deleting?.let { account -> AlertDialog(onDismissRequest = { deleting = null }, title = { Text("删除 ${account.name}？") }, text = { Text("使用它的会话需要重新选择模型，聊天和文件保留。已运行任务需另行停止。") },
@@ -138,33 +139,11 @@ import kotlinx.coroutines.launch
         val account = ModelAccount(id = original?.id ?: java.util.UUID.randomUUID().toString(), provider = provider.id, name = name.trim(), endpoint = normalizedEndpoint, key = secret, protocol = protocol, models = models)
         return account.copy(models = catalog.enrich(account, models))
     }
-    ModelDialog(if (original == null) "添加模型 API" else "编辑模型 API", onDismiss) {
-        Column(Modifier.weight(1f, fill = false).heightIn(max = 450.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Box {
-                OutlinedButton(enabled = !busy, onClick = { providerMenu = true }, modifier = Modifier.fillMaxWidth()) { ProviderLogo(provider.id); Text(provider.name, Modifier.weight(1f).padding(start = 10.dp)); Icon(Icons.Outlined.ExpandMore, null) }
-                DropdownMenu(providerMenu, { providerMenu = false }, Modifier.heightIn(max = 300.dp)) {
-                    Providers.all.forEach { item -> DropdownMenuItem(text = { Text(item.name) }, leadingIcon = { ProviderLogo(item.id) }, onClick = {
-                        provider = item; key = ""; manual = ""; protocol = item.protocol; name = item.name; endpoint = item.url; advanced = item.id in setOf("custom", "qwen"); providerMenu = false
-                    }) }
-                }
-            }
-            OutlinedTextField(name, { name = it }, label = { Text("配置名称") }, enabled = !busy, singleLine = true, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(key, { key = it }, label = { Text(if (original == null) "API Key" else "API Key（同地址留空保留）") }, enabled = !busy, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth())
-            TextButton(enabled = !busy, onClick = { advanced = !advanced }) { Text(if (advanced) "收起高级选项" else "高级选项") }
-            if (advanced) {
-                OutlinedTextField(endpoint, { endpoint = it }, label = { Text("API Base URL") }, singleLine = true, enabled = !busy, modifier = Modifier.fillMaxWidth())
-                Box { OutlinedButton(enabled = !busy, onClick = { protocolMenu = true }) { Text(protocol.label) }
-                    DropdownMenu(protocolMenu, { protocolMenu = false }) { ModelProtocol.entries.forEach { p -> DropdownMenuItem(text = { Text(p.label) }, onClick = { protocol = p; protocolMenu = false }) } } }
-                if (provider.id == "qwen") Text("百炼地域、业务空间和套餐地址可能不同，请使用控制台对应的 Base URL。", fontSize = 11.sp)
-            }
-            OutlinedTextField(manual, { manual = it }, label = { Text("手动添加模型 ID（可选）") }, singleLine = true, enabled = !busy, modifier = Modifier.fillMaxWidth())
-            if (original != null) Text("已保存 ${original.models.size} 个模型", fontSize = 11.sp)
-            if (status.isNotBlank()) Text(status, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+    ModelDialog(if (original == null) "添加模型 API" else "编辑模型 API", onDismiss, actions = {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             TextButton(enabled = !busy, onClick = {
                 try { store.save(account()); onChange(); onDismiss() } catch (_: Exception) { status = "请检查名称、HTTPS 地址、API Key 和模型 ID" }
-            }) { Text("仅保存") }
+            }, modifier = Modifier.weight(1f)) { Text("仅保存") }
             Button(enabled = !busy, onClick = {
                 val account = try { account() } catch (_: Exception) { status = "请填写有效 API Key 和 HTTPS 地址"; return@Button }
                 busy = true; status = "正在获取模型…"
@@ -178,8 +157,37 @@ import kotlinx.coroutines.launch
                     catch (error: Exception) { status = ModelApi.errorLabel(error) + "；当前输入已保留" }
                     finally { busy = false }
                 }
-            }) { if (busy) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp) else Text("保存并获取模型") }
+            }, modifier = Modifier.weight(2f)) { if (busy) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp) else Text("保存并获取模型") }
         }
+    }) {
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            ConfigIntro("全局 · API 连接", "连接信息加密保存在本机；密钥不回显。")
+            ConfigGroup("服务与身份") {
+            Box {
+                OutlinedButton(enabled = !busy, onClick = { providerMenu = true }, modifier = Modifier.fillMaxWidth()) { ProviderLogo(provider.id); Text(provider.name, Modifier.weight(1f).padding(start = 10.dp)); Icon(Icons.Outlined.ExpandMore, null) }
+                DropdownMenu(providerMenu, { providerMenu = false }, Modifier.heightIn(max = 300.dp)) {
+                    Providers.all.forEach { item -> DropdownMenuItem(text = { Text(item.name) }, leadingIcon = { ProviderLogo(item.id) }, onClick = {
+                        provider = item; key = ""; manual = ""; protocol = item.protocol; name = item.name; endpoint = item.url; advanced = item.id in setOf("custom", "qwen"); providerMenu = false
+                    }) }
+                }
+            }
+            OutlinedTextField(name, { name = it }, label = { Text("配置名称") }, enabled = !busy, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(key, { key = it }, label = { Text(if (original == null) "API Key" else "API Key（同地址留空保留）") }, enabled = !busy, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth())
+            }
+            TextButton(enabled = !busy, onClick = { advanced = !advanced }) { Text(if (advanced) "收起高级选项" else "高级选项") }
+            if (advanced) ConfigGroup("高级连接", "通常使用服务商默认地址和协议。") {
+                OutlinedTextField(endpoint, { endpoint = it }, label = { Text("API Base URL") }, singleLine = true, enabled = !busy, modifier = Modifier.fillMaxWidth())
+                Box { OutlinedButton(enabled = !busy, onClick = { protocolMenu = true }) { Text(protocol.label) }
+                    DropdownMenu(protocolMenu, { protocolMenu = false }) { ModelProtocol.entries.forEach { p -> DropdownMenuItem(text = { Text(p.label) }, onClick = { protocol = p; protocolMenu = false }) } } }
+                if (provider.id == "qwen") Text("百炼地域、业务空间和套餐地址可能不同，请使用控制台对应的 Base URL。", fontSize = 11.sp)
+            }
+            ConfigGroup("模型列表", "保存并获取模型，或填写一个已知模型 ID。") {
+            OutlinedTextField(manual, { manual = it }, label = { Text("手动添加模型 ID（可选）") }, singleLine = true, enabled = !busy, modifier = Modifier.fillMaxWidth())
+            if (original != null) Text("已保存 ${original.models.size} 个模型", fontSize = 11.sp)
+            }
+            ConfigNotice(status)
+        }
+
     }
 }
 

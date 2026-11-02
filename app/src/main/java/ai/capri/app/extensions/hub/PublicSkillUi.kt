@@ -1,5 +1,9 @@
 package ai.capri.app.extensions.hub
 
+import ai.capri.app.ConfigGroup
+import ai.capri.app.ConfigIntro
+import ai.capri.app.ConfigNotice
+import ai.capri.app.ConfigToggle
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -20,9 +24,10 @@ import kotlinx.coroutines.withContext
     ai.capri.app.SettingsRow("公共 Skill 仓库","自动同步、贡献与待处理记录"){open=true}
     if(open) {
         val state=remember(revision){hub.status()}
-        ai.capri.app.DetailPage(onDismissRequest={open=false},title={Text("公共 Skill 仓库")},text={Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-            Text(HubGitHub.REPOSITORY)
-            Row { Text("自动获取和更新",Modifier.weight(1f));Switch(checked=hub.enabled(),onCheckedChange={hub.enable(it)}) }
+        ai.capri.app.DetailPage(onDismissRequest={open=false},title={Text("公共 Skill 仓库")},text={Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(16.dp)) {
+            ConfigIntro("全局 · 公共 Skill 仓库",HubGitHub.REPOSITORY)
+            ConfigGroup("获取与更新") {
+            ConfigToggle("自动同步","只下载公共 Skill，不会自动公开本机内容。",hub.enabled()){hub.enable(it)}
             Text("已收录 ${state.optInt("skill_count")} 个；本机修改与同名个人 Skill 会保留。下载不执行脚本。")
             if(state.optString("last_error").isNotBlank())Text("同步尚未完成，继续保留本地内容；请检查网络后重试。")
             TextButton(enabled=!syncing,onClick={scope.launch {
@@ -31,17 +36,18 @@ import kotlinx.coroutines.withContext
                 finally { syncing=false }
             }}){Text(if(syncing)"正在同步…" else "立即同步")}
             if(syncing)LinearProgressIndicator(Modifier.fillMaxWidth())
-            if(notice.isNotBlank())Text(notice,style=MaterialTheme.typography.bodySmall)
-            Text("当前对话的贡献记录",style=MaterialTheme.typography.titleMedium)
+            ConfigNotice(notice)
+            }
+            ConfigIntro("当前对话 · 贡献记录","公开贡献只在你主动要求时准备；待处理记录不会在启动时重弹。")
             val receipts=remember(chat,revision){hub.list(chat)}
             if(receipts.length()==0)Text("暂无贡献记录。需要公开时，可在对话中主动让 Capri 准备贡献。")
             for(i in 0 until receipts.length()) {
                 val receipt=receipts.getJSONObject(i);val state=receipt.optString("state")
-                HorizontalDivider()
-                Text(receipt.optString("id"))
+                ConfigGroup(receipt.optString("id")) {
                 Text(when(state){"submitted"->"已提交 PR";"declined"->"仅本机使用";"failed"->"提交未确认";"publishing","approved"->"待核对提交结果";else->"等待确认"},style=MaterialTheme.typography.bodySmall)
                 if(state=="submitted")SelectionContainer{Text(receipt.optString("pull_request"))}
-                else if(state!="declined")TextButton(onClick={hub.reopen(chat,receipt.getString("key"));open=false}){Text("查看并处理")}
+                else if(state!="declined")OutlinedButton(onClick={hub.reopen(chat,receipt.getString("key"));open=false},modifier=Modifier.fillMaxWidth()){Text("查看并处理")}
+                }
             }
         }},confirmButton={TextButton(onClick={open=false}){Text("关闭")}})
     }

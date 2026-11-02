@@ -43,9 +43,9 @@ import androidx.compose.ui.window.DialogProperties
     text: @Composable () -> Unit, confirmButton: @Composable () -> Unit = {}, dismissButton: (@Composable () -> Unit)? = null) {
     Dialog(onDismissRequest = onDismissRequest, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(Modifier.fillMaxSize()) {
-            Scaffold(topBar = { TopAppBar(title = title, navigationIcon = { IconButton(onClick = onDismissRequest) { Icon(Icons.Outlined.ArrowBack, "返回") } }) },
+            Scaffold(modifier = Modifier.imePadding(), topBar = { TopAppBar(title = title, navigationIcon = { IconButton(onClick = onDismissRequest) { Icon(Icons.Outlined.ArrowBack, "返回") } }) },
                 bottomBar = { Surface { Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.End) { dismissButton?.invoke(); confirmButton() } } }) { insets ->
-                Box(Modifier.padding(insets).consumeWindowInsets(insets).imePadding().fillMaxSize().padding(horizontal = 20.dp, vertical = 12.dp)) { text() }
+                Box(Modifier.padding(insets).consumeWindowInsets(insets).fillMaxSize().padding(horizontal = 20.dp, vertical = 12.dp)) { text() }
             }
         }
     }

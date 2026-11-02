@@ -1,6 +1,6 @@
 package ai.capri.app.retrieval
 
-import ai.capri.app.CapriModel
+import ai.capri.app.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -16,8 +16,9 @@ import androidx.compose.ui.unit.dp
     val supported = ProviderCapabilities.deepSeek(config)
     var enabled by remember { mutableStateOf(vm.enhancements.enabled(ProviderCapabilities.DEEPSEEK_WEB)) }
     ai.capri.app.DetailPage(onDismissRequest = onDismiss, title = { Text("增强能力") }, text = {
-        Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("按项启用供应商增强。关闭时仍可使用免费基础检索。", style = MaterialTheme.typography.bodySmall)
+        Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            ConfigIntro("全局 · 能力增强", "按需要启用服务，实际可用性由账号、环境与权限决定。")
+            ConfigGroup("联网服务") {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("DeepSeek 搜索与抓取", Modifier.weight(1f))
                 Switch(checked = enabled, enabled = supported || enabled, onCheckedChange = { value ->
@@ -27,6 +28,7 @@ import androidx.compose.ui.unit.dp
             Text("复用官方 DeepSeek API Key。搜索和抓取各按成功请求额外计费，当前官方价格均为5元/千次；不包含模型推理费用。", style = MaterialTheme.typography.bodySmall)
             Text(if (supported) "已识别官方 DeepSeek 服务；账户权限在实际请求时确认。" else "当前配置不适用。仅支持官方 api.deepseek.com，第三方中转暂不推断此能力。", style = MaterialTheme.typography.bodySmall)
             if (supported) Text(vm.enhancements.deepSeekStatus, style = MaterialTheme.typography.bodySmall)
+            }
         }
     }, confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } })
 }

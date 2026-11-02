@@ -1,6 +1,6 @@
 package ai.capri.app.knowledge
 
-import ai.capri.app.CapriModel
+import ai.capri.app.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -39,54 +39,60 @@ import org.json.JSONObject
             finally { busy = false; vm.refresh() }
         }
     }
-    ai.capri.app.DetailPage(onDismissRequest = onDismiss, title = { Text("记忆与资料") }, text = {
-        Column(Modifier.fillMaxSize()) {
-            Text("当前会话 · ${vm.sessions.first { it.id == chat }.title}", style = MaterialTheme.typography.labelSmall)
-            if (!personal) PersonalMemoryResetControl(vm, !busy)
-            TabRow(selectedTabIndex = tab) { listOf("上下文", if (personal) "Capri记忆" else "任务资料", "文档检索").forEachIndexed { i, name -> Tab(selected = tab == i, onClick = { tab = i; result = "" }, text = { Text(name) }) } }
-            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Spacer(Modifier.height(4.dp))
-                if (tab == 0) {
-                    Text("按模型能力自动计算上下文预算，预留输出和安全余量；token为估算并由实际用量校准。超预算归档完整工具组，不截断系统规则；单组过大将停止并保留检查点。")
-                    Text(budget, style = MaterialTheme.typography.bodySmall)
-                    Text("历史摘录摘要", style = MaterialTheme.typography.titleMedium); Text(summary)
-                    OutlinedTextField(query, { query = it }, label = { Text("搜索当前会话历史") }, modifier = Modifier.fillMaxWidth())
-                    Button(enabled = !busy && !vm.resettingMemory && !vm.memoryResetRequired && query.isNotBlank(), onClick = { val q = query; val entries = vm.sessions.first { it.id == chat }.messages.toList(); perform { vm.contextHistory.query(conversation, entries, JSONObject().put("query", q)) } }) { Text("检索历史") }
-                } else if (tab == 1 && personal) {
-                    Text("一起聊过的事情会留下记忆，重要的偏好与纠正也会逐渐延续。任务对话单独保存，Capri可以按需回看。")
-                    Text("这里只保留整体重置。重置会清空共同经历，核心人格保留。", style = MaterialTheme.typography.bodySmall)
-                    PersonalMemoryResetControl(vm, !busy)
-                } else {
-                    Text("资料独立于核心人格。默认当前会话；明确共享后才可被其他会话检索。停用或删除会停止后续检索；已发送的聊天不会被抹除。", style = MaterialTheme.typography.bodySmall)
-                    if (tab == 1) {
-                        OutlinedTextField(text, { text = it }, label = { Text(if (editing.isBlank()) "新增记忆" else "编辑记忆") }, modifier = Modifier.fillMaxWidth(), maxLines = 5)
-                        Row { Checkbox(memoryGlobal, { memoryGlobal = it }); Text("跨会话共享", Modifier.padding(top = 12.dp)) }
-                        Button(enabled = !busy && !vm.resettingMemory && !vm.memoryResetRequired && text.isNotBlank(), onClick = { val t = text; val g = memoryGlobal; val id = editing
-                            perform(onSuccess = { text = ""; editing = ""; memoryGlobal = false }) { vm.knowledge.putMemory(chat, t, "用户在知识面板明确录入/编辑 · ${System.currentTimeMillis()}", g, id); "记忆已保存" }
-                        }) { Text("保存记忆") }
-                    } else {
-                        Text("支持UTF-8：txt/md/csv/json/jsonl/log/yaml/xml/html，单份≤2MB。PDF、Office、图片暂不支持。资料为带SHA-256和行号的快照；原文件修改后需重新索引。", style = MaterialTheme.typography.bodySmall)
-                        OutlinedTextField(path, { path = it }, label = { Text("当前工作区相对路径") }, modifier = Modifier.fillMaxWidth())
-                        Row { Checkbox(documentGlobal, { documentGlobal = it }); Text("跨会话共享此文档", Modifier.padding(top = 12.dp)) }
-                        Button(enabled = !busy && !vm.resettingMemory && !vm.memoryResetRequired && path.isNotBlank(), onClick = { val p = path; val g = documentGlobal; perform { vm.knowledge.index(chat, p, g).let { "索引完成：${it.getString("title")} · ${it.getJSONArray("chunks").length()}段" } } }) { Text("建立 / 更新索引") }
+    DetailPage(onDismissRequest=onDismiss,title={Text("记忆与资料")},text={
+        Column(Modifier.fillMaxSize(),verticalArrangement=Arrangement.spacedBy(12.dp)) {
+            ConfigIntro("当前对话 · ${vm.sessions.first { it.id==chat }.title}","上下文、共同经历和资料索引分别管理。")
+            TabRow(selectedTabIndex=tab) { listOf("上下文",if(personal)"Capri记忆" else "任务资料","文档检索").forEachIndexed { i,name -> Tab(selected=tab==i,onClick={tab=i;result=""},text={Text(name)}) } }
+            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(16.dp)) {
+                if(tab==0) {
+                    ConfigGroup("上下文概览") {
+                        ConfigFact("当前预算",budget)
+                        ConfigHelp("预算与归档方式"){Text("预算按模型能力计算，预留输出与安全余量；Token 为估算并由实际用量校准。超预算归档完整工具组，系统规则保留。单组过大时停止并保留检查点。",style=MaterialTheme.typography.bodySmall)}
                     }
-                    OutlinedTextField(query, { query = it }, label = { Text("搜索记忆与文档") }, modifier = Modifier.fillMaxWidth())
-                    Button(enabled = !busy && !vm.resettingMemory && !vm.memoryResetRequired && query.isNotBlank(), onClick = { val q = query; perform { vm.knowledge.search(chat, q).toString(2) } }) { Text("检索资料") }
-                    records.filter { it.optString("kind") == if (tab == 1) "memory" else "document" }.forEach { record ->
-                        HorizontalDivider()
-                        Text(record.getString("title"), style = MaterialTheme.typography.titleSmall)
-                        Text("${if (record.getString("scope") == "global") "跨会话共享" else "当前会话"} · ${record.getString("source")}\nID: ${record.getString("id")}", style = MaterialTheme.typography.bodySmall)
-                        if (tab == 1) Text(record.getString("text"))
-                        else Text("SHA-256: ${record.optString("sha256")}\n${record.getJSONArray("chunks").length()}段 · ${record.getLong("updated")}", style = MaterialTheme.typography.bodySmall)
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            TextButton(enabled = !busy && !vm.resettingMemory && !vm.memoryResetRequired, onClick = { perform { vm.knowledge.change(chat, record.getString("id"), !record.getBoolean("enabled")); "启用状态已更新" } }) { Text(if (record.getBoolean("enabled")) "停用" else "启用") }
-                            if (tab == 1) TextButton(enabled = !busy && !vm.resettingMemory && !vm.memoryResetRequired, onClick = { editing = record.getString("id"); text = record.getString("text"); memoryGlobal = record.getString("scope") == "global" }) { Text("编辑") }
-                            TextButton(enabled = !busy && !vm.resettingMemory && !vm.memoryResetRequired, onClick = { deleting = record }) { Text("删除") }
+                    ConfigHelp("历史摘录摘要"){Text(summary.ifBlank{"暂无摘要"},style=MaterialTheme.typography.bodyMedium)}
+                    ConfigGroup("查找对话历史") {
+                        OutlinedTextField(query,{query=it},label={Text("关键词")},singleLine=true,modifier=Modifier.fillMaxWidth())
+                        OutlinedButton(enabled=!busy&&!vm.resettingMemory&&!vm.memoryResetRequired&&query.isNotBlank(),onClick={val q=query;val entries=vm.sessions.first{it.id==chat}.messages.toList();perform {vm.contextHistory.query(conversation,entries,JSONObject().put("query",q))}},modifier=Modifier.fillMaxWidth()){Text("检索历史")}
+                    }
+                }else if(tab==1&&personal) {
+                    ConfigGroup("共同经历","重要偏好与纠正会逐渐延续；任务对话单独保存，可按需回看。") {
+                        Text("整体重置会清空共同经历，核心人格保留。",style=MaterialTheme.typography.bodySmall)
+                        PersonalMemoryResetControl(vm,!busy)
+                    }
+                }else {
+                    ConfigNotice("默认仅当前对话可用；跨会话共享需明确开启。删除索引不会修改原文件或已经发送的聊天。")
+                    if(tab==1)ConfigGroup(if(editing.isBlank())"添加任务资料" else "编辑任务资料") {
+                        OutlinedTextField(text,{text=it},label={Text("内容")},modifier=Modifier.fillMaxWidth(),minLines=3,maxLines=8)
+                        ConfigToggle("跨会话共享","开启后可被其他对话检索。",memoryGlobal){memoryGlobal=it}
+                        Button(enabled=!busy&&!vm.resettingMemory&&!vm.memoryResetRequired&&text.isNotBlank(),onClick={val t=text;val g=memoryGlobal;val id=editing;perform(onSuccess={text="";editing="";memoryGlobal=false}){vm.knowledge.putMemory(chat,t,"用户在知识面板明确录入/编辑 · ${System.currentTimeMillis()}",g,id);"记忆已保存"}},modifier=Modifier.fillMaxWidth()){Text("保存资料")}
+                    }else ConfigGroup("文档索引") {
+                        OutlinedTextField(path,{path=it},label={Text("工作区相对路径")},modifier=Modifier.fillMaxWidth())
+                        ConfigToggle("跨会话共享","开启后，此文档索引可被其他对话检索。",documentGlobal){documentGlobal=it}
+                        Button(enabled=!busy&&!vm.resettingMemory&&!vm.memoryResetRequired&&path.isNotBlank(),onClick={val p=path;val g=documentGlobal;perform {vm.knowledge.index(chat,p,g).let{"索引完成：${it.getString("title")} · ${it.getJSONArray("chunks").length()}段"}}},modifier=Modifier.fillMaxWidth()){Text("建立 / 更新索引")}
+                        ConfigHelp("支持的格式与限制"){Text("支持 UTF-8 文本：txt/md/csv/json/jsonl/log/yaml/xml/html，单份最多 2 MB。PDF、Office、图片暂不支持。索引为带摘要和行号的快照，原文件修改后需更新。",style=MaterialTheme.typography.bodySmall)}
+                    }
+                    ConfigGroup("检索资料") {
+                        OutlinedTextField(query,{query=it},label={Text("关键词")},modifier=Modifier.fillMaxWidth())
+                        OutlinedButton(enabled=!busy&&!vm.resettingMemory&&!vm.memoryResetRequired&&query.isNotBlank(),onClick={val q=query;perform{vm.knowledge.search(chat,q).toString(2)}},modifier=Modifier.fillMaxWidth()){Text("搜索记忆与文档")}
+                    }
+                    val visible=records.filter{it.optString("kind")==if(tab==1)"memory" else "document"}
+                    if(visible.isEmpty())ConfigGroup("暂无资料","保存资料或建立文档索引后会显示在这里。"){}
+                    visible.forEach { record -> ConfigGroup(record.getString("title"),if(record.getString("scope")=="global")"跨会话共享" else "当前对话") {
+                        if(tab==1)Text(record.getString("text"),style=MaterialTheme.typography.bodyMedium)
+                        ConfigHelp("来源与索引信息") {
+                            ConfigFact("来源",record.getString("source"));ConfigFact("ID",record.getString("id"))
+                            if(tab!=1){ConfigFact("SHA-256",record.optString("sha256"));ConfigFact("分段",record.getJSONArray("chunks").length().toString())}
                         }
-                    }
+                        Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                            TextButton(enabled=!busy&&!vm.resettingMemory&&!vm.memoryResetRequired,onClick={perform{vm.knowledge.change(chat,record.getString("id"),!record.getBoolean("enabled"));"启用状态已更新"}}){Text(if(record.getBoolean("enabled"))"停用" else "启用")}
+                            if(tab==1)TextButton(enabled=!busy&&!vm.resettingMemory&&!vm.memoryResetRequired,onClick={editing=record.getString("id");text=record.getString("text");memoryGlobal=record.getString("scope")=="global"}){Text("编辑")}
+                            TextButton(enabled=!busy&&!vm.resettingMemory&&!vm.memoryResetRequired,onClick={deleting=record}){Text("删除",color=MaterialTheme.colorScheme.error)}
+                        }
+                    } }
                 }
-                if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-                if (result.isNotBlank()) { HorizontalDivider(); Text(result, style = MaterialTheme.typography.bodySmall) }
+                if(!personal)ConfigHelp("共同经历管理"){PersonalMemoryResetControl(vm,!busy)}
+                if(busy)LinearProgressIndicator(Modifier.fillMaxWidth())
+                if(result.isNotBlank())ConfigGroup("操作结果"){Text(result,style=MaterialTheme.typography.bodySmall)}
             }
         }
     })
