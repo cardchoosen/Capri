@@ -15,14 +15,14 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
 /** Intent precedes launch. Receipts never reattach PIDs or replay effects. One event waiter per live process. */
-internal class ProcessLedger(private val root: File, private val stop: (Process) -> Unit = OwnedProcesses::stop, private val invalidate: () -> Unit = {}) {
+internal class ProcessLedger(private val root: File, private val stop: (Process) -> Unit = OwnedProcesses::stop, private val invalidate: () -> Unit = {},private val completed: (String,String,String)->Unit = { _,_,_ -> }) {
     companion object {
         private val stopReasons = ConcurrentHashMap<Process,String>()
         fun markStopping(process: Process, reason: String) { if (finishers.containsKey(process)) stopReasons.putIfAbsent(process,reason) }
         private val finishers = ConcurrentHashMap<Process, () -> Unit>()
         fun processStopped(process: Process) { if (!process.isAlive) finishers[process]?.invoke() }
         private val instances = ConcurrentHashMap<String, ProcessLedger>()
-        @Synchronized fun get(context: Context) = instances.getOrPut(context.filesDir.canonicalPath) { ProcessLedger(File(context.filesDir,"process-ledger"), invalidate = { ai.capri.app.environment.InstallationEnvironment.get(context).invalidate("ubuntu_shared", "An opaque execution may have changed dependencies; reuse requires fresh evidence.") }) }
+        @Synchronized fun get(context: Context) = instances.getOrPut(context.filesDir.canonicalPath) { ProcessLedger(File(context.filesDir,"process-ledger"), completed={ chat,id,state -> ai.capri.app.agent.reliability.ReliabilityAndroid.publish(context,chat,"process_completed",id,state) }, invalidate = { ai.capri.app.environment.InstallationEnvironment.get(context).invalidate("ubuntu_shared", "An opaque execution may have changed dependencies; reuse requires fresh evidence.") }) }
         fun forgetIfLoaded(files: File, chat: String) { instances[files.canonicalPath]?.forget(chat) }
         private val active = setOf("starting", "running", "cancel_requested")
     }
@@ -105,7 +105,7 @@ internal class ProcessLedger(private val root: File, private val stop: (Process)
                         } catch (_: Exception) { record.put("output_path",JSONObject.NULL).put("output_capture_failed",true) }
                     }
                     record.put("receipt_durable",true)
-                    try { save(record) } catch (_: Exception) { record.put("receipt_durable",false) }
+                    try { save(record);runCatching { completed(chat,id,record.getString("state")) } } catch (_: Exception) { record.put("receipt_durable",false) }
                     updates.value++
                 }
             }

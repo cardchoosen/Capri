@@ -7,6 +7,7 @@ import java.io.File
 
 /** Internal task checkpoint, separate from visible chat. Never stores credentials or full profile results. */
 internal class AgentRecovery(private val root: File) {
+    private val events=ai.capri.app.agent.reliability.AgentEvents(File(root.parentFile,"agent-events"))
     private fun file(chat: String): AtomicFile {
         val (id, revision, legacy) = HistoryEditing.scope(chat)
         val target = if (revision == null) File(root, "$id.json") else File(root, "$id/${if(legacy) "branches" else "revisions"}/$revision.json")
@@ -19,6 +20,7 @@ internal class AgentRecovery(private val root: File) {
         }
     }.getOrNull()
     fun save(chat: String, messages: JSONArray) {
+        events.transition(chat,messages,"checkpoint")
         val target = file(chat)
         val stream = target.startWrite()
         try {

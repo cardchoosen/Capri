@@ -32,6 +32,8 @@ Android 原生个人 AI Agent，在手机上执行任务。
 
 - [程序化调用与运行效率](docs/AGENT_PROGRAMS.zh-CN.md)：受控 RPC、热内核、批处理、共享并发与可恢复回执
 
+- [可靠性、长期运行与评估](docs/AGENT_RELIABILITY.zh-CN.md)：来源链、持久目标、只读后台分析、触发任务与轨迹回放
+- [Agent 优化专项完成情况](docs/AGENT_OPTIMIZATION_STATUS.zh-CN.md)：已完成范围、实验边界与剩余验收
 - [多 Agent 与复杂任务分工](docs/AGENT_DELEGATION.zh-CN.md)：最小上下文、能力与预算限制、独立提案及保护合并
 - [记忆、Skills 与经验复用](docs/AGENT_MEMORY_SKILLS.zh-CN.md)：知识归属、精选记忆、历史检索与 Skill 证据／版本闭环
 - [终端与长任务生命周期](docs/AGENT_EXECUTION.zh-CN.md)：统一登记、完成事件、持久回执、输出分页与环境失效

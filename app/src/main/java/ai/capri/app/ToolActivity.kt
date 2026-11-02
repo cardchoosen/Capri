@@ -23,6 +23,7 @@ internal fun toolLabel(name: String, args: JSONObject?): String = when (name) {
     "knowledge" -> "Manage knowledge"
     "context_history" -> "Read current chat history"
     "conversation_history" -> "Read all chat histories"
+    "agent_jobs" -> "Manage durable goals and jobs"
     "agent_delegate" -> when(args?.optString("action")) { "merge" -> "Merge delegated changes"; "read", "list" -> "Inspect delegated results"; "discard" -> "Discard delegated drafts"; else -> "Delegate bounded work" }
     "task_experience" -> when(args?.optString("action")) {
         "draft" -> "Draft reusable Skill"; "feedback" -> "Record Skill feedback"; "restore" -> "Restore Skill revision"

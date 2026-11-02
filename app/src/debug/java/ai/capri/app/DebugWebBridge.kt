@@ -29,6 +29,12 @@ internal object DebugWebBridge {
     }
 
     fun call(vm: CapriModel, method: String, args: Bundle): JSONObject { return when (method) {
+        "web_events" -> {
+            val session=vm.sessions.firstOrNull { it.id==args.getString("chat_id") }?:error("Unknown chat.")
+            require(session.contextVersion==args.getString("context_id")) { "History changed; refresh events." }
+            val scope=HistoryEditing.actualContextKey(session)
+            vm.taskEvents.read(scope,args.getLong("after",0)).put("jobs",vm.durableJobs.list(scope))
+        }
         "web_revise" -> historyRequest(vm,method,args)
         "web_message" -> {
             require(args.getString("epoch") == epoch) { "App restarted; refresh history." }

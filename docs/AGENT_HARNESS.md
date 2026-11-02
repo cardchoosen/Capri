@@ -108,3 +108,7 @@ Typed knowledge ownership, bounded sourced personal notes, topic corrections, ex
 ## Bounded delegation
 
 `agent_delegate` runs selected independent investigation/review or disjoint coding proposals with isolated declared-file snapshots and explicit evidence. Children share the parent request allowance and a retry-inclusive token-credit ledger; two child slots and three model-transport slots bound application concurrency. They cannot inherit phone, shell, web, accounts, MCP, memory or delegation. Structured receipts and guarded parent-file merges preserve source/rule versions and unknown-effect recovery; proposals are not goal verification. See [implementation, scripted single/serial/parallel comparison and verification limits](AGENT_DELEGATION.zh-CN.md).
+
+## Reliability and durable work
+
+A bounded metadata event journal links checkpoints, recovery, compaction and history revisions. Model attempts and failures are budgeted by purpose without automatic account/provider fallback. Durable goals and Android JobScheduler triggers reuse isolated read-only file delegation for explicitly authorized unattended analysis; general goals retain foreground continuation. Unknown occurrences are never replayed automatically. Fixed offline replay fixtures validate declared invariants, not real-model quality. See [reliability scope](AGENT_RELIABILITY.zh-CN.md) and [optimization status](AGENT_OPTIMIZATION_STATUS.zh-CN.md); Android lifecycle and real-model acceptance remain pending.

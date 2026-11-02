@@ -24,7 +24,7 @@ internal object DebugSocketBridge {
     private val main = Handler(Looper.getMainLooper())
     private val workers = ThreadPoolExecutor(2, 2, 20, TimeUnit.SECONDS, ArrayBlockingQueue(2),
         { task -> Thread(task, "CapriWebConnection").apply { isDaemon = true } })
-    private val methods = setOf("web_state", "web_revise", "web_message", "web_create", "web_stop", "web_delete", "web_select", "web_attachment", "web_catalog", "web_runtime", "send", "status")
+    private val methods = setOf("web_events", "web_state", "web_revise", "web_message", "web_create", "web_stop", "web_delete", "web_select", "web_attachment", "web_catalog", "web_runtime", "send", "status")
 
     @Synchronized fun connectionInfo(): JSONObject {
         if (listener == null) {

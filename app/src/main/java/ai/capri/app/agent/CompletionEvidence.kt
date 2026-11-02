@@ -5,7 +5,7 @@ import org.json.JSONObject
 
 /** Checks provenance and explicit failure signals, never claims to prove arbitrary user goals. */
 internal object CompletionEvidence {
-    private val bookkeeping = setOf("task_state", "tool_search", "tool_describe", "ask_user", "model_info", "profile_search", "skill")
+    private val bookkeeping = setOf("agent_jobs", "task_state", "tool_search", "tool_describe", "ask_user", "model_info", "profile_search", "skill")
     private val reads = setOf("read_file", "list_files", "search_files", "project", "coding_reference", "coding_diagnostics", "web_search", "web_read", "context_history", "conversation_history", "personal_memory", "knowledge")
     private fun administrative(call: JSONObject): Boolean {
         val f=runCatching { ToolRegistry.function(call) }.getOrDefault(call.getJSONObject("function"))

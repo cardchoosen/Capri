@@ -22,7 +22,7 @@ from urllib.parse import quote
 
 DEFAULT_PORT = 47863
 WEB = Path(__file__).with_name('web')
-METHODS = {'web_state', 'web_revise', 'web_message', 'web_create', 'web_stop', 'web_delete', 'web_select', 'web_attachment', 'web_catalog', 'web_runtime', 'send', 'status'}
+METHODS = {'web_events', 'web_state', 'web_revise', 'web_message', 'web_create', 'web_stop', 'web_delete', 'web_select', 'web_attachment', 'web_catalog', 'web_runtime', 'send', 'status'}
 
 
 class BridgeError(RuntimeError):
@@ -162,7 +162,7 @@ class Bridge:
                     return result
                 except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
                     self._disconnect()
-                    if method not in {'web_state', 'web_attachment', 'web_catalog', 'web_message', 'status'} or attempt:
+                    if method not in {'web_events', 'web_state', 'web_attachment', 'web_catalog', 'web_message', 'status'} or attempt:
                         if isinstance(error, BridgeError):
                             raise
                         raise BridgeError('connection_lost', 'Connection lost; inspect the chat before repeating an unconfirmed operation.') from None
@@ -296,6 +296,7 @@ def server_for(bridge, port=DEFAULT_PORT, token=None):
                 self.reply(403, {'error': 'Invalid host'}); return
             files = {'/': ('index.html', 'text/html; charset=utf-8'),
                      '/app.js': ('app.js', 'text/javascript; charset=utf-8'),
+                     '/reliability.js': ('reliability.js', 'text/javascript; charset=utf-8'),
                      '/run.js': ('run.js', 'text/javascript; charset=utf-8'),
                      '/models.js': ('models.js', 'text/javascript; charset=utf-8'),
                      '/inputs.js': ('inputs.js', 'text/javascript; charset=utf-8'),

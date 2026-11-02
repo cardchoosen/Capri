@@ -16,18 +16,25 @@ internal class ModelRequestFailure(val category: String, cause: Exception, val b
 internal class ModelRequests(
     private val maximum: Int = 50,
     private val pause: suspend (Long) -> Unit = { delay(it) },
-    private val reservedDelivery: Int = 0
+    private val reservedDelivery: Int = 0,
+    private val purposeLimits: Map<Purpose,Int> = mapOf(Purpose.COMPRESSION to 6,Purpose.DELIVERY to 3,Purpose.DELEGATION to 8)
 ) {
     enum class Purpose { EXECUTION, COMPRESSION, DELIVERY, DELEGATION }
     private val counts = Purpose.entries.associateWith { 0 }.toMutableMap()
     private var retries = 0
+    private val failures = Purpose.entries.associateWith { 0 }.toMutableMap()
+    init { require(maximum>0 && reservedDelivery in 0 until maximum && purposeLimits.values.all { it>0 }) }
+    @Synchronized private fun failed(purpose:Purpose) { failures[purpose]=failures.getValue(purpose)+1 }
     @Synchronized fun report(): JSONObject = JSONObject().put("maximum", maximum).put("used", used).put("remaining", (maximum - used).coerceAtLeast(0))
         .put("delegation_remaining",(maximum-used-reservedDelivery-2).coerceAtLeast(0)).put("execution_remaining", (maximum - used - reservedDelivery).coerceAtLeast(0)).put("reserved_delivery", reservedDelivery).put("retries", retries)
         .put("attempts_by_purpose", JSONObject(counts.mapKeys { it.key.name.lowercase() }))
+        .put("failures_by_purpose",JSONObject(failures.mapKeys { it.key.name.lowercase() }))
+        .put("purpose_limits",JSONObject(purposeLimits.mapKeys { it.key.name.lowercase() })).put("fallback_policy","same_config_only")
     fun message(): JSONObject = JSONObject().put("role", "system").put("content", "Client request budget (actual attempts; retries are included in purpose totals): " + report() + "\nReserve delivery capacity. Reuse evidence; avoid starting work that cannot be verified within the remaining budget. If unfinished, preserve state and report unresolved work; never claim completion to satisfy a budget.")
     @Volatile var used = 0
         private set
     @Synchronized private fun reserve(purpose: Purpose,retry: Boolean,before: (Int)->Unit) {
+        if(counts.getValue(purpose)>=(purposeLimits[purpose]?:maximum))throw ModelRequestFailure("Model purpose budget exhausted: ${purpose.name.lowercase()}.",IllegalStateException(),budgetExhausted=true)
         val keep=if(purpose==Purpose.DELIVERY)0 else reservedDelivery + if(purpose==Purpose.DELEGATION)2 else 0
         if(used>=maximum-keep)throw ModelRequestFailure("Model request budget exhausted; parent reconciliation and delivery capacity are reserved.",IllegalStateException(),budgetExhausted=true)
         before(used+1)
@@ -40,8 +47,9 @@ internal class ModelRequests(
             try { return block() }
             catch (cancel: CancellationException) { throw cancel }
             catch (input: InputAttachmentFailure) { throw input }
-            catch (context: ai.capri.app.model.ModelContextRejected) { throw context }
+            catch (context: ai.capri.app.model.ModelContextRejected) { failed(purpose);throw context }
             catch (error: Exception) {
+                failed(purpose)
                 val category = when (error) {
                     is ModelHttpError -> "模型接口 HTTP ${error.code}"
                     is SSLException -> "模型 TLS 连接校验失败"

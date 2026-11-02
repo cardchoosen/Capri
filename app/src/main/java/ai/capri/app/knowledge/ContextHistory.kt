@@ -99,6 +99,7 @@ internal class ContextHistory(
     }
     private fun commit(chat: String, candidate: Candidate, tools: JSONArray, budget: ContextBudget, policy: String): JSONArray {
         val result = candidate.messages
+        ai.capri.app.agent.reliability.AgentEvents(File(root.parentFile,"agent-events")).transition(chat,result,"compaction",candidate.archive)
         write(File(directory(chat), "summary.txt"), result.getJSONObject(1).getString("content"))
         write(File(directory(chat), "budget.json"), budget.report(ContextTokens.estimate(result, tools))
             .put("strategy", policy).put("archived_messages", candidate.segment.length()).put("protected_user_messages", candidate.protectedUsers).toString())

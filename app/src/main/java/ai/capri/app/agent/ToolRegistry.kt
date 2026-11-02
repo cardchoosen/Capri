@@ -36,7 +36,7 @@ internal class ToolRegistry(specifications: JSONArray) {
         else ToolInput.check(args, definition.function.getJSONObject("parameters"))
     }
     companion object {
-        val specialized = setOf("agent_delegate", "task_experience", "coding_diagnostics", "coding_reference", "coding_restore", "environment", "environment_check", "python_env", "knowledge", "personal_memory", "conversation_history", "model_info", "profile_search")
+        val specialized = setOf("agent_jobs", "agent_delegate", "task_experience", "coding_diagnostics", "coding_reference", "coding_restore", "environment", "environment_check", "python_env", "knowledge", "personal_memory", "conversation_history", "model_info", "profile_search")
         val discovery = setOf("tool_search", "tool_describe", "tool_invoke")
         /** Used for evidence and progress accounting; never grants permission or dispatches a call. */
         fun function(call: JSONObject): JSONObject {

@@ -132,6 +132,7 @@ internal object CapabilitySearch {
         listOf("profile","persona","身份","人格"),listOf("search","find","lookup","搜索","查找","查询"),
         listOf("file","files","directory","folder","文件","目录"),listOf("git","github","repository","repositories","commit","仓库","提交"),
         listOf("coding","code","diagnostic","diagnostics","lint","syntax","lsp","代码","诊断","语法","报错"),
+        listOf("job","jobs","cron","schedule","scheduled","reliability","automation","定时","后台","持久目标","可靠性","调度"),
         listOf("delegate","delegation","agent","agents","subtask","parallel","委派","子任务","多智能体","并行"),
         listOf("experience","procedure","skill","feedback","任务经验","技能","反馈","经验复用"),
         listOf("snapshot","restore","rollback","version","快照","回滚","恢复文件","版本"),

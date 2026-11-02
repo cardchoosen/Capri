@@ -12,7 +12,7 @@ class ToolSurfaceTest {
     @Test fun completeBuiltinCatalogStaysDiscoverableWithFewerEagerSchemaTokens() {
         val all = JSONArray((FileToolContract.specifications() + ai.capri.app.coding.CodingContract.specifications() + listOf(
             FileToolContract.sendSpecification(), ai.capri.app.model.ModelInfoTool.specification(), KnowledgeTool.specification(),
-            KnowledgeTool.historySpecification(), PersonalMemory.specification(), TaskExperienceContract.specification(), ai.capri.app.agent.delegation.DelegateContract.specification(), ConversationHistory.specification(),
+            KnowledgeTool.historySpecification(), PersonalMemory.specification(), TaskExperienceContract.specification(), ai.capri.app.agent.delegation.DelegateContract.specification(), ai.capri.app.agent.reliability.JobContract.specification(), ConversationHistory.specification(),
             ShortTaskContract.specification(), ai.capri.app.program.ProgramContract.specification(), ai.capri.app.coding.CodingAssistContract.specification(), CapabilityContract.specification(), ai.capri.app.nativebridge.NativeCatalog.spec(),
             ai.capri.app.terminal.TerminalContract.specification(), ai.capri.app.browser.BrowserContract.specification(),
             ai.capri.app.extensions.ExtensionInstall.specification(),

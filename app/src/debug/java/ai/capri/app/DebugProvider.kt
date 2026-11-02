@@ -32,7 +32,7 @@ internal object DebugBridge {
         val vm = model.get() ?: return JSONObject().put("error", "not_ready: open Capri first")
         return when (method) {
             "web_connect" -> DebugSocketBridge.connectionInfo()
-            "web_state", "web_revise", "web_message", "web_create", "web_stop", "web_delete", "web_select" -> DebugWebBridge.call(vm, method, args)
+            "web_events", "web_state", "web_revise", "web_message", "web_create", "web_stop", "web_delete", "web_select" -> DebugWebBridge.call(vm, method, args)
             "sessions" -> JSONObject().put("sessions", JSONArray().apply {
                 vm.sessions.forEach { put(JSONObject().put("chat_id", it.id).put("title", it.title).put("busy", vm.jobs.containsKey(it.id))) }
             })

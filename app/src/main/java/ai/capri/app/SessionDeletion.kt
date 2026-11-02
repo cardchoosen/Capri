@@ -32,7 +32,7 @@ internal class SessionDeletion(private val root: File) {
     fun finish(chat: String) { marker(chat).delete() }
     private fun targets(chat: String): List<File> {
         require(chat.matches(Regex("[a-zA-Z0-9-]+")))
-        return listOf("history-backups/$chat", "sessions/$chat", "context-history/$chat", "agent-programs/$chat", "agent-delegates/$chat", "coding-history/$chat", "coding-jobs/$chat", "task-experience/$chat", "process-ledger/$chat", "web-retrieval/$chat", "agent-recovery/$chat", "agent-recovery/$chat.json", "agent-recovery/$chat.json.bak", "agent-recovery/$chat.json.new").map(::checked)
+        return listOf("history-backups/$chat", "sessions/$chat", "context-history/$chat", "agent-programs/$chat", "agent-delegates/$chat", "agent-events/$chat", "agent-jobs/$chat", "coding-history/$chat", "coding-jobs/$chat", "task-experience/$chat", "process-ledger/$chat", "web-retrieval/$chat", "agent-recovery/$chat", "agent-recovery/$chat.json", "agent-recovery/$chat.json.bak", "agent-recovery/$chat.json.new").map(::checked)
     }
     fun validate(chat: String) { targets(chat) }
     fun cleanup(chat: String) { ai.capri.app.knowledge.TaskExperience.deleteSharedFeedback(root,chat); ai.capri.app.execution.ProcessLedger.forgetIfLoaded(root,chat); targets(chat).forEach(RuntimeFiles::delete) }

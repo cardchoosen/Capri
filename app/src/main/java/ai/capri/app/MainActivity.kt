@@ -249,6 +249,7 @@ class MainActivity : ComponentActivity() {
                                 modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp))
                         }
                         notice?.takeUnless { vm.activeTools.containsKey(session.id) }?.let { Text(it, color = Green, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp)) }
+                        AgentReliabilityPanel(vm,session)
                         val turnState = vm.turnView(session.id)
                         val requestBudget = turnState.optJSONObject("budget")
                         if (turnState.optString("label").isNotBlank()) Text(turnState.optString("label") + (requestBudget?.let { " · 请求 ${it.optInt("used")}/${it.optInt("maximum")}" } ?: ""), color = Muted, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 3.dp))
