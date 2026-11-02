@@ -10,7 +10,8 @@ import javax.net.ssl.SSLHandshakeException
 class ModelRequestsTest {
     @Test fun connectionRetriesNeverReplayEarlierToolEffectsAndStayBounded() = runBlocking {
         var toolExecutions = 0
-        val policy = ModelRequests(pause = {})
+        var clock=0L
+        val policy = ModelRequests(pause = {clock+=it},now={clock})
         policy.execute { JSONObject().put("tool", "run") }
         toolExecutions++
         var attempts = 0
@@ -23,7 +24,8 @@ class ModelRequestsTest {
         assertEquals(1, toolExecutions)
         assertEquals(4, policy.used)
         try { policy.execute { throw IOException("abort") }; fail() } catch (_: ModelRequestFailure) { }
-        assertEquals(7, policy.used)
+        assertEquals(10, policy.used)
+        assertEquals(33_000L,clock)
     }
     @Test fun authTlsAndInvalidResponsesDoNotRetryAndRetryAfterIsHonored() = runBlocking {
         for (error in listOf(ModelHttpError(401), SSLHandshakeException("bad cert"), IllegalArgumentException())) {
@@ -39,6 +41,22 @@ class ModelRequestsTest {
         val longWait = ModelRequests(pause = { fail("must not wait/retry") })
         try { longWait.execute { throw ModelHttpError(429, 60_000) }; fail() } catch (_: ModelRequestFailure) { }
         assertEquals(1, longWait.used)
+    }
+    @Test fun retryWindowIncludesSlowRetriesButLeavesTheInitialRequestTimeoutUnchanged() = runBlocking {
+        val policy=ModelRequests(retryWindowMs=60,pause={})
+        var attempts=0
+        val started=System.nanoTime()
+        try { policy.execute { if(attempts++==0)throw IOException("offline");awaitCancellation() };fail() }catch(_:ModelRequestFailure){}
+        assertEquals(2,attempts)
+        assertTrue((System.nanoTime()-started)/1_000_000<2000)
+        val first=ModelRequests(retryWindowMs=10)
+        assertEquals("ok",first.execute{delay(30);JSONObject().put("value","ok")}.getString("value"))
+    }
+    @Test fun shortPurposeBudgetStopsWithoutSleepingOrConsumingAnUnusedAttempt() = runBlocking {
+        var clock=0L
+        val policy=ModelRequests(now={clock},pause={clock+=it},purposeLimits=mapOf(ModelRequests.Purpose.DELIVERY to 2))
+        try{policy.execute(ModelRequests.Purpose.DELIVERY){throw IOException()};fail()}catch(_:ModelRequestFailure){}
+        assertEquals(2,policy.used);assertEquals(1000L,clock)
     }
     @Test fun budgetIncludesRetriesAndCancellationStopsImmediately() = runBlocking {
         val policy = ModelRequests(maximum = 2, pause = {})

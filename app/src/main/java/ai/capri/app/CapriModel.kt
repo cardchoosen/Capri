@@ -107,7 +107,8 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
     }
     private val tick = MutableStateFlow(0)
     val updates = tick.asStateFlow()
-    val jobs = ConcurrentHashMap<String, Job>()
+    internal val taskEngine by lazy { AgentTaskEngine(app) { refresh() } }
+    val jobs get() = taskEngine.jobs
     private val activeOrigins = ConcurrentHashMap<String, String>()
     internal val activeTools = ConcurrentHashMap<String, ToolActivity>()
     val notices = ConcurrentHashMap<String, String>()
@@ -214,7 +215,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
             finally { runtimeBusy = false; refresh() }
         }
     }
-    override fun onCleared() { codingDiagnostics.dispose(); programs.dispose(); browser.dispose(); extensions.dispose(); super.onCleared() }
+    override fun onCleared() { taskEngine.dispose(); codingDiagnostics.dispose(); programs.dispose(); browser.dispose(); extensions.dispose(); super.onCleared() }
     fun refresh() { tick.value++ }
     fun current() = sessions.first { it.id == selected }
     internal fun personalSession() = sessions.first { it.kind == SessionKind.PERSONAL }
@@ -372,9 +373,10 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
         persist()
         if (inputIds.isNotEmpty()) runCatching { inputAttachments.consume(chat, inputIds.toSet()) }
         if (busy) { delegates.interrupt(HistoryEditing.actualContextKey(session)); terminals.interruptWaiters(chat); notices[chat] = "补充要求已保存，将在安全边界接入；已开始的操作不会自动回滚。"; refresh(); return true }
-        val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
+        val job = taskEngine.create(chat) {
             taskModels[chat] = config
-            try { respond(session, config) }
+            try { taskEngine.promote(chat); respond(session, config) }
+            catch (e: AgentTaskEngine.ForegroundUnavailable) { turnViews[HistoryEditing.actualContextKey(session)] = JSONObject().put("phase",TurnState.Phase.FAILED.name).put("origin",activeOrigins[chat]); session.messages.add(Entry("status", "任务后台服务未能启动，本轮尚未开始执行。请返回 Capri 前台后重试。")); Log.w("CapriAgentTask", "foreground_start_failed",e) }
             catch (e: CancellationException) { session.messages.add(Entry("status", "执行已停止")); throw e }
             catch (e: ai.capri.app.knowledge.ContextBudgetFailure) { session.messages.add(Entry("status", e.message.orEmpty())) }
             catch (e: InputAttachmentFailure) { session.messages.add(Entry("status", "附件输入未完成：图片可能已变更或无法读取。原文件仍保留，请核对附件后重新选择或重试。")) }
@@ -383,11 +385,11 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                 session.messages.add(Entry("status", "${e.category}，模型回复未完成。已记录的工具结果保留，持续终端不会因此自动停止。发送“继续”可接续；结果未确认的操作会先核验，不直接重跑。"))
             }
             catch (e: Exception) { session.messages.add(Entry("status", "客户端处理未完成。已有工具操作不会回滚，请查看执行记录；发送“继续”可从检查点核验。")); Log.w("CapriModelRequest", "client_failure type=${e.javaClass.simpleName}") }
-            finally { taskModels.remove(chat); activeOrigins.remove(chat); activeTools.remove(session.id); jobs.remove(session.id); notices.remove(session.id); persist() }
+            finally { taskModels.remove(chat); activeOrigins.remove(chat); activeTools.remove(session.id); notices.remove(session.id); persist() }
         }
         activeOrigins[chat] = session.messages.last { it.role == "user" }.id
         turnViews[HistoryEditing.actualContextKey(session)] = JSONObject().put("phase", TurnState.Phase.PREPARING.name).put("origin", activeOrigins[chat])
-        jobs[session.id] = job; notices[session.id] = "思考中"; refresh(); job.start()
+        notices[session.id] = "思考中"; refresh(); job.start()
         return true
     }
     private fun tool(name: String, description: String, properties: JSONObject, required: List<String>) = JSONObject().put("type", "function").put("function", JSONObject().put("name", name).put("description", description).put("parameters", JSONObject().put("type", "object").put("properties", properties).put("required", JSONArray(required))))
@@ -500,7 +502,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
         suspend fun requestModel(modelMessages: JSONArray, modelTools: JSONArray, outputTokens: Int, finalOnly: Boolean = false, purpose: ModelRequests.Purpose = ModelRequests.Purpose.EXECUTION, attemptGate: ()->Unit = {}): JSONObject {
             var assignedAttempt=0
             return requests.execute(beforeAttempt={ number -> attemptGate();assignedAttempt=number }, purpose = purpose, onRetry = { attempt, category ->
-                notices[session.id] = "模型连接重试 $attempt/2"; refresh()
+                notices[session.id] = "模型连接重试 $attempt · 最多等待 30 秒"; refresh()
                 Log.w("CapriModelRequest", "retry=$attempt used=${requests.used} category=$category")
             }, onBackoff = { elapsed -> trace.event(PerformanceTrace.Stage.MODEL_BACKOFF, elapsed, PerformanceTrace.Status.RETURNED, purpose = purpose) }) {
                 val attemptStarted = PerformanceTrace.now()

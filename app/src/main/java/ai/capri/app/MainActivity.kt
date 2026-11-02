@@ -7,7 +7,6 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.viewModels
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -47,7 +46,7 @@ private val White = Color(0xFFF4F6F3)
 private val Muted = Color(0xFF939E94)
 
 class MainActivity : ComponentActivity() {
-    private val model: CapriModel by viewModels()
+    private val model: CapriModel get() = AgentRuntime.get(application)
     override fun onResume() { super.onResume(); model.androidTools.permissions.attach(this);ai.capri.app.extensions.hub.HubAndroid.schedule(application) }
     override fun onPause() { model.androidTools.permissions.detach(this); super.onPause() }
     override fun onCreate(savedInstanceState: Bundle?) {

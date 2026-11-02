@@ -77,7 +77,7 @@ class ToolsDeviceTest {
         }
         val screen = activity ?: error("Activity not resumed")
         lateinit var vm: CapriModel
-        instrumentation.runOnMainSync { vm = ViewModelProvider(screen)[CapriModel::class.java] }
+        instrumentation.runOnMainSync { vm = AgentRuntime.get(screen.application) }
         val chat = vm.selected; val otherChat = "test-catalog-${UUID.randomUUID()}"; val server = id()
         val source = vm.store.workspace.file(chat, "$server-source").apply { mkdirs() }
         val tools = listOf("fixture_echo", "fixture_extra")

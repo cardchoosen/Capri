@@ -46,7 +46,7 @@ class MobileUiDeviceTest {
         }
         try {
             scenario.onActivity { activity ->
-                vm = ViewModelProvider(activity)[CapriModel::class.java]; previousTab = vm.activeTab; chat = vm.selected
+                vm = AgentRuntime.get(activity.application); previousTab = vm.activeTab; chat = vm.selected
                 activity.window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 vm.activeTab = 3
             }

@@ -56,7 +56,7 @@ class FinalReplyDeviceTest {
             "\n\n```python\nprint('😀')\n```\n\n| 项目 | 状态 |\n| --- | --- |\n| 输出 | 正常 |\n\nREVEAL_END"
         try {
             instrumentation.runOnMainSync {
-                val vm = ViewModelProvider(foreground)[CapriModel::class.java]
+                val vm = AgentRuntime.get(foreground.application)
                 previous = vm.selected
                 vm.create(); chat = vm.selected
                 vm.current().messages.add(Entry("assistant", "过程说明立即显示 PROCESS_OK"))
@@ -89,7 +89,7 @@ class FinalReplyDeviceTest {
             assertTrue("Activity recreation must not replay", texts().contains("REVEAL_END"))
         } finally {
             instrumentation.runOnMainSync {
-                val vm = ViewModelProvider(foreground)[CapriModel::class.java]
+                val vm = AgentRuntime.get(foreground.application)
                 vm.sessions.removeAll { it.id == chat }
                 vm.selected = previous.takeIf { id -> vm.sessions.any { it.id == id } } ?: vm.sessions.first().id
                 vm.persist()

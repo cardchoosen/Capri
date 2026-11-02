@@ -39,6 +39,9 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <service android:name=".AgentTaskService" android:exported="false" android:stopWithTask="false" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Continue user-started AI agent tasks and model requests while the user switches apps, with visible progress and stop control" />
+        </service>
         <service android:name=".LinuxSetupService" android:exported="false" android:stopWithTask="false" android:foregroundServiceType="specialUse">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Prepare local Linux execution environment when the user creates a chat" />
         </service>

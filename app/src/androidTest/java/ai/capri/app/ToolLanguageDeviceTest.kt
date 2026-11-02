@@ -23,7 +23,7 @@ class ToolLanguageDeviceTest {
         for (attempt in 0 until 50) {
             instrumentation.runOnMainSync {
                 ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED).filterIsInstance<MainActivity>().firstOrNull { !it.isDestroyed && !it.isFinishing }?.let {
-                    builtins = ViewModelProvider(it)[CapriModel::class.java].builtinTools()
+                    builtins = AgentRuntime.get(it.application).builtinTools()
                 }
             }
             if (builtins != null) break

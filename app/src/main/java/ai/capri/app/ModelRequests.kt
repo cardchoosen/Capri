@@ -4,6 +4,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 import java.io.IOException
 import java.net.ProtocolException
@@ -17,13 +18,15 @@ internal class ModelRequests(
     private val maximum: Int = 50,
     private val pause: suspend (Long) -> Unit = { delay(it) },
     private val reservedDelivery: Int = 0,
-    private val purposeLimits: Map<Purpose,Int> = mapOf(Purpose.COMPRESSION to 6,Purpose.DELIVERY to 3,Purpose.DELEGATION to 8)
+    private val purposeLimits: Map<Purpose,Int> = mapOf(Purpose.COMPRESSION to 6,Purpose.DELIVERY to 3,Purpose.DELEGATION to 8),
+    private val now:()->Long = { System.nanoTime()/1_000_000 },
+    private val retryWindowMs:Long = 30_000
 ) {
     enum class Purpose { EXECUTION, COMPRESSION, DELIVERY, DELEGATION }
     private val counts = Purpose.entries.associateWith { 0 }.toMutableMap()
     private var retries = 0
     private val failures = Purpose.entries.associateWith { 0 }.toMutableMap()
-    init { require(maximum>0 && reservedDelivery in 0 until maximum && purposeLimits.values.all { it>0 }) }
+    init { require(maximum>0 && reservedDelivery in 0 until maximum && purposeLimits.values.all { it>0 } && retryWindowMs>0) }
     @Synchronized private fun failed(purpose:Purpose) { failures[purpose]=failures.getValue(purpose)+1 }
     @Synchronized fun report(): JSONObject = JSONObject().put("maximum", maximum).put("used", used).put("remaining", (maximum - used).coerceAtLeast(0))
         .put("delegation_remaining",(maximum-used-reservedDelivery-2).coerceAtLeast(0)).put("execution_remaining", (maximum - used - reservedDelivery).coerceAtLeast(0)).put("reserved_delivery", reservedDelivery).put("retries", retries)
@@ -41,11 +44,20 @@ internal class ModelRequests(
         used++;counts[purpose]=counts.getValue(purpose)+1;if(retry)retries++
     }
     suspend fun execute(purpose: Purpose = Purpose.EXECUTION, onRetry: (Int, String) -> Unit = { _, _ -> }, onBackoff: (Long) -> Unit = {}, beforeAttempt: (Int)->Unit = {}, block: suspend () -> JSONObject): JSONObject {
-        repeat(3) { attempt ->
+        var attempt=0
+        var deadline:Long?=null
+        var lastFailure:ModelRequestFailure?=null
+        while(true) {
             currentCoroutineContext().ensureActive()
+            val remaining=deadline?.let{it-now()}
+            if(remaining!=null && remaining<=0)throw checkNotNull(lastFailure)
             reserve(purpose,attempt>0,beforeAttempt)
-            try { return block() }
+            try {
+                return if(remaining==null)block()
+                else withTimeoutOrNull(remaining){block()}?:run{failed(purpose);throw checkNotNull(lastFailure)}
+            }
             catch (cancel: CancellationException) { throw cancel }
+            catch (failure:ModelRequestFailure) { throw failure }
             catch (input: InputAttachmentFailure) { throw input }
             catch (context: ai.capri.app.model.ModelContextRejected) { failed(purpose);throw context }
             catch (error: Exception) {
@@ -65,16 +77,20 @@ internal class ModelRequests(
                     is IOException -> true
                     else -> false
                 }
-                if (!retryable || attempt == 2 || used >= maximum - (if (purpose == Purpose.DELIVERY) 0 else reservedDelivery + if(purpose==Purpose.DELEGATION)2 else 0)) throw ModelRequestFailure(category, error)
-                val requested = (error as? ModelHttpError)?.retryAfterMs
-                // Do not retry sooner than a server's long Retry-After. Leave explicit continuation to the user.
-                if (requested != null && requested > 5000) throw ModelRequestFailure(category, error)
+                val failure=ModelRequestFailure(category,error);lastFailure=failure
+                if(!retryable || used>=maximum-(if(purpose==Purpose.DELIVERY)0 else reservedDelivery+if(purpose==Purpose.DELEGATION)2 else 0) || counts.getValue(purpose)>=(purposeLimits[purpose]?:maximum))throw failure
+                if(deadline==null)deadline=now()+retryWindowMs
+                val remainingWait=deadline!!-now()
+                val requested=(error as? ModelHttpError)?.retryAfterMs?:0L
+                // A retry must fit the fixed recovery window and honor Retry-After.
+                if(remainingWait<=0 || requested>remainingWait)throw failure
+                val wait=minOf(maxOf(1000L shl attempt.coerceAtMost(3),requested),remainingWait)
                 onRetry(attempt + 1, category)
                 val backoffStarted = System.nanoTime()
-                try { pause(maxOf(500L shl attempt, requested ?: 0)) }
+                try { pause(wait) }
                 finally { onBackoff(((System.nanoTime() - backoffStarted) / 1_000_000).coerceAtLeast(0)) }
+                attempt++
             }
         }
-        error("unreachable")
     }
 }

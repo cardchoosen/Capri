@@ -26,7 +26,7 @@ class SessionDeletionDeviceTest {
                     val activity = listOf(Stage.RESUMED, Stage.STARTED, Stage.PAUSED, Stage.STOPPED, Stage.CREATED)
                         .flatMap { ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(it) }
                         .filterIsInstance<MainActivity>().firstOrNull()
-                    if (activity != null) vm = ViewModelProvider(activity)[CapriModel::class.java]
+                    if (activity != null) vm = AgentRuntime.get(activity.application)
                 }
                 if (vm == null) Thread.sleep(100)
             }

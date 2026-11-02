@@ -55,7 +55,7 @@ class TurnControlDeviceTest {
         }
         val client=OkHttpClient.Builder().sslSocketFactory(trust.sslSocketFactory(),trust.trustManager).callTimeout(15,TimeUnit.SECONDS).build()
         val scenario=ActivityScenario.launch(MainActivity::class.java);lateinit var vm:CapriModel
-        scenario.onActivity{vm=ViewModelProvider(it)[CapriModel::class.java]}
+        scenario.onActivity{vm=AgentRuntime.get(it.application)}
         val http=CapriModel::class.java.getDeclaredField("http").apply{isAccessible=true};val original=http.get(vm)
         val chat=Session(title="Turn control isolated fixture")
         val account=ModelAccount(provider="custom",name="Control fixture ${UUID.randomUUID()}",endpoint=server.url("/").toString(),key="fixture-not-a-real-key",protocol=ModelProtocol.CHAT,models=listOf(ModelOption("fixture",context=131072,output=4096,source="manual")))

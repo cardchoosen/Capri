@@ -18,7 +18,7 @@ class WebModelPickerDeviceTest {
         val ins = InstrumentationRegistry.getInstrumentation()
         val scenario = ActivityScenario.launch(MainActivity::class.java)
         lateinit var vm: CapriModel
-        scenario.onActivity { vm = ViewModelProvider(it)[CapriModel::class.java] }
+        scenario.onActivity { vm = AgentRuntime.get(it.application) }
         val chat = Session(title = "Model picker isolated fixture")
         val other = Session(title = "Model picker other fixture")
         val account = ModelAccount(provider = "custom", name = "Picker fixture ${UUID.randomUUID()}", endpoint = "https://example.com/v1", key = "picker-secret-never-export", protocol = ModelProtocol.CHAT,

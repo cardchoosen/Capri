@@ -17,7 +17,7 @@ class WebCatalogDeviceTest {
         ins.runOnMainSync { ins.targetContext.startActivity(Intent(ins.targetContext, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
         var vm: CapriModel? = null
         repeat(60) {
-            if (vm == null) ins.runOnMainSync { ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED).filterIsInstance<MainActivity>().firstOrNull()?.let { vm = ViewModelProvider(it)[CapriModel::class.java] } }
+            if (vm == null) ins.runOnMainSync { ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED).filterIsInstance<MainActivity>().firstOrNull()?.let { vm = AgentRuntime.get(it.application) } }
             if (vm == null) Thread.sleep(100)
         }
         val model = requireNotNull(vm); val original = model.selected

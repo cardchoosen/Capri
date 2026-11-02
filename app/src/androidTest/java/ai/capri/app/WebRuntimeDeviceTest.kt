@@ -14,7 +14,7 @@ class WebRuntimeDeviceTest {
         val ins = InstrumentationRegistry.getInstrumentation()
         val scenario = ActivityScenario.launch(MainActivity::class.java)
         lateinit var vm: CapriModel
-        scenario.onActivity { vm = ViewModelProvider(it)[CapriModel::class.java] }
+        scenario.onActivity { vm = AgentRuntime.get(it.application) }
         val chat = Session(title = "Web Run isolated fixture")
         val modelName = "Run fixture ${UUID.randomUUID()}"
         val skillName = "web-run-${UUID.randomUUID()}"

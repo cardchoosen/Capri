@@ -14,7 +14,7 @@ class LargeUploadDeviceTest {
     @Test fun hundredMiBFileIsImportedIntactWithoutInlineContext() {
         val ins=InstrumentationRegistry.getInstrumentation();val context=ins.targetContext
         val scenario=ActivityScenario.launch(MainActivity::class.java)
-        lateinit var vm:CapriModel;scenario.onActivity{vm=ViewModelProvider(it)[CapriModel::class.java]}
+        lateinit var vm:CapriModel;scenario.onActivity{vm=AgentRuntime.get(it.application)}
         val chat=Session(title="Large upload isolated fixture")
         val ready=File(context.cacheDir,"large-upload-ready.json");val complete=File(context.cacheDir,"large-upload-complete")
         complete.delete()

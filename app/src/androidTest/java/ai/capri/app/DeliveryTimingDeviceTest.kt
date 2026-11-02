@@ -43,7 +43,7 @@ class DeliveryTimingDeviceTest {
         }
         val client=OkHttpClient.Builder().sslSocketFactory(trust.sslSocketFactory(),trust.trustManager).addInterceptor(ModelTransport.QueueTiming()).callTimeout(15,TimeUnit.SECONDS).build()
         val scenario=ActivityScenario.launch(MainActivity::class.java);lateinit var vm:CapriModel
-        scenario.onActivity{vm=ViewModelProvider(it)[CapriModel::class.java]}
+        scenario.onActivity{vm=AgentRuntime.get(it.application)}
         val field=CapriModel::class.java.getDeclaredField("http").apply{isAccessible=true};val original=field.get(vm)
         val normal=Session(title="Delivery timing normal fixture");val strict=Session(title="Delivery timing JSON fixture");val chats=listOf(normal,strict)
         val account=ModelAccount(provider="custom",name="Delivery timing ${UUID.randomUUID()}",endpoint=server.url("/").toString(),key="timing-fixture-key",protocol=ModelProtocol.CHAT,models=listOf(ModelOption("fixture",context=131072,output=4096,source="manual")))

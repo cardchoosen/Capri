@@ -39,7 +39,7 @@ class SettingsPagesDeviceTest {
         fun back(){tap("返回",true)}
         fun capture(name:String){ins.waitForIdleSync();Thread.sleep(400);ins.uiAutomation.takeScreenshot().let{bitmap->File(ins.targetContext.cacheDir,"settings-polish-$name.png").outputStream().use{bitmap.compress(Bitmap.CompressFormat.PNG,100,it)}}}
         try {
-            scenario.onActivity{activity->vm=ViewModelProvider(activity)[CapriModel::class.java];previous=vm.activeTab;chat=vm.selected;vm.activeTab=3;activity.window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)}
+            scenario.onActivity{activity->vm=AgentRuntime.get(activity.application);previous=vm.activeTab;chat=vm.selected;vm.activeTab=3;activity.window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)}
             tap("模型配置");node("全局 · 模型账号");capture("models");tap("添加 API");node("服务与身份");node("模型列表");capture("model-editor")
             tap("API Key");Thread.sleep(400)
             assertTrue("Save action must remain visible with the keyboard",node("保存并获取模型").isVisibleToUser)

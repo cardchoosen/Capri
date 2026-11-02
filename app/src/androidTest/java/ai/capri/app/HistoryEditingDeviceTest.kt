@@ -18,7 +18,7 @@ class HistoryEditingDeviceTest {
     private fun click(node:AccessibilityNodeInfo){var n=node;while(!n.isClickable&&n.parent!=null)n=n.parent;check(n.performAction(AccessibilityNodeInfo.ACTION_CLICK))}
     @Test fun inlineEditorCancelSendAndRetryUseOneTimelineAndKeepExecutionState() {
         val scenario=ActivityScenario.launch(MainActivity::class.java);lateinit var vm:CapriModel
-        scenario.onActivity{vm=ViewModelProvider(it)[CapriModel::class.java]};val selected=vm.selected
+        scenario.onActivity{vm=AgentRuntime.get(it.application)};val selected=vm.selected
         val chat=Session(title="原位编辑隔离验收",messages=mutableListOf(Entry("user","你是谁"),Entry("assistant",IdentityReply.TEXT,finalReply=true),Entry("user","later"),Entry("assistant","FUTURE_MARKER",finalReply=true)))
         fun call(method:String,vararg fields:Pair<String,Any>):JSONObject{lateinit var out:JSONObject;ins.runOnMainSync{out=DebugWebBridge.call(vm,method,Bundle().apply{putString("epoch",DebugWebBridge.epoch);putString("chat_id",chat.id);for((k,v)in fields)when(v){is String->putString(k,v);is Long->putLong(k,v)}})};return out}
         try {

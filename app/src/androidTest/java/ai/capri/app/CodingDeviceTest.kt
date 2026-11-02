@@ -46,7 +46,7 @@ class CodingDeviceTest {
         assumeTrue(InstrumentationRegistry.getArguments().getString("keep_coding_fixture") == "true")
         foreground()
         var vm: CapriModel? = null
-        repeat(60) { if (vm == null) { ins.runOnMainSync { ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED).filterIsInstance<MainActivity>().firstOrNull()?.let { vm = ViewModelProvider(it)[CapriModel::class.java] } }; if (vm == null) Thread.sleep(100) } }
+        repeat(60) { if (vm == null) { ins.runOnMainSync { ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED).filterIsInstance<MainActivity>().firstOrNull()?.let { vm = AgentRuntime.get(it.application) } }; if (vm == null) Thread.sleep(100) } }
         val model = requireNotNull(vm); val session = Session(title = "通用编程能力验收")
         val work = model.store.workspace.folder(session.id, "workspace")
         File(work, "AGENTS.md").writeText("Use Python standard-library unittest, no new dependencies. Preserve addition. Run python3 -m unittest discover -s tests -v from /workspace. Keep code and tests in English.")

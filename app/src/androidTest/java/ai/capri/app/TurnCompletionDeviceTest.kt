@@ -49,7 +49,7 @@ class TurnCompletionDeviceTest {
         val client=OkHttpClient.Builder().sslSocketFactory(trust.sslSocketFactory(),trust.trustManager)
             .callTimeout(15,TimeUnit.SECONDS).build()
         val scenario=ActivityScenario.launch(MainActivity::class.java);lateinit var vm:CapriModel
-        scenario.onActivity{vm=ViewModelProvider(it)[CapriModel::class.java]}
+        scenario.onActivity{vm=AgentRuntime.get(it.application)}
         val http=CapriModel::class.java.getDeclaredField("http").apply{isAccessible=true};val original=http.get(vm)
         val chats=mutableListOf<Session>()
         val config=ModelConfig(endpoint=server.url("/").toString(),model="completion-fixture",key="fixture",contextWindow=131072,maxOutput=4096,contextSource="manual")
