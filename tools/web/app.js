@@ -8,7 +8,7 @@ let pending = JSON.parse(sessionStorage.getItem('capri-pending') || 'null');
 let polling = false, dispatching = false, olderCursor = 0, navSignature = '', generation = 0;
 let pollTimer = null, refreshAgain = false;
 const views = new Map();
-let deleteTarget = null, historyTarget = null, historyEditor = null;
+let deleteTarget = null, historyTarget = null, historyEditor = null, historyLoad = 0;
 let entries = new Map(), nodes = new Map();
 // Reading intent survives rendering; proximity alone must never resume following.
 class ChatViewport {
@@ -146,7 +146,7 @@ function attachmentView(body, entry, record) {
   record.cancel=()=>{controller.abort();observer?.disconnect();if(objectUrl)URL.revokeObjectURL(objectUrl);};
   if(isImage){observer=new IntersectionObserver(items=>{if(items.some(x=>x.isIntersecting)){observer.disconnect();void load();}},{root:$('messages'),rootMargin:'300px'});observer.observe(figure);}
 }
-function resetMessages() { historyTarget=null;historyEditor=null;generation++;for(const record of nodes.values()){record.finish?.();record.cancel?.();}entries.clear();nodes.clear();$('entries').replaceChildren();olderCursor=0; }
+function resetMessages() { historyLoad++;historyTarget=null;historyEditor=null;generation++;for(const record of nodes.values()){record.finish?.();record.cancel?.();}entries.clear();nodes.clear();$('entries').replaceChildren();olderCursor=0; }
 function requestRefresh(){clearTimeout(pollTimer);if(polling){refreshAgain=true;return;}void refresh();}
 function switchChat(id){
   if(state){views.set(chat,{state:{...state,entries:[...entries.values()],before:olderCursor},top:$('messages').scrollTop,pinned:viewport.pinned});if(views.size>5)views.delete(views.keys().next().value);}
@@ -317,13 +317,13 @@ function historyLocked(){return !connected||dispatching||!!pending||!state||stat
 function historyButton(label,kind,action){const b=document.createElement('button');b.type='button';b.className='user-'+kind;b.title=label;b.setAttribute('aria-label',label);const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('fill','none');svg.setAttribute('stroke','currentColor');svg.setAttribute('stroke-width','1.6');svg.setAttribute('aria-hidden','true');const paths={copy:['M9 9h11v12H9z','M15 9V3H3v12h6'],retry:['M20 7v5h-5','M20 12a8 8 0 1 0-2 6'],edit:['M15 4l5 5','M4 20l5-1L21 7a3.5 3.5 0 0 0-5-5L4 14z']}[kind];for(const d of paths){const p=document.createElementNS(svg.namespaceURI,'path');p.setAttribute('d',d);svg.append(p);}b.append(svg);b.onclick=action;return b;}
 function historyRequest(entry){return {chat_id:chat,epoch,from_context:state.context_id,history_revision:state.history_revision,entry_id:entry.id};}
 async function copyHistorical(entry){try{const data=await api('web_message',historyRequest(entry));if(data.truncated)throw Error('消息过长，请在手机复制');await navigator.clipboard.writeText(data.text);}catch(e){failure(e.message);}}
-function cancelHistorical(){const target=historyTarget;historyTarget=null;historyEditor=null;if(target){const record=nodes.get(String(target.index));if(record)record.signature='';}if(state)renderMessages({...state,entries:[...entries.values()]},false);controls();}
+function cancelHistorical(){historyLoad++;const target=historyTarget;historyTarget=null;historyEditor=null;if(target){const record=nodes.get(chatEntryKey({id:target.entry_id,index:target.index}));if(record)record.signature='';}if(state)renderMessages({...state,entries:[...entries.values()]},false);controls();}
 async function openHistorical(entry){
-  if(historyLocked())return;const target=historyRequest(entry);
-  try{const data=await api('web_message',target);if(chat!==target.chat_id||epoch!==target.epoch||state.context_id!==target.from_context||state.history_revision!==target.history_revision)throw Error('历史记录已变化，请重新选择消息');if(data.truncated)throw Error('消息过长，请在手机编辑');
-    if(historyTarget)cancelHistorical();const record=nodes.get(String(entry.index));if(!record)return;
+  if(historyLocked())return;const target=historyRequest(entry),load=++historyLoad;
+  try{const data=await api('web_message',target);if(load!==historyLoad)return;if(historyLocked())throw Error('当前状态不允许编辑历史消息，请稍后重试');if(chat!==target.chat_id||epoch!==target.epoch||state.context_id!==target.from_context||state.history_revision!==target.history_revision)throw Error('历史记录已变化，请重新选择消息');if(data.truncated)throw Error('消息过长，请在手机编辑');
+    if(historyTarget)cancelHistorical();const record=nodes.get(chatEntryKey(entry));if(!record)throw Error('消息已不在当前页面，请刷新后重新选择');
     historyTarget={...target,index:entry.index};const form=document.createElement('form');form.className='message-editor';const input=document.createElement('textarea');input.setAttribute('aria-label','编辑历史消息');input.value=data.text;input.maxLength=128000;input.rows=2;const error=document.createElement('small');error.className='history-error';const actions=document.createElement('div');actions.className='history-actions';const cancel=document.createElement('button');cancel.type='button';cancel.textContent='取消';cancel.onclick=cancelHistorical;const send=document.createElement('button');send.textContent='发送';send.className='history-send';actions.append(cancel,send);form.append(input,error,actions);form.onsubmit=e=>{e.preventDefault();submitHistorical('edit');};record.node.replaceChildren(form);record.node.classList.add('editing');historyEditor={input,error,send};controls();input.focus();input.setSelectionRange(input.value.length,input.value.length);const resize=()=>{input.style.height='auto';input.style.height=Math.min(320,Math.max(70,input.scrollHeight))+'px';};input.oninput=resize;resize();
-  }catch(e){failure(e.message);}
+  }catch(e){if(load===historyLoad)failure(e.message);}
 }
 async function retryHistorical(entry){if(historyLocked())return;if(historyTarget)cancelHistorical();historyTarget={...historyRequest(entry),index:entry.index};await submitHistorical('retry');}
 async function submitHistorical(mode){

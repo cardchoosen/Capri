@@ -1,4 +1,5 @@
 'use strict';
+function chatEntryKey(entry){return 'entry:'+(entry.id||entry.index);}
 // The phone supplies process membership from its own timelineRows implementation.
 function groupChatEntries(ordered) {
   const groups=[], processes=new Map();
@@ -11,7 +12,7 @@ function groupChatEntries(ordered) {
     }
     const previous=groups.at(-1);
     if(entry.role==='tool'&&previous?.legacy){previous.items.push(entry);continue;}
-    groups.push({key:'entry:'+(entry.id||entry.index),tool:entry.role==='tool',legacy:entry.role==='tool',items:[entry]});
+    groups.push({key:chatEntryKey(entry),tool:entry.role==='tool',legacy:entry.role==='tool',items:[entry]});
   }
   return groups;
 }
