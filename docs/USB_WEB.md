@@ -98,3 +98,7 @@ python3 tools/capri_web.py --serial DEVICE_SERIAL --open-browser
 ## Markdown 附件预览
 
 Markdown 附件新增“查看”，在当前会话打开可关闭的文档子标签，保留对话阅读位置。支持标题、表格、代码块；预览安全边界、大小限制和定稿交付机制见 [报告定稿交付与 Markdown 预览](ARTIFACT_DELIVERY.zh-CN.md)。
+
+## 会话字号
+
+Web 会话右上角提供“字号”，可选小、标准、大、更大四档。聊天正文、工具记录、代码、表格、附件信息、输入区及 Markdown 文档预览统一按比例调整，保留标题和辅助文字的层级。选择仅保存在当前浏览器本机，刷新和切换会话后沿用；默认标准。此功能不修改手机字号或模型配置。

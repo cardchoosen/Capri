@@ -338,3 +338,18 @@ async function submitHistorical(mode){
   catch(e){if(historyEditor)historyEditor.error.textContent=e.message;failure(e.message);}
   finally{dispatching=false;controls();requestRefresh();}
 }
+
+// One local reading preference for all conversation text, including code and document tabs.
+(() => {
+  const picker=$('chat-font-size'),main=document.querySelector('main');
+  const allowed=['13','15','17','19'];
+  const apply=value=>{picker.value=value;main.style.setProperty('--chat-font-scale',String(Number(value)/15));};
+  let saved='15';try{saved=localStorage.getItem('capri-chat-font-size')||'15';}catch{}
+  apply(allowed.includes(saved)?saved:'15');
+  picker.onchange=()=>{
+    const value=allowed.includes(picker.value)?picker.value:'15';
+    const reading=$('messages').hidden?null:viewport.capture();apply(value);
+    try{localStorage.setItem('capri-chat-font-size',value);}catch{}
+    if(reading)requestAnimationFrame(()=>viewport.restore(reading));
+  };
+})();
