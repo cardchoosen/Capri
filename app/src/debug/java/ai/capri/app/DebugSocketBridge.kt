@@ -50,7 +50,7 @@ internal object DebugSocketBridge {
             val next = reader.read()
             if (next < 0) return null
             if (next == 10) return result.toString()
-            require(result.length < 64000) { "request too large" }
+            require(result.length < 1500000) { "request too large" }
             result.append(next.toChar())
         }
     }
@@ -68,6 +68,8 @@ internal object DebugSocketBridge {
                     val method = request.getString("method")
                     require(method in methods) { "unknown method" }
                     val values = request.optJSONObject("args") ?: JSONObject()
+                    val uploadChunk=method=="web_runtime" && values.optString("action")=="upload_chunk"
+                    require(raw.length <= if(uploadChunk)1500000 else 64000) { "Request exceeds its method limit." }
                     val task = FutureTask {
                         try {
                             val bundle = Bundle().apply {

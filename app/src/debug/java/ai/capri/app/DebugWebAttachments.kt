@@ -45,7 +45,7 @@ internal object DebugWebAttachments {
         }
         val file = vm.store.workspace.file(chat, item.getString("path"))
         val size = item.getLong("size")
-        require(size in 1..Attachments.MAX_BYTES && file.isFile && file.length() == size && file.lastModified() == item.getLong("modified_at")) { "附件已变化或不存在" }
+        require(size in 1..InputAttachments.MAX_BYTES && file.isFile && file.length() == size && file.lastModified() == item.getLong("modified_at")) { "附件已变化或不存在" }
         val offset = args.getInt("offset", 0)
         require(offset.toLong() in 0..size) { "invalid byte offset" }
         val mime = item.optString("mime").takeIf { it in images } ?: "application/octet-stream"

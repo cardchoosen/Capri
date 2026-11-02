@@ -6,6 +6,7 @@ Use capri_web_service.py install for macOS login autostart; Ctrl-C stops a manua
 """
 import argparse
 import base64
+import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -139,7 +140,8 @@ class Bridge:
             raise ValueError('Unsupported operation')
         if method == 'send' and not all(args.get(k) for k in ('chat_id', 'epoch', 'request_id')):
             raise ValueError('Select a chat and refresh before submitting')
-        if len(json.dumps(args, ensure_ascii=False).encode()) > 48000:
+        limit = 1_450_000 if method == 'web_runtime' and args.get('action') == 'upload_chunk' else 48000
+        if len(json.dumps(args, ensure_ascii=False).encode()) > limit:
             raise ValueError('Message too large')
         with self.lock:
             # Android closes idle sockets after 15s. Discard ours before using an expired socket.
@@ -316,9 +318,12 @@ def server_for(bridge, port=DEFAULT_PORT, token=None):
                 self.reply(403, {'error': 'Invalid origin'}); return
             if not secrets.compare_digest(self.headers.get('Authorization', ''), 'Bearer ' + token):
                 self.reply(401, {'error': '请使用启动时输出的访问链接'}); return
-            if self.path not in {'/api/call', '/api/attachment'}:
+            if self.path not in {'/api/call', '/api/attachment', '/api/upload'}:
                 self.reply(404, {'error': 'Not found'}); return
             try:
+                if self.path == '/api/upload':
+                    self.upload_chunk()
+                    return
                 if self.headers.get('Transfer-Encoding') or self.headers.get_content_type() != 'application/json':
                     raise ValueError('Expected JSON')
                 length = int(self.headers.get('Content-Length', '-1'))
@@ -342,6 +347,29 @@ def server_for(bridge, port=DEFAULT_PORT, token=None):
                 self.reply(400, {'error': '请求格式或大小不正确'})
             except (RuntimeError, subprocess.SubprocessError, OSError) as error:
                 self.reply(503, {'error': str(error) if isinstance(error, BridgeError) else 'Connection unavailable; unconfirmed operations are not replayed.', 'code': error.code if isinstance(error, BridgeError) else 'connection_lost'})
+
+        def upload_chunk(self):
+            if self.headers.get('Transfer-Encoding') or self.headers.get_content_type() != 'application/octet-stream':
+                raise ValueError('Expected binary upload')
+            length = int(self.headers.get('Content-Length', '-1'))
+            metadata = self.headers.get('X-Capri-Upload', '')
+            if not 0 < length <= 1_048_576 or len(metadata) > 2048:
+                raise ValueError('Invalid chunk size or metadata')
+            args = json.loads(metadata)
+            if not isinstance(args, dict) or set(args) != {'chat_id', 'epoch', 'id', 'offset', 'sha256'}:
+                raise ValueError('Invalid upload metadata')
+            if (any(not isinstance(args[k], str) or not 0 < len(args[k]) <= 200 for k in ('chat_id', 'epoch', 'id'))
+                    or type(args['offset']) is not int or not 0 <= args['offset'] <= 536_870_912
+                    or not isinstance(args['sha256'], str) or len(args['sha256']) != 64):
+                raise ValueError('Invalid upload scope')
+            self.connection.settimeout(30)
+            data = self.rfile.read(length)
+            if len(data) != length or hashlib.sha256(data).hexdigest() != args['sha256']:
+                raise ValueError('Chunk checksum mismatch')
+            result = bridge.call('web_runtime', {'chat_id': args['chat_id'], 'epoch': args['epoch'],
+                'action': 'upload_chunk', 'payload': {'id': args['id'], 'offset': args['offset'],
+                'sha256': args['sha256'], 'base64': base64.b64encode(data).decode('ascii')}})
+            self.reply(200, result)
 
         def attachment(self, args):
             first = bridge.call('web_attachment', {**args, 'offset': 0})

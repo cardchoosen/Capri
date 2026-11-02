@@ -28,11 +28,14 @@ internal object DebugWebRuntime {
         previews[id] = Preview(chat, file, file.length(), file.lastModified()); return data.put("preview_id", id)
     }
     private val mutation = Mutex()
-    private data class Upload(val chat: String, val kind: String, val file: File, val size: Int, val created: Long = android.os.SystemClock.elapsedRealtime())
+    private data class Upload(val chat: String, val kind: String, val file: File, val size: Int, var touched: Long = android.os.SystemClock.elapsedRealtime(), var committing: Boolean = false)
     private val uploads = java.util.concurrent.ConcurrentHashMap<String, Upload>()
     private suspend fun upload(chat: String, id: String, kind: String, block: suspend (File) -> JSONObject): JSONObject {
         val u = uploads[id] ?: error("Upload unavailable.")
-        require(u.chat == chat && u.kind == kind && u.file.length() == u.size.toLong())
+        synchronized(u) {
+            require(uploads[id]===u && u.chat == chat && u.kind == kind && !u.committing && u.file.length() == u.size.toLong())
+            u.committing=true
+        }
         try { return block(u.file) } finally { u.file.delete(); uploads.remove(id) }
     }
     private fun obj(value: String) = runCatching { JSONObject(value) }.getOrElse { JSONObject().put("message", value.take(24000)) }
@@ -68,24 +71,26 @@ internal object DebugWebRuntime {
                 if (action == "upload_abort") {
                     val u = uploads[p.getString("id")] ?: return@withContext result("Upload already removed.")
                     require(u.chat == chat)
-                    withContext(Dispatchers.IO) { synchronized(u) { u.file.delete(); uploads.remove(p.getString("id")) } }
+                    withContext(Dispatchers.IO) { synchronized(u) { require(!u.committing) { "Input commit is in progress; inspect the selected inputs before removing it." };u.file.delete(); uploads.remove(p.getString("id")) } }
                     return@withContext result("Upload removed.")
                 }
                 if (action == "upload_status") {
                     val u = uploads[p.getString("id")] ?: error("Upload unavailable; refresh selected inputs before starting another upload.")
                     require(u.chat == chat) { "Upload belongs to another chat." }
-                    return@withContext JSONObject().put("size", u.size).put("offset", u.file.length())
+                    return@withContext JSONObject().put("size", u.size).put("offset", u.file.length()).put("chunk_bytes", if(u.kind=="file")UploadChunks.MAX_CHUNK else 24000)
                 }
                 if (action == "upload_chunk") {
                     val u = uploads[p.getString("id")] ?: error("Upload unavailable.")
-                    require(u.chat == chat && android.os.SystemClock.elapsedRealtime() - u.created < 1200000)
+                    require(u.chat == chat && android.os.SystemClock.elapsedRealtime() - u.touched < 1200000)
+                    require(p.getString("base64").length <= 1398104) { "Upload chunk exceeds its encoded limit." }
                     val bytes = android.util.Base64.decode(p.getString("base64"), android.util.Base64.DEFAULT)
-                    require(bytes.size in 1..24000)
+                    require(bytes.size in 1..if(u.kind=="file")UploadChunks.MAX_CHUNK else 24000)
                     val offset = p.getLong("offset")
                     return@withContext withContext(Dispatchers.IO) {
                         synchronized(u) {
-                            require(offset == u.file.length() && offset + bytes.size <= u.size)
-                            u.file.appendBytes(bytes); result(u.file.length())
+                            require(uploads[p.getString("id")]===u && !u.committing) { "Upload no longer accepts chunks." }
+                            val received=UploadChunks.append(u.file,u.size.toLong(),offset,bytes,p.optString("sha256").takeIf{it.isNotBlank()})
+                            u.touched=android.os.SystemClock.elapsedRealtime();result(received)
                         }
                     }
                 }
@@ -189,10 +194,12 @@ internal object DebugWebRuntime {
                 } } finally { RuntimeGate.endFiles(lease) }
             }
             "upload_begin" -> withContext(Dispatchers.IO) {
-                uploads.entries.removeAll { (_, u) -> if (android.os.SystemClock.elapsedRealtime() - u.created > 1200000) { u.file.delete(); true } else false }
+                uploads.entries.removeAll { (_, u) -> synchronized(u) { if (!u.committing && android.os.SystemClock.elapsedRealtime() - u.touched > 1200000) { u.file.delete(); true } else false } }
                 require(uploads.size < 2); val kind = p.getString("kind"); val size = p.getInt("size")
-                require(kind in setOf("ssh", "skill", "file") && size in 1..when(kind) { "ssh" -> 65536; "file" -> 20000000; else -> 10000000 })
+                require(kind in setOf("ssh", "skill", "file") && size in 1..when(kind) { "ssh" -> 65536; "file" -> InputAttachments.MAX_BYTES.toInt(); else -> 10000000 })
                 val directory = File(context.cacheDir, "web-imports").apply { mkdirs() }
+                val reserved=uploads.values.sumOf{2L*it.size-it.file.length()}
+                require(directory.usableSpace >= 2L*size+reserved+16L*1024*1024) { "Insufficient phone storage for upload and import." }
                 if (uploads.isEmpty()) directory.listFiles().orEmpty().forEach { it.delete() }
                 val id = UUID.randomUUID().toString(); val file = File(directory, id); check(file.createNewFile()); android.system.Os.chmod(file.path, 384)
                 uploads[id] = Upload(chat, kind, file, size); result(id)

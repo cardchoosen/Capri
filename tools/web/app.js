@@ -136,7 +136,7 @@ function attachmentView(body, entry, record) {
         body:JSON.stringify({args:{chat_id:sourceChat,epoch:sourceEpoch,entry:entry.index,context_id:sourceContext,entry_id:entry.id}}),signal:controller.signal});
       if(!response.ok){const error=await response.json();throw new Error(error.error||'附件读取失败');}
       const blob=await response.blob();if(controller.signal.aborted)return;
-      if(blob.size!==item.size||blob.size>20000000)throw new Error('附件不完整，请重试');
+      if(blob.size!==item.size||blob.size>(isImage?20000000:536870912))throw new Error('附件不完整，请重试');
       objectUrl=URL.createObjectURL(blob);
       if(image){image.onload=()=>{status.hidden=true;};image.onerror=()=>{status.textContent='图片无法解码，请下载原图查看';};image.src=objectUrl;}
       else{status.textContent='附件已就绪';}

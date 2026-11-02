@@ -273,4 +273,43 @@ class RecoveryEndpointTest(unittest.TestCase):
         self.assertEqual('device_offline',json.loads(body)['code'])
 
 
+
+class BinaryUploadEndpointTest(unittest.TestCase):
+    setUp = WebBoundaryTest.setUp
+    tearDown = WebBoundaryTest.tearDown
+
+    def chunk(self, data=b'x', metadata=None, **overrides):
+        import hashlib
+        args = metadata or {'chat_id': 'chat', 'epoch': 'epoch', 'id': 'upload', 'offset': 0,
+                            'sha256': hashlib.sha256(data).hexdigest()}
+        headers = {'Host': self.origin[7:], 'Origin': self.origin, 'Authorization': 'Bearer ' + self.token,
+                   'Content-Type': 'application/octet-stream', 'X-Capri-Upload': json.dumps(args)}
+        headers.update(overrides)
+        conn = http.client.HTTPConnection('127.0.0.1', self.server.server_port, timeout=5)
+        conn.request('POST', '/api/upload', body=data, headers=headers)
+        response = conn.getresponse(); result = response.status, response.read(); conn.close(); return result
+
+    def test_megabyte_chunk_is_checked_and_forwarded_without_expanding_json_requests(self):
+        import base64
+        data = bytes(range(256)) * 4096
+        self.assertEqual(200, self.chunk(data)[0])
+        method, args = self.bridge.calls[0]
+        self.assertEqual('web_runtime', method)
+        self.assertEqual('upload_chunk', args['action'])
+        self.assertEqual(data, base64.b64decode(args['payload']['base64']))
+        conn = http.client.HTTPConnection('127.0.0.1', self.server.server_port, timeout=5)
+        conn.request('POST', '/api/call', body=json.dumps({'method': 'web_state', 'args': {'text': 'x' * 50000}}),
+                     headers={'Origin': self.origin, 'Authorization': 'Bearer ' + self.token, 'Content-Type': 'application/json'})
+        response = conn.getresponse(); self.assertEqual(400, response.status); response.read(); conn.close()
+        self.assertEqual(1, len(self.bridge.calls))
+
+    def test_upload_requires_origin_token_hash_and_bounded_body(self):
+        for headers, expected in [({'Origin': 'https://evil.example'}, 403), ({'Authorization': ''}, 401),
+                                  ({'Content-Type': 'application/json'}, 400)]:
+            self.assertEqual(expected, self.chunk(**headers)[0])
+        self.assertEqual(400, self.chunk(metadata={'chat_id': 'chat', 'epoch': 'epoch', 'id': 'u',
+                                                 'offset': 0, 'sha256': '0' * 64})[0])
+        self.assertEqual([], self.bridge.calls)
+
+
 if __name__ == '__main__': unittest.main()

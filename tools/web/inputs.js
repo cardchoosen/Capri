@@ -2,6 +2,8 @@
 // Uploads are explicitly staged on the phone. Only the send action submits them to a model.
 (() => {
   const queue=[], previews=new Map();let worker=false,lastScope='';
+  const MAX_FILE=512*1024*1024, CHUNK=1024*1024;
+  const sizeLabel=bytes=>bytes>=1024*1024?(bytes/(1024*1024)).toFixed(1)+' MiB':Math.ceil(bytes/1024)+' KiB';
   const same=owner=>owner.chat===chat&&owner.epoch===epoch;
   const ownerOf=()=>({chat,epoch});
   const rpc=(owner,action,payload={},requestId)=>api('web_runtime',{chat_id:owner.chat,epoch:owner.epoch,action,payload,...(requestId?{request_id:requestId}:{})});
@@ -38,7 +40,7 @@
     const node=document.createElement('div');node.className='input-file'+(local?.error?' error':'');
     if(item.mime?.startsWith('image/')){const image=document.createElement('img');image.alt=item.name;image.loading='lazy';node.append(image);image.dataset.inputId=item.id||'';if(local?.url)image.src=local.url;else void preview(item,owner,image);}
     const info=document.createElement('div');info.className='input-file-info';const name=document.createElement('div');name.className='input-file-name';name.textContent=item.name;name.title=item.name;
-    const detail=document.createElement('small');detail.textContent=local?(local.error||`正在上传 ${local.progress||0}%`):`${Math.ceil(item.size/1024)} KB · 待发送`;
+    const detail=document.createElement('small');detail.textContent=local?(local.error||`${local.progress===100?'正在校验并保存':'正在上传'} ${local.progress||0}% · ${sizeLabel(item.size)}`):`${sizeLabel(item.size)} · 待发送`;
     info.append(name,detail);node.append(info);
     if(local?.error){const retry=document.createElement('button');retry.type='button';retry.textContent='核对 / 重试';retry.onclick=()=>{local.error='';local.waiting=true;void drain();};node.append(retry);}
     const remove=document.createElement('button');remove.type='button';remove.textContent='×';remove.setAttribute('aria-label','移除附件 '+item.name);
@@ -62,18 +64,28 @@
   async function upload(entry){
     const {owner,file}=entry;
     if(!same(owner))throw Error('应用或会话已变化，请先核对当前附件列表。');
+    if(!entry.commit.sent){
     if(!entry.uploadId)entry.uploadId=await operation(owner,'upload_begin',{kind:'file',size:file.size},entry.begin);
+    if(entry.cancelled){await rpc(owner,'upload_abort',{id:entry.uploadId});return;}
     const status=await rpc(owner,'upload_status',{id:entry.uploadId});let offset=status.offset;
     if(status.size!==file.size||!Number.isInteger(offset)||offset<0||offset>file.size)throw Error('上传进度不匹配，请移除后重新选择。');
     while(offset<file.size){
       if(entry.cancelled)return;
-      const bytes=new Uint8Array(await file.slice(offset,offset+24000).arrayBuffer());
-      let binary='';for(const value of bytes)binary+=String.fromCharCode(value);
-      await rpc(owner,'upload_chunk',{id:entry.uploadId,offset,base64:btoa(binary)});
-      offset+=bytes.length;entry.progress=Math.round(offset/file.size*100);redraw();
+      if(!same(owner))throw Error('会话或应用已变化，上传已暂停；返回原会话后可核对进度继续。');
+      const length=Math.min(CHUNK,status.chunk_bytes||24000);
+      const bytes=await file.slice(offset,offset+length).arrayBuffer();
+      const digest=await crypto.subtle.digest('SHA-256',bytes);
+      const sha256=Array.from(new Uint8Array(digest),v=>v.toString(16).padStart(2,'0')).join('');
+      const response=await fetch('/api/upload',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/octet-stream',
+        'X-Capri-Upload':JSON.stringify({chat_id:owner.chat,epoch:owner.epoch,id:entry.uploadId,offset,sha256})},body:bytes,signal:AbortSignal.timeout(60000)});
+      const value=await response.json();if(!response.ok||value.error)throw Error(value.error||'分块传输未确认，请核对进度后继续。');
+      if(value.result!==offset+bytes.byteLength)throw Error('手机接收进度不匹配，请核对后继续。');
+      offset=value.result;entry.progress=Math.floor(offset/file.size*100);redraw();
     }
     if(entry.cancelled)return;
+    }
     const item=await operation(owner,'input_commit',{upload_id:entry.uploadId,name:file.name},entry.commit);
+    if(entry.cancelled){await operation(owner,'input_remove',{id:item.id},receipt());requestRefresh();return;}
     if(entry.url){previews.set(item.id,{url:entry.url});entry.url=null;}
     const index=queue.indexOf(entry);if(index>=0)queue.splice(index,1);
     if(same(owner)){state.input_drafts=[...currentDrafts().filter(x=>x.id!==item.id),item];redraw();}requestRefresh();
@@ -88,7 +100,8 @@
     if(!connected||!state)return failure('请先连接手机并选择会话。');
     const selected=Array.from(files),existing=queue.filter(q=>q.owner.chat===chat&&!q.cancelled).length+currentDrafts().length;
     if(existing+selected.length>8)return failure('每条消息最多选择8个文件。');
-    if(selected.some(file=>file.size<=0||file.size>20000000))return failure('每个文件须非空且不超过20MB。');
+    if(selected.some(file=>file.size<=0||file.size>MAX_FILE))return failure('每个文件须非空且不超过512 MiB。');
+    if(selected.some(file=>file.type.startsWith('image/')&&file.size>20000000))return failure('用于视觉识别的图片仍限制为20 MB；普通文件支持512 MiB。');
     const owner=ownerOf();
     for(const file of selected)queue.push({file,owner,begin:receipt(),commit:receipt(),waiting:true,progress:0,url:file.type.startsWith('image/')?URL.createObjectURL(file):null});
     redraw();void drain();

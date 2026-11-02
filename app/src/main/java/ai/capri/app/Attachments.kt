@@ -11,15 +11,16 @@ internal object Attachments {
         require(!path.contains(":") && !path.contains('\\')) { "仅支持当前会话工作区文件" }
         return path.removePrefix("/workspace/")
     }
-    fun inspect(workspace: Workspace, chat: String, path: String, caption: String): JSONObject {
+    fun inspect(workspace: Workspace, chat: String, path: String, caption: String, maxBytes: Long = MAX_BYTES): JSONObject {
         val relative = relativePath(path)
         val file = workspace.file(chat, relative)
-        require(file.isFile && file.length() in 1..MAX_BYTES) { "文件不存在、为空或超过20MB" }
+        require(file.isFile && file.length() in 1..maxBytes) { "File is missing, empty or exceeds the permitted size." }
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(file.path, bounds)
         val image = bounds.outMimeType in setOf("image/png", "image/jpeg", "image/gif", "image/webp")
         val extension = file.extension.lowercase()
         require(image || extension !in setOf("png", "jpg", "jpeg", "gif", "webp")) { "图片内容无法识别，请检查生成结果" }
+        if (image) require(file.length() <= MAX_BYTES) { "Image inputs must not exceed 20 MB." }
         if (image) require(bounds.outWidth > 0 && bounds.outHeight > 0 && bounds.outWidth.toLong() * bounds.outHeight <= 32_000_000L) { "图片尺寸无效或超过3200万像素" }
         return JSONObject().put("path", file.relativeTo(workspace.folder(chat, "workspace").canonicalFile).path)
             .put("name", file.name).put("caption", caption.take(240)).put("size", file.length()).put("modified_at", file.lastModified())
