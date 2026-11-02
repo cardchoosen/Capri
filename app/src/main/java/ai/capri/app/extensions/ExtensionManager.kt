@@ -123,7 +123,7 @@ internal class ExtensionManager(private val context: Context, private val runtim
                 if (destination.exists()) RuntimeFiles.delete(destination)
                 check(skill.directory.copyRecursively(destination))
                 val instructions = File(skill.directory, "SKILL.md").readText()
-                JSONObject().put("id", skill.id).put("category", store.category(skill).id).put("instructions", instructions.take(16000)).put("instructions_truncated", instructions.length > 16000).put("next_offset", minOf(16000, instructions.length)).put("resource_base", "/workspace/.capri/skills/${skill.id}").put("note", "脚本在当前会话执行；依赖按实际任务准备；技能不新增权限、不改写核心档案").toString()
+                JSONObject().put("id", skill.id).put("category", store.category(skill).id).put("revision",SkillVersions.revision(skill.directory)).put("source","installed").put("instructions", instructions.take(16000)).put("instructions_truncated", instructions.length > 16000).put("next_offset", minOf(16000, instructions.length)).put("resource_base", "/workspace/.capri/skills/${skill.id}").put("note", "脚本在当前会话执行；依赖按实际任务准备；技能不新增权限、不改写核心档案").toString()
             }
             "read_resource" -> store.withSkill(args.getString("id")) { skill ->
                 val file = ExtensionPolicy.relative(skill.directory, args.getString("path"))

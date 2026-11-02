@@ -23,6 +23,10 @@ internal fun toolLabel(name: String, args: JSONObject?): String = when (name) {
     "knowledge" -> "Manage knowledge"
     "context_history" -> "Read current chat history"
     "conversation_history" -> "Read all chat histories"
+    "task_experience" -> when(args?.optString("action")) {
+        "draft" -> "Draft reusable Skill"; "feedback" -> "Record Skill feedback"; "restore" -> "Restore Skill revision"
+        "revisions", "compare" -> "Inspect Skill revisions"; else -> "Review task experience"
+    }
     "personal_memory" -> "Recall personal memories"
     "android" -> args?.optString("action")?.let { ai.capri.app.nativebridge.NativeCatalog.find(it)?.title } ?: "Android tools"
     "terminal" -> when (args?.optString("action")) {

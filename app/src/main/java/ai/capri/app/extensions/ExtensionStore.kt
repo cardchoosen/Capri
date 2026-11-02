@@ -86,7 +86,7 @@ internal object SkillParser {
 }
 
 /** Global definitions; per-chat activation is persisted separately. No secret material in config/list results. */
-internal class ExtensionStore(private val context: Context) {
+internal class ExtensionStore(private val context: Context) : SkillHistory {
     val root = File(context.filesDir, "extensions").apply { mkdirs() }
     private val prefs = context.getSharedPreferences("extensions", Context.MODE_PRIVATE)
     private val secretPrefs = context.getSharedPreferences("extension-secrets", Context.MODE_PRIVATE)
@@ -242,7 +242,7 @@ internal class ExtensionStore(private val context: Context) {
     fun enable(skill: SkillInfo, value: Boolean) { prefs.edit().putBoolean("skill:${skill.id}", value).apply() }
     fun skill(id: String) = skills().firstOrNull { it.id == id && enabled(it) } ?: error("技能不存在或已停用")
     fun <T> withSkill(id: String, block: (SkillInfo) -> T): T = synchronized(lock) { block(skill(id)) }
-    fun removeSkill(id: String) = synchronized(lock) { val s = skills().first { it.id == id }; require(!s.builtin) { "内置技能可停用，不可删除" }; ai.capri.app.RuntimeFiles.delete(s.directory); prefs.edit().remove("skill-category:$id").apply() }
+    fun removeSkill(id: String) = synchronized(lock) { val s = skills().first { it.id == id }; require(!s.builtin) { "内置技能可停用，不可删除" }; ai.capri.app.RuntimeFiles.delete(s.directory); ai.capri.app.RuntimeFiles.delete(File(root,"skill-versions/$id")); ai.capri.app.RuntimeFiles.delete(File(context.filesDir,"skill-feedback/$id.json")); prefs.edit().remove("skill-category:$id").apply() }
     fun importSkill(input: InputStream, zip: Boolean, replace: Boolean = false): String = synchronized(lock) {
         val stage = File(root, "import-${UUID.randomUUID()}").apply { mkdirs() }
         try {
@@ -304,6 +304,9 @@ internal class ExtensionStore(private val context: Context) {
             val normalized = File(validation, name)
             check(source.renameTo(normalized)) { "无法准备技能目录" }
             SkillParser.parse(normalized)
+            val versions=SkillVersions(File(root,"skill-versions"))
+            val parent=if(target.exists()) versions.capture(name,target,"pre_update") else ""
+            versions.capture(name,normalized,"validated_import",parent)
             if (target.exists()) check(target.renameTo(backup)) { "无法暂存原技能" }
             if (!normalized.renameTo(target)) {
                 if (backup.exists()) check(backup.renameTo(target)) { "技能恢复失败" }
@@ -315,6 +318,15 @@ internal class ExtensionStore(private val context: Context) {
             if (backup.exists() && !target.exists()) backup.renameTo(target)
             if (!backup.exists() || target.exists()) ai.capri.app.RuntimeFiles.delete(validation)
         }
+    }
+    override fun skillVersions(id: String): JSONArray = synchronized(lock) { val current=skills().firstOrNull { it.id==id } ?: error("Skill not found.");SkillVersions(File(root,"skill-versions")).list(id,SkillVersions.revision(current.directory)) }
+    override fun compareSkill(id: String,before: String,after: String): JSONObject = synchronized(lock) { require(skills().any { it.id==id }) { "Skill not found." };SkillVersions(File(root,"skill-versions")).compare(id,before,after) }
+    override fun restoreSkill(id: String,revision: String,expected: String): String = synchronized(lock) {
+        val current=skills().firstOrNull { it.id==id } ?: error("Skill not found.")
+        require(!current.builtin) { "Built-in Skills are APK-managed and cannot be restored through user revisions." }
+        SkillVersions.requireExpected(current.directory,expected)
+        val archive=SkillVersions(File(root,"skill-versions"))
+        importSkillDirectory(archive.source(id,revision),replace=true)
     }
     fun setActive(chat: String, id: String, active: Boolean) { prefs.edit().putBoolean("active:$chat:$id", active).apply() }
     fun clearChat(chat: String) {

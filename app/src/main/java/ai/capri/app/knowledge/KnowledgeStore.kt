@@ -31,32 +31,51 @@ internal class KnowledgeStore(
             it.optString("scope") == chat && it.optString("kind") in setOf("personal_note", "episode")
         }
     }
-    @Synchronized internal fun savePersonal(record: JSONObject) {
+    @Synchronized internal fun savePersonal(record: JSONObject,visibleIds: Set<String>? = null) {
         require(record.getString("kind") in setOf("personal_note", "episode"))
         val data = load()
+        for(i in 0 until data.length()) { val item=data.getJSONObject(i);if(item.optString("kind")=="personal_note" && item.optString("state","active")=="active" && item.optLong("expires_at") in 1..System.currentTimeMillis())item.put("state","expired") }
+        if(visibleIds!=null)for(i in 0 until data.length()) { val item=data.getJSONObject(i);if(item.optString("scope")==record.getString("scope") && item.optString("kind")=="personal_note" && item.optString("state","active")=="active" && item.getString("id") !in visibleIds)item.put("state","source_revoked") }
+        val beforeNotes=(0 until data.length()).map { data.getJSONObject(it) }.filter { it.optString("kind")=="personal_note" && it.optString("scope")==record.getString("scope") && it.optString("state","active")=="active" }
+        val beforeChars=beforeNotes.sumOf { it.optString("text").length }
         val index = (0 until data.length()).firstOrNull { data.getJSONObject(it).getString("id") == record.getString("id") }
+        val previous=index?.let { data.getJSONObject(it) }
+        fun userIds(value: JSONObject): Set<String> = value.optJSONArray("sources")?.let { a -> (0 until a.length()).map { a.getJSONObject(it) }.filter { it.optString("role")=="user" }.map { it.optString("entry_id") }.filter { it.isNotBlank() }.toSet() } ?: emptySet()
+        if(record.getString("kind")=="personal_note") {
+            val blocked=if(record.optString("state")=="forgotten")userIds(record) else previous?.let { userIds(it)-userIds(record) } ?: emptySet()
+            if(blocked.isNotEmpty())for(i in 0 until data.length()) { val episode=data.getJSONObject(i)
+                if(episode.optString("scope")==record.getString("scope") && episode.optString("kind")=="episode" && episode.optString("state","active")=="active" && userIds(episode).any { it in blocked })
+                    episode.put("state",if(record.optString("state")=="forgotten")"forgotten_source" else "superseded_source")
+            }
+        } else if(previous?.optString("state","active")!="active" && previous!=null)record.put("state",previous.getString("state"))
         if (index == null) data.put(record) else {
-            require(data.getJSONObject(index).optString("kind") == record.getString("kind") &&
-                data.getJSONObject(index).optString("scope") == record.getString("scope"))
+            require(previous!!.optString("kind") == record.getString("kind") && previous.optString("scope") == record.getString("scope"))
             data.put(index, record)
         }
+        val notes=(0 until data.length()).map { data.getJSONObject(it) }.filter { it.optString("kind")=="personal_note" && it.optString("scope")==record.getString("scope") && it.optString("state","active")=="active" }
+        require(record.optString("kind")!="personal_note" || record.optString("state")=="forgotten" || notes.size <= MemoryPolicy.NOTE_COUNT && (notes.sumOf { it.optString("text").length } <= MemoryPolicy.NOTE_CHARS || notes.sumOf { it.optString("text").length } < beforeChars)) { "Personal memory budget reached (200 notes / 32000 characters); merge or forget obsolete notes." }
+        val key=record.optString("key")
+        require(key.isBlank() || record.optString("state")=="forgotten" || notes.count { it.optString("key")==key }<=1) { "Memory topic already exists; update its current id." }
+        // Bound tombstones as well, without evicting active notes.
+        val retired=(0 until data.length()).filter { data.getJSONObject(it).optString("kind")=="personal_note" && data.getJSONObject(it).optString("state") in setOf("forgotten","expired","source_revoked") }.sortedByDescending { data.getJSONObject(it).optLong("updated") }.drop(200).toSet()
         // Bound the recall index; original messages remain searchable through conversation_history.
         val episodes = (0 until data.length()).filter { data.getJSONObject(it).optString("kind") == "episode" }
             .sortedByDescending { data.getJSONObject(it).optLong("updated") }.drop(1000).toSet()
-        save(JSONArray((0 until data.length()).filterNot { it in episodes }.map { data.getJSONObject(it) }))
+        save(JSONArray((0 until data.length()).filterNot { it in episodes || it in retired }.map { data.getJSONObject(it) }))
     }
     private fun visible(record: JSONObject, chat: String) = record.getString("scope") == "global" || record.getString("scope") == chat
     @Synchronized fun records(chat: String): List<JSONObject> = load().let { data ->
         (0 until data.length()).map { data.getJSONObject(it) }.filter { visible(it, chat) && it.optString("kind") in setOf("memory", "document") }
     }
-    @Synchronized fun putMemory(chat: String, text: String, source: String, global: Boolean = false, id: String = ""): JSONObject {
+    @Synchronized fun putMemory(chat: String, text: String, source: String, global: Boolean = false, id: String = "", category: String = "task_note"): JSONObject {
+        require(category in MemoryPolicy.knowledge) { "Use environment for installation facts, task_state for progress, and task_experience for procedures." }
         require(text.isNotBlank() && text.length <= 4000) { "记忆须为1–4000字符" }
         require(source.isNotBlank() && source.length <= 500) { "记忆必须附带来源" }
         require(!Regex("(?i)(sk-[a-z0-9]{16,}|-----BEGIN .*PRIVATE KEY|bearer\\s+[a-z0-9._-]{16,})").containsMatchIn(text)) { "请勿把密钥写入记忆" }
         val data = load()
         val existing = if (id.isBlank()) null else (0 until data.length()).map { data.getJSONObject(it) }.firstOrNull { it.getString("id") == id }
         if (id.isNotBlank()) require(existing != null && visible(existing, chat) && existing.getString("kind") == "memory") { "记忆不存在或不属于可管理范围" }
-        val record = JSONObject().put("id", existing?.getString("id") ?: UUID.randomUUID().toString()).put("kind", "memory")
+        val record = JSONObject().put("id", existing?.getString("id") ?: UUID.randomUUID().toString()).put("kind", "memory").put("category",category)
             .put("scope", if (global) "global" else chat).put("origin_chat", chat).put("title", text.take(60)).put("text", text)
             .put("source", source).put("enabled", existing?.optBoolean("enabled", true) ?: true).put("updated", System.currentTimeMillis())
         if (existing == null) { require((0 until data.length()).count { data.getJSONObject(it).optString("kind") in setOf("memory", "document") } < 300) { "知识条目上限300，请先清理" }; data.put(record) }
@@ -109,7 +128,7 @@ internal class KnowledgeStore(
             chunks.forEachIndexed { index, chunk ->
                 val score = TextIndex.score(query, record.getString("title") + "\n" + chunk.getString("text"))
                 if (score > 0) hits += score to JSONObject().put("citation", "${record.getString("id")}:${index + 1}")
-                    .put("id", record.getString("id")).put("kind", record.getString("kind")).put("scope", if (record.getString("scope") == "global") "global" else "chat")
+                    .put("id", record.getString("id")).put("kind", record.getString("kind")).put("category",record.optString("category","legacy_unclassified")).put("scope", if (record.getString("scope") == "global") "global" else "chat")
                     .put("source", record.getString("source")).put("sha256", record.optString("sha256")).put("updated", record.getLong("updated"))
                     .put("line_start", chunk.getInt("start")).put("line_end", chunk.getInt("end")).put("text", chunk.getString("text"))
             }

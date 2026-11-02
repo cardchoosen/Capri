@@ -9,7 +9,7 @@ internal object CompletionEvidence {
     private val reads = setOf("read_file", "list_files", "search_files", "project", "coding_reference", "coding_diagnostics", "web_search", "web_read", "context_history", "conversation_history", "personal_memory", "knowledge")
     private fun administrative(call: JSONObject): Boolean {
         val f=runCatching { ToolRegistry.function(call) }.getOrDefault(call.getJSONObject("function"))
-        return f.optString("name") in bookkeeping || f.optString("name")=="program_run" &&
+        return f.optString("name")=="task_experience" && runCatching { JSONObject(f.optString("arguments")).optString("action") in setOf("list","read","feedback","feedback_history","revisions","compare") }.getOrDefault(false) || f.optString("name") in bookkeeping || f.optString("name")=="program_run" &&
             runCatching { JSONObject(f.optString("arguments")).optString("action") in setOf("status","reset","read") }.getOrDefault(false)
     }
     private fun prior(messages: JSONArray): Set<String> = TurnState.snapshot(messages).optJSONArray("prior_calls")?.let { a -> (0 until a.length()).map { a.getString(it) }.toSet() } ?: emptySet()
