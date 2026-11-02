@@ -6,7 +6,9 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import android.widget.Toast
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -34,11 +36,19 @@ import kotlinx.coroutines.withContext
     val key=record?.optString("key")?:return
     LaunchedEffect(key){selected="";offset=0}
     if(hidden==key)return
-    val submitted=record.optString("state")=="submitted";val busy=hub.running(chat,key)
-    AlertDialog(onDismissRequest={if(!busy)hidden=key},title={Text(if(submitted)"公开贡献已提交" else "是否公开贡献这个 Skill？")},text={
+    val context=LocalContext.current
+    if(record.optString("state")=="submitted") {
+        // A durable PR receipt ends approval; it must not require another modal acknowledgement.
+        LaunchedEffect(chat,key) {
+            hub.acknowledge(chat,key)
+            Toast.makeText(context,"公开贡献已提交 PR #${record.optInt("number")}，链接已保留在贡献回执中。",Toast.LENGTH_LONG).show()
+        }
+        return
+    }
+    val busy=hub.running(chat,key)
+    AlertDialog(onDismissRequest={if(!busy)hidden=key},title={Text("是否公开贡献这个 Skill？")},text={
         Column(Modifier.heightIn(max=440.dp).verticalScroll(rememberScrollState())) {
             Text("${record.optString("id")} → ${HubGitHub.REPOSITORY}")
-            if(submitted)SelectionContainer{Text(record.optString("pull_request"))}else {
                 Text("确认后，下列文件将通过你的 GitHub 账号公开上传并提交 PR，按 MIT 许可贡献。审核合并前也已公开。不会上传聊天记录；请核对文件是否包含私人内容。")
                 val files=record.getJSONObject("manifest").getJSONArray("files")
                 for(i in 0 until files.length()) {val file=files.getJSONObject(i);TextButton(onClick={selected=file.getString("path");offset=0}){Text("${file.getString("path")} · ${file.getInt("bytes")} 字节")}}
@@ -50,9 +60,8 @@ import kotlinx.coroutines.withContext
                 }
                 if(record.optString("state") in setOf("failed","approved","publishing") && !busy)Text("提交尚未确认。请检查 GitHub 账号及权限后重试；会先核对已有分支和 PR。")
                 if(busy)Text("正在提交，请稍候…")
-            }
         }
-    },confirmButton={TextButton(enabled=!busy,onClick={if(submitted){hub.acknowledge(chat,key);hidden=key}else hub.approve(chat,key)}){Text(if(submitted)"知道了" else "确认公开并提交 PR")}},dismissButton={
-        if(!submitted)Row { TextButton(enabled=!busy,onClick={hub.decline(chat,key);hidden=key}){Text("仅本机使用")};TextButton(enabled=!busy,onClick={hidden=key}){Text("稍后")}}
+    },confirmButton={TextButton(enabled=!busy,onClick={hub.approve(chat,key)}){Text("确认公开并提交 PR")}},dismissButton={
+        Row { TextButton(enabled=!busy,onClick={hub.decline(chat,key);hidden=key}){Text("仅本机使用")};TextButton(enabled=!busy,onClick={hidden=key}){Text("稍后")}}
     })
 }
