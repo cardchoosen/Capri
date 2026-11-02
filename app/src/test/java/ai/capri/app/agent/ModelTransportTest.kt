@@ -18,6 +18,41 @@ import java.nio.file.Files
 import java.util.concurrent.TimeUnit
 
 class ModelTransportTest {
+    @Test fun parentAndDelegatedRequestsShareGlobalAdmissionCapacity()=runBlocking<Unit> {
+        val certificate=HeldCertificate.Builder().commonName("localhost").addSubjectAlternativeName("localhost").build()
+        val serverCert=HandshakeCertificates.Builder().heldCertificate(certificate).build()
+        val clientCert=HandshakeCertificates.Builder().addTrustedCertificate(certificate.certificate).build()
+        val release=java.util.concurrent.CountDownLatch(1)
+        val server=MockWebServer().apply {
+            useHttps(serverCert.sslSocketFactory(),false)
+            dispatcher=object:okhttp3.mockwebserver.Dispatcher() {
+                override fun dispatch(request:okhttp3.mockwebserver.RecordedRequest):MockResponse {
+                    release.await(5,TimeUnit.SECONDS)
+                    return MockResponse().setBody("{\"choices\":[{\"finish_reason\":\"stop\",\"message\":{\"role\":\"assistant\",\"content\":\"done\"}}]}")
+                }
+            };start()
+        }
+        val root=Files.createTempDirectory("capri-model-admission").toFile()
+        try {
+            val client=OkHttpClient.Builder().sslSocketFactory(clientCert.sslSocketFactory(),clientCert.trustManager).build()
+            val config=ModelConfig(endpoint=server.url("/v1").toString(),model="fixture",key="fixture-secret")
+            val trace=PerformanceTrace(java.io.File(root,"trace.jsonl"));val entered=java.util.concurrent.atomic.AtomicInteger()
+            coroutineScope {
+                val requests=(1..6).map { attempt -> async {
+                    entered.incrementAndGet()
+                    ModelTransport(client).request(config,JSONArray().put(JSONObject().put("role","user").put("content","bounded input")),JSONArray(),128,trace,attempt,false,
+                        if(attempt%2==0)ModelRequests.Purpose.DELEGATION else ModelRequests.Purpose.EXECUTION)
+                } }
+                try {
+                    withTimeout(4000) { while(entered.get()<6 || server.requestCount<3)delay(5) }
+                    delay(100);assertEquals(3,server.requestCount)
+                } finally { release.countDown() }
+                requests.awaitAll()
+            }
+            assertEquals(6,server.requestCount)
+            assertEquals(6,java.io.File(root,"trace.jsonl").readLines().count { JSONObject(it).optString("stage")=="model_admission" })
+        } finally { release.countDown();server.shutdown();root.deleteRecursively() }
+    }
     @Test fun httpsInferenceUsesOneTransportAndContextRejectionDoesNotRetry() = runBlocking {
         val certificate = HeldCertificate.Builder().commonName("localhost").addSubjectAlternativeName("localhost").build()
         val serverCert = HandshakeCertificates.Builder().heldCertificate(certificate).build()

@@ -36,6 +36,13 @@ internal class WorkspaceFileTools(private val workspace: Workspace,
     private class Failure(val code: String, message: String, val details: JSONObject = JSONObject()) : Exception(message)
     private data class TextFile(val bytes: ByteArray, val text: String, val sha: String)
     private val seenRules = ConcurrentHashMap<String, MutableSet<String>>()
+    internal fun <T> withWorkspaceLock(chat: String,write: Boolean=false,block: (File)->T): T {
+        val root=File(workspace.sessionDirectory(chat),"workspace").absoluteFile
+        for(directory in listOf(root.parentFile!!.parentFile!!,root.parentFile!!,root))rejectLink(directory)
+        Files.createDirectories(root.toPath())
+        val lock=locks.getOrPut(root.path) { ReentrantReadWriteLock() }
+        return (if(write)lock.writeLock() else lock.readLock()).withLock { block(root) }
+    }
     fun beginTurn(chat: String) { seenRules.remove(chat) }
     private data class Scan(val files: List<File>, val truncated: Boolean)
     companion object {
@@ -396,6 +403,7 @@ internal class WorkspaceFileTools(private val workspace: Workspace,
     private fun write(root: File, args: JSONObject, check: () -> Unit,mutation:Mutation): JSONObject {
         val file = path(root, args.getString("path"))
         val previous = if (Files.exists(file.toPath(), LinkOption.NOFOLLOW_LINKS)) load(file, check) else null
+        if(args.optBoolean("expected_absent") && previous!=null)throw Failure("conflict","The target exists; an absent-version write cannot replace it.")
         expect(args, previous?.sha)
         val bytes = encode(args.getString("content"))
         require(bytes.size <= 1_000_000) { "content exceeds 1000000 UTF-8 bytes." }

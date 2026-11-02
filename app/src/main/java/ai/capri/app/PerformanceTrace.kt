@@ -5,12 +5,12 @@ import java.io.File
 
 /** Numeric operational metadata only. Never pass prompts, arguments, outputs, URLs or exception text. */
 internal class PerformanceTrace(private val file: File, private val clock: () -> Long = System::nanoTime) {
-    enum class Stage { TURN, FINAL_REPLY, MODEL_REQUEST, MODEL_PREPARE, MODEL_QUEUE, MODEL_HEADERS, MODEL_BODY, MODEL_PARSE, MODEL_BACKOFF, TOOL, PREPARE, EXECUTE, STEP, ENVIRONMENT, TURN_PREPARE, CONTEXT_PREPARE, DELIVERY_PREPARE }
+    enum class Stage { TURN, FINAL_REPLY, MODEL_REQUEST, MODEL_ADMISSION, MODEL_PREPARE, MODEL_QUEUE, MODEL_HEADERS, MODEL_BODY, MODEL_PARSE, MODEL_BACKOFF, TOOL, PREPARE, EXECUTE, STEP, ENVIRONMENT, TURN_PREPARE, CONTEXT_PREPARE, DELIVERY_PREPARE }
     enum class Status { STARTED, OK, RETURNED, ERROR, CANCELLED, TIMEOUT, BUDGET, INCOMPLETE, WAITING }
     private val origin = clock()
     private var closed = false
     companion object {
-        private val tools = setOf("ask_user", "task_state", "tool_search", "tool_describe", "tool_invoke", "program_run", "task_experience", "coding_diagnostics", "coding_reference", "coding_restore", "extensions", "project", "apply_patch", "search_files", "edit_file", "model_info", "profile_search", "list_files", "read_file", "write_file", "send_file", "python_run", "environment", "environment_check", "python_env", "android", "terminal", "browser")
+        private val tools = setOf("ask_user", "task_state", "tool_search", "tool_describe", "tool_invoke", "program_run", "task_experience", "agent_delegate", "coding_diagnostics", "coding_reference", "coding_restore", "extensions", "project", "apply_patch", "search_files", "edit_file", "model_info", "profile_search", "list_files", "read_file", "write_file", "send_file", "python_run", "environment", "environment_check", "python_env", "android", "terminal", "browser")
         private val usageFields = setOf("prompt_tokens", "completion_tokens", "total_tokens", "prompt_cache_hit_tokens", "prompt_cache_miss_tokens")
         fun now() = System.nanoTime()
         fun elapsed(start: Long) = ((System.nanoTime() - start) / 1_000_000).coerceAtLeast(0)

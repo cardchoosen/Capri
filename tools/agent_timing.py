@@ -8,9 +8,9 @@ from collections import Counter, defaultdict
 import json
 import math
 
-PURPOSES = {'execution', 'compression', 'delivery'}
-PRIORITY = ['delivery', 'compression', 'execution_model', 'unattributed_model', 'retry_wait', 'tools', 'preparation']
-NESTED = {'model_request', 'model_prepare', 'model_queue', 'model_headers', 'model_body', 'model_parse', 'model_backoff', 'turn_prepare', 'context_prepare', 'delivery_prepare', 'final_reply', 'tool'}
+PURPOSES = {'execution', 'compression', 'delivery', 'delegation'}
+PRIORITY = ['delivery', 'compression', 'execution_model', 'delegation_model', 'unattributed_model', 'retry_wait', 'tools', 'preparation']
+NESTED = {'model_request', 'model_admission', 'model_prepare', 'model_queue', 'model_headers', 'model_body', 'model_parse', 'model_backoff', 'turn_prepare', 'context_prepare', 'delivery_prepare', 'final_reply', 'tool'}
 
 
 def number(value):
@@ -65,7 +65,7 @@ def summarize(events):
         if stage == 'final_reply':
             category = 'delivery'
         elif stage == 'model_request':
-            category = {'execution': 'execution_model', 'compression': 'compression', 'delivery': 'delivery'}.get(purpose, 'unattributed_model')
+            category = {'execution': 'execution_model', 'compression': 'compression', 'delivery': 'delivery', 'delegation': 'delegation_model'}.get(purpose, 'unattributed_model')
         elif stage == 'model_backoff':
             category = 'retry_wait'
         elif stage == 'tool':

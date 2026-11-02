@@ -104,3 +104,7 @@ Local runtime launchers now share a bounded process ledger with durable intents/
 ## Memory and Skill experience
 
 Typed knowledge ownership, bounded sourced personal notes, topic corrections, expiry/forgetting and source revocation now feed separate current memory snapshots and query deltas. Explicit past-event requests trigger bounded local history retrieval with stable source IDs. `task_experience` captures positive task evidence, authors reviewable English workspace drafts and records versioned Skill feedback without inferring causality or installing automatically. Managed Skill imports retain resource snapshots for comparison and content-guarded restoration; legacy and progressive loading share the observation path. See [implementation and verification limits](AGENT_MEMORY_SKILLS.zh-CN.md).
+
+## Bounded delegation
+
+`agent_delegate` runs selected independent investigation/review or disjoint coding proposals with isolated declared-file snapshots and explicit evidence. Children share the parent request allowance and a retry-inclusive token-credit ledger; two child slots and three model-transport slots bound application concurrency. They cannot inherit phone, shell, web, accounts, MCP, memory or delegation. Structured receipts and guarded parent-file merges preserve source/rule versions and unknown-effect recovery; proposals are not goal verification. See [implementation, scripted single/serial/parallel comparison and verification limits](AGENT_DELEGATION.zh-CN.md).

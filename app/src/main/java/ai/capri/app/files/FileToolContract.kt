@@ -30,7 +30,7 @@ internal object FileToolContract {
             "start_column" to integer("Unicode code points to skip in the first line; use next_column when continuing a long line.", 0, 10000000, 0),
             "max_lines" to integer("Maximum physical lines to return; long output may end earlier.", 1, 1000, 200),
             "expected_sha256" to version())
-        "write_file" -> linkedMapOf("path" to path(true), "content" to text("Complete UTF-8 text, at most 1000000 bytes. Existing files are replaced; prefer edit_file for small changes.", 1000000, true), "expected_sha256" to version())
+        "write_file" -> linkedMapOf("expected_absent" to flag("Require the target to be absent; fails without replacing an existing file. Useful for guarded creation.",false), "path" to path(true), "content" to text("Complete UTF-8 text, at most 1000000 bytes. Existing files are replaced; prefer edit_file for small changes.", 1000000, true), "expected_sha256" to version())
         "edit_file" -> linkedMapOf("path" to path(true),
             "old_text" to Field(text("Exact, nonempty text to replace. Include enough context for a unique match.", 128000, true).schema.put("minLength", 1), true),
             "new_text" to text("Replacement text. An empty string removes old_text.", 128000, true),

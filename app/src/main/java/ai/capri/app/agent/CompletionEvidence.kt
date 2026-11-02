@@ -9,7 +9,7 @@ internal object CompletionEvidence {
     private val reads = setOf("read_file", "list_files", "search_files", "project", "coding_reference", "coding_diagnostics", "web_search", "web_read", "context_history", "conversation_history", "personal_memory", "knowledge")
     private fun administrative(call: JSONObject): Boolean {
         val f=runCatching { ToolRegistry.function(call) }.getOrDefault(call.getJSONObject("function"))
-        return f.optString("name")=="task_experience" && runCatching { JSONObject(f.optString("arguments")).optString("action") in setOf("list","read","feedback","feedback_history","revisions","compare") }.getOrDefault(false) || f.optString("name") in bookkeeping || f.optString("name")=="program_run" &&
+        return f.optString("name")=="agent_delegate" && runCatching { JSONObject(f.optString("arguments")).optString("action") in setOf("list","read","discard") }.getOrDefault(false) || f.optString("name")=="task_experience" && runCatching { JSONObject(f.optString("arguments")).optString("action") in setOf("list","read","feedback","feedback_history","revisions","compare") }.getOrDefault(false) || f.optString("name") in bookkeeping || f.optString("name")=="program_run" &&
             runCatching { JSONObject(f.optString("arguments")).optString("action") in setOf("status","reset","read") }.getOrDefault(false)
     }
     private fun prior(messages: JSONArray): Set<String> = TurnState.snapshot(messages).optJSONArray("prior_calls")?.let { a -> (0 until a.length()).map { a.getString(it) }.toSet() } ?: emptySet()
@@ -33,7 +33,7 @@ internal object CompletionEvidence {
         if (text.startsWith("exit=")) return !text.startsWith("exit=0\n") && text != "exit=0"
         val root = runCatching { JSONObject(text) }.getOrNull() ?: return text.startsWith("工具失败")
         fun bad(obj: JSONObject, depth: Int): Boolean {
-            if (obj.optBoolean("result_incomplete") || obj.optBoolean("isError") || obj.optString("outcome") == "unknown") return true
+            if (obj.optBoolean("has_unmerged_proposals") || obj.optBoolean("result_incomplete") || obj.optBoolean("isError") || obj.optString("outcome") == "unknown") return true
             if (obj.optString("status") in setOf("tool_error", "mcp_call_failed", "unavailable", "not_found", "error", "partial", "partial_failure", "project_rules_required", "timeout", "failed", "permission_required", "permission_denied", "execution_failed", "preparation_failed", "invalid_argument", "cancelled", "not_executed", "awaiting_user") || obj.optString("state") in setOf("starting", "running", "pending", "failed", "cancelled", "timeout", "interrupted", "cancel_requested", "launch_failed", "output_limit")) return true
             if (obj.has("success") && obj.opt("success") == false || obj.has("exit_code") && !obj.isNull("exit_code") && obj.optInt("exit_code", -1) != 0 || obj.has("error") && !obj.isNull("error")) return true
             return depth < 3 && listOf("data", "command", "result", "process").any { obj.optJSONObject(it)?.let { child -> bad(child, depth + 1) } == true }

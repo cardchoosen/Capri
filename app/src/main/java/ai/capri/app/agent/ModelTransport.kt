@@ -8,6 +8,8 @@ import ai.capri.app.model.ModelContextRejected
 import ai.capri.app.model.ModelWire
 import ai.capri.app.model.ModelApi
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import okhttp3.*
@@ -19,6 +21,7 @@ import java.io.IOException
 
 /** One cancellable transport for execution, compaction and final delivery; never retries tools. */
 internal class ModelTransport(private val client: OkHttpClient, private val hydrate: (JSONArray) -> JSONArray = { it }) {
+    companion object { private val admission=Semaphore(3) }
     private data class Timing(val trace: PerformanceTrace, val attempt: Int, val purpose: ModelRequests.Purpose, val queuedAt: Long)
     /** Application interceptor starts on the dispatcher worker, before DNS/connect work. */
     class QueueTiming : Interceptor {
@@ -31,6 +34,9 @@ internal class ModelTransport(private val client: OkHttpClient, private val hydr
     }
     suspend fun request(config: ModelConfig, messages: JSONArray, tools: JSONArray, output: Int,
                         trace: PerformanceTrace, attempt: Int, finalOnly: Boolean, purpose: ModelRequests.Purpose = if (finalOnly) ModelRequests.Purpose.DELIVERY else ModelRequests.Purpose.EXECUTION): JSONObject = withContext(Dispatchers.IO) {
+        val admittedAt=PerformanceTrace.now()
+        admission.withPermit {
+        trace.event(PerformanceTrace.Stage.MODEL_ADMISSION,PerformanceTrace.elapsed(admittedAt),PerformanceTrace.Status.RETURNED,attempt=attempt,purpose=purpose)
         val url = ModelWire.url(config).toString()
         require(url.startsWith("https://")) { "Model endpoint must use HTTPS." }
         val preparing = PerformanceTrace.now()
@@ -75,6 +81,7 @@ internal class ModelTransport(private val client: OkHttpClient, private val hydr
                     }
                 }
             })
+        }
         }
     }
 }

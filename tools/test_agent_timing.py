@@ -46,3 +46,16 @@ class TimingTest(unittest.TestCase):
         self.assertEqual('cancelled', r['status'])
         self.assertEqual({'direct_exact_json': 1}, r['delivery_routes'])
         self.assertEqual({}, r['model_attempts'])
+
+    def test_parallel_delegation_is_counted_by_purpose_without_double_wall_time(self):
+        result = summarize([event('tool', 100, 100),
+                            event('model_request', 90, 80, purpose='delegation', status='ok'),
+                            event('model_request', 80, 60, purpose='delegation', status='ok'),
+                            event('model_parse', 90, 1, purpose='delegation', usage={'total_tokens': 20}),
+                            event('model_parse', 80, 1, purpose='delegation', usage={'total_tokens': 30}),
+                            event('turn', 100, 100, status='ok')])
+        self.assertEqual(80, result['wall_ms']['delegation_model'])
+        self.assertEqual(20, result['wall_ms']['tools'])
+        self.assertEqual(100, sum(result['wall_ms'].values()))
+        self.assertEqual(2, result['model_attempts']['delegation'])
+        self.assertEqual(50, result['usage_by_purpose']['delegation']['total_tokens'])
