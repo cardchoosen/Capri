@@ -48,7 +48,7 @@ import org.json.JSONObject
     val chosen = terminals.firstOrNull { it.optString("terminal_id") == selected }
     val commands = chosen?.optJSONArray("commands")
     val latest = if (commands != null && commands.length() > 0) commands.getJSONObject(commands.length() - 1) else null
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("持续终端") }, text = {
+    ai.capri.app.DetailPage(onDismissRequest = onDismiss, title = { Text("持续终端") }, text = {
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("保留目录与环境 · 关闭面板不停止任务", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
             Text("后台可能被系统暂停，可在应用电池设置中允许运行。", fontSize = 11.sp)

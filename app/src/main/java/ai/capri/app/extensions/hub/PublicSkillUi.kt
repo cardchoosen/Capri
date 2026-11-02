@@ -14,39 +14,55 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-@Composable internal fun PublicSkillSettings(hub:PublicSkillHub) {
+@Composable internal fun PublicSkillSettings(hub:PublicSkillHub,chat:String) {
     val revision by hub.updates.collectAsState();var open by remember{mutableStateOf(false)};val scope=rememberCoroutineScope()
-    OutlinedButton(onClick={open=true}){Text("公共 Skills")}
+    var syncing by remember{mutableStateOf(false)};var notice by remember{mutableStateOf("")}
+    ai.capri.app.SettingsRow("公共 Skill 仓库","自动同步、贡献与待处理记录"){open=true}
     if(open) {
         val state=remember(revision){hub.status()}
-        AlertDialog(onDismissRequest={open=false},title={Text("公共 Skills")},text={Column {
+        ai.capri.app.DetailPage(onDismissRequest={open=false},title={Text("公共 Skill 仓库")},text={Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
             Text(HubGitHub.REPOSITORY)
             Row { Text("自动获取和更新",Modifier.weight(1f));Switch(checked=hub.enabled(),onCheckedChange={hub.enable(it)}) }
             Text("已收录 ${state.optInt("skill_count")} 个；本机修改与同名个人 Skill 会保留。下载不执行脚本。")
             if(state.optString("last_error").isNotBlank())Text("同步尚未完成，继续保留本地内容；请检查网络后重试。")
-            TextButton(onClick={scope.launch {withContext(Dispatchers.IO){hub.sync()}}}){Text("立即同步")}
-            TextButton(onClick={open=false;hub.reopen()}){Text("查看待处理的公开贡献")}
+            TextButton(enabled=!syncing,onClick={scope.launch {
+                syncing=true;notice=""
+                try { val result=withContext(Dispatchers.IO){hub.sync()};notice=if(!hub.enabled())"自动同步已关闭。" else if(result.optString("status")=="partial")"同步未完成，已保留本地内容，请检查网络后重试。" else "同步完成，已收录 ${result.optInt("skill_count")} 个公共 Skill。" }
+                finally { syncing=false }
+            }}){Text(if(syncing)"正在同步…" else "立即同步")}
+            if(syncing)LinearProgressIndicator(Modifier.fillMaxWidth())
+            if(notice.isNotBlank())Text(notice,style=MaterialTheme.typography.bodySmall)
+            Text("当前对话的贡献记录",style=MaterialTheme.typography.titleMedium)
+            val receipts=remember(chat,revision){hub.list(chat)}
+            if(receipts.length()==0)Text("暂无贡献记录。需要公开时，可在对话中主动让 Capri 准备贡献。")
+            for(i in 0 until receipts.length()) {
+                val receipt=receipts.getJSONObject(i);val state=receipt.optString("state")
+                HorizontalDivider()
+                Text(receipt.optString("id"))
+                Text(when(state){"submitted"->"已提交 PR";"declined"->"仅本机使用";"failed"->"提交未确认";"publishing","approved"->"待核对提交结果";else->"等待确认"},style=MaterialTheme.typography.bodySmall)
+                if(state=="submitted")SelectionContainer{Text(receipt.optString("pull_request"))}
+                else if(state!="declined")TextButton(onClick={hub.reopen(chat,receipt.getString("key"));open=false}){Text("查看并处理")}
+            }
         }},confirmButton={TextButton(onClick={open=false}){Text("关闭")}})
     }
 }
 @Composable internal fun PublicSkillApproval(hub:PublicSkillHub,chat:String) {
     val revision by hub.updates.collectAsState();val request by hub.openRequests.collectAsState()
-    var hidden by remember(chat,request){mutableStateOf<String?>(null)};var selected by remember(chat){mutableStateOf("")};var offset by remember{mutableIntStateOf(0)}
-    val record=remember(chat,revision){val a=hub.list(chat);(0 until a.length()).map{a.getJSONObject(it)}.firstOrNull{!it.optBoolean("acknowledged") && it.optString("state") in setOf("awaiting_user","approved","failed","publishing","submitted")}}
-    val key=record?.optString("key")?:return
-    LaunchedEffect(key){selected="";offset=0}
-    if(hidden==key)return
+    val active=request?.takeIf{it.chat==chat}?:return
+    val key=active.key
+    var selected by remember(chat,key){mutableStateOf("")};var offset by remember(chat,key){mutableIntStateOf(0)}
+    val record=remember(chat,key,revision){runCatching{hub.read(chat,key)}.getOrNull()}?:return
     val context=LocalContext.current
     if(record.optString("state")=="submitted") {
         // A durable PR receipt ends approval; it must not require another modal acknowledgement.
         LaunchedEffect(chat,key) {
-            hub.acknowledge(chat,key)
+            hub.acknowledge(chat,key);hub.dismiss(chat,key)
             Toast.makeText(context,"公开贡献已提交 PR #${record.optInt("number")}，链接已保留在贡献回执中。",Toast.LENGTH_LONG).show()
         }
         return
     }
     val busy=hub.running(chat,key)
-    AlertDialog(onDismissRequest={if(!busy)hidden=key},title={Text("是否公开贡献这个 Skill？")},text={
+    AlertDialog(onDismissRequest={if(!busy)hub.dismiss(chat,key)},title={Text("是否公开贡献这个 Skill？")},text={
         Column(Modifier.heightIn(max=440.dp).verticalScroll(rememberScrollState())) {
             Text("${record.optString("id")} → ${HubGitHub.REPOSITORY}")
                 Text("确认后，下列文件将通过你的 GitHub 账号公开上传并提交 PR，按 MIT 许可贡献。审核合并前也已公开。不会上传聊天记录；请核对文件是否包含私人内容。")
@@ -62,6 +78,6 @@ import kotlinx.coroutines.withContext
                 if(busy)Text("正在提交，请稍候…")
         }
     },confirmButton={TextButton(enabled=!busy,onClick={hub.approve(chat,key)}){Text("确认公开并提交 PR")}},dismissButton={
-        Row { TextButton(enabled=!busy,onClick={hub.decline(chat,key);hidden=key}){Text("仅本机使用")};TextButton(enabled=!busy,onClick={hidden=key}){Text("稍后")}}
+        Row { TextButton(enabled=!busy,onClick={hub.decline(chat,key)}){Text("仅本机使用")};TextButton(enabled=!busy,onClick={hub.dismiss(chat,key)}){Text("稍后")}}
     })
 }

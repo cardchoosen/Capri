@@ -2,6 +2,8 @@ package ai.capri.app.retrieval
 
 import ai.capri.app.CapriModel
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -13,8 +15,8 @@ import androidx.compose.ui.unit.dp
     val config = remember(updates) { vm.store.config(vm.selected) }
     val supported = ProviderCapabilities.deepSeek(config)
     var enabled by remember { mutableStateOf(vm.enhancements.enabled(ProviderCapabilities.DEEPSEEK_WEB)) }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("增强能力") }, text = {
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    ai.capri.app.DetailPage(onDismissRequest = onDismiss, title = { Text("增强能力") }, text = {
+        Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("按项启用供应商增强。关闭时仍可使用免费基础检索。", style = MaterialTheme.typography.bodySmall)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("DeepSeek 搜索与抓取", Modifier.weight(1f))

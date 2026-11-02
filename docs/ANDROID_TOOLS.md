@@ -89,7 +89,7 @@ root_status仅检查已知su路径与之前的应用验证记录，不为每轮�
 {"action":"root_exec","params":{"command":"id\npwd","timeout_seconds":5}}
 ```
 
-Root命令直接运行在Android宿主`/system/bin/sh`中，默认工作目录是当前会话工作区的宿主路径。不是Ubuntu/PRoot，不会让原来的terminal/python_run自动提权；Ubuntu的glibc程序与Python虚拟环境不能假定在宿主可直接运行。新建文件可能属于root，需要时只处理相应产物的归属。运行页提供“Root · Android宿主”的状态与“请求并验证Root授权”按钮。
+Root命令直接运行在Android宿主`/system/bin/sh`中，默认工作目录是当前会话工作区的宿主路径。不是Ubuntu/PRoot，不会让原来的terminal/python_run自动提权；Ubuntu的glibc程序与Python虚拟环境不能假定在宿主可直接运行。新建文件可能属于root，需要时只处理相应产物的归属。手机「设置 → Root」提供宿主状态与“请求并验证Root授权”按钮。
 
 实现通过独立`setsid -w`进程组启动监督脚本。用户脚本单独写入应用私有临时文件，不插入su命令或可信监督脚本；核验真实UID0及进程身份后才放行。命令返回、超时、输出上限或协程取消时，通过本次进程组PID/启动时间核验后清理，并检查进程组是否消失，不按模型传入PID杀进程。若清理未确认返回cleanup_unconfirmed，不声称已经完全停止；已有副作用不回滚。取消后的最后清理状态也能通过root_status的last_cleanup回查。应用退出时监督进程自带看门狗，上限为命令超时加40秒授权／收尾余量，不建立永久Root服务。
 

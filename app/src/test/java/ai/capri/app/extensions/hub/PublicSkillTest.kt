@@ -55,6 +55,16 @@ class PublicSkillTest {
         hub.publish("chat",key,"contributor","secret"){true};assertEquals(1,remote.prs)
         assertTrue(remote.requests.none{it.startsWith("PATCH")});assertFalse(result.toString().contains("secret"))
     }
+    @Test fun explicitRetryOfInterruptedPublicationReconcilesAnExistingPr()=runBlocking<Unit> {
+        val remote=Remote();val root=File(temp.root,"contributions");val hub=HubContribution(root,remote)
+        val key=hub.prepare("chat",source(),"example-skill").getString("key");hub.approve("chat",key)
+        val submitted=hub.publish("chat",key,"contributor","secret"){true}
+        val receipt=File(root,"chat/$key/record.json")
+        receipt.writeText(JSONObject(submitted.toString()).put("state","publishing").toString())
+        val restored=HubContribution(root,remote);restored.approve("chat",key)
+        assertEquals("submitted",restored.publish("chat",key,"contributor","secret"){true}.getString("state"))
+        assertEquals(1,remote.prs);assertEquals(1,remote.branches)
+    }
     @Test fun changedPreviewAndChangedAccountCannotBeSilentlyPublished()=runBlocking<Unit> {
         val remote=Remote();val root=File(temp.root,"contributions");val hub=HubContribution(root,remote);val key=hub.prepare("chat",source(),"example-skill").getString("key");hub.approve("chat",key)
         File(root,"chat/$key/files/SKILL.md").appendText("changed")

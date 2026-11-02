@@ -29,7 +29,7 @@ import kotlinx.coroutines.withContext
     val automaticUsername = runCatching { GitCredentialPolicy.host(host) == "github.com" }.getOrDefault(false)
     val scope = rememberCoroutineScope()
     fun reset() { editing = null; host = "github.com"; username = ""; token = ""; repository = ""; message = "" }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("Git 账号 · 全局") }, text = {
+    ai.capri.app.DetailPage(onDismissRequest = onDismiss, title = { Text("Git 账号 · 全局") }, text = {
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("所有会话共用，每个 HTTPS 主机一个账号。Token 加密保存，不回显；修改后对后续认证生效。", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             entries.forEach { account ->

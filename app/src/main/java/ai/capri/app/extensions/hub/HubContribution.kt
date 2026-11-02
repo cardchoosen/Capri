@@ -105,5 +105,12 @@ internal class HubContribution(private val root:File,private val remote:HubRemot
         } catch(error:Exception) { update(chat,key) { it.put("state","failed").put("error_code",if(error is HubHttpError)"github_http_${error.code}" else "publish_unconfirmed") };throw error }
     }
     fun acknowledge(chat:String,key:String) = update(chat,key) { it.put("acknowledged",true) }
-    fun approve(chat:String,key:String):JSONObject { decision(chat,key,true);return update(chat,key) { it.put("approved_by_user",true) } }
+    fun approve(chat:String,key:String):JSONObject {
+        val record=read(chat,key)
+        if(record.optString("state")=="publishing") {
+            require(record.optBoolean("approved_by_user")) { "An interrupted contribution must retain native approval before reconciliation." }
+            return record
+        }
+        decision(chat,key,true);return update(chat,key) { it.put("approved_by_user",true) }
+    }
 }

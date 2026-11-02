@@ -39,9 +39,8 @@ import org.json.JSONObject
             finally { busy = false; vm.refresh() }
         }
     }
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(Modifier.fillMaxSize()) { Column(Modifier.padding(16.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("上下文 / 记忆 / 文档", style = MaterialTheme.typography.titleLarge); TextButton(onClick = onDismiss) { Text("关闭") } }
+    ai.capri.app.DetailPage(onDismissRequest = onDismiss, title = { Text("记忆与资料") }, text = {
+        Column(Modifier.fillMaxSize()) {
             Text("当前会话 · ${vm.sessions.first { it.id == chat }.title}", style = MaterialTheme.typography.labelSmall)
             if (!personal) PersonalMemoryResetControl(vm, !busy)
             TabRow(selectedTabIndex = tab) { listOf("上下文", if (personal) "Capri记忆" else "任务资料", "文档检索").forEachIndexed { i, name -> Tab(selected = tab == i, onClick = { tab = i; result = "" }, text = { Text(name) }) } }
@@ -89,8 +88,8 @@ import org.json.JSONObject
                 if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
                 if (result.isNotBlank()) { HorizontalDivider(); Text(result, style = MaterialTheme.typography.bodySmall) }
             }
-        } }
-    }
+        }
+    })
     deleting?.let { record -> AlertDialog(onDismissRequest = { deleting = null }, title = { Text("删除${record.getString("title")}？") }, text = { Text("删除索引/记忆后不再检索。原文件与既有聊天保留。共享条目会对所有会话生效。") }, confirmButton = { TextButton(onClick = { deleting = null; perform { vm.knowledge.change(chat, record.getString("id")); "已删除" } }) { Text("删除") } }, dismissButton = { TextButton(onClick = { deleting = null }) { Text("取消") } }) }
 }
 

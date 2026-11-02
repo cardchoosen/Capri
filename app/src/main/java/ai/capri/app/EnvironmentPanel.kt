@@ -9,7 +9,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 
-@Composable internal fun EnvironmentPanel(vm: CapriModel) {
+@Composable internal fun EnvironmentPanel(vm: CapriModel, initiallyExpanded: Boolean = false) {
     vm.updates.collectAsState().value
     val state = vm.environmentState()
     val scope = rememberCoroutineScope()
@@ -21,7 +21,7 @@ import kotlinx.coroutines.launch
             confirmButton = { TextButton(onClick = { pending = null; vm.maintainEnvironment(chat, action) }, enabled = !vm.runtimeBusy) { Text("确认执行") } },
             dismissButton = { TextButton(onClick = { pending = null }) { Text("取消") } })
     }
-    var diagnostics by remember { mutableStateOf(false) }
+    var diagnostics by remember { mutableStateOf(initiallyExpanded) }
     Spacer(Modifier.height(12.dp))
     Text(state.message, fontSize = 14.sp, color = if (state.phase == "error") Color(0xFFFF514F) else Color(0xFFA5FF75))
     if (state.phase == "preparing" || vm.migrating) LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical = 8.dp))

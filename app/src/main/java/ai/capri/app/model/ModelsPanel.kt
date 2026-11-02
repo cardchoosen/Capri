@@ -77,14 +77,9 @@ import kotlinx.coroutines.launch
 }
 
 @Composable private fun ModelDialog(title: String, onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth().padding(16.dp).heightIn(max = 680.dp)) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) { Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f)); IconButton(onClick = onDismiss) { Icon(Icons.Outlined.Close, "关闭") } }
-                content()
-            }
-        }
-    }
+    ai.capri.app.DetailPage(onDismissRequest = onDismiss, title = { Text(title) }, text = {
+        Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp), content = content)
+    })
 }
 
 @Composable internal fun ModelsPanel(vm: CapriModel, onDismiss: () -> Unit) {
@@ -188,32 +183,6 @@ import kotlinx.coroutines.launch
     }
 }
 
-@Composable internal fun ModelBalances(vm: CapriModel) {
-    val tick by vm.updates.collectAsState()
-    val accounts = remember(tick) { vm.store.models.all().filter { ai.capri.app.retrieval.ProviderCapabilities.deepSeek(it.config(ModelOption("balance"))) } }
-    if (accounts.isEmpty()) return
-    val api = remember { ModelApi() }; val scope = rememberCoroutineScope()
-    val values = remember { mutableStateMapOf<String, String>() }; val fetching = remember { mutableStateMapOf<String, Boolean>() }
-    fun identity(account: ModelAccount) = ModelWire.scope(account.config(ModelOption("balance")))
-    fun refresh(account: ModelAccount) {
-        val id = identity(account)
-        if (fetching[id] == true) return
-        fetching[id] = true
-        values[id] = "正在获取余额…"
-        scope.launch {
-            try { values[id] = api.balance(account) + " · " + java.text.SimpleDateFormat("HH:mm", java.util.Locale.ROOT).format(java.util.Date()) }
-            catch (cancel: CancellationException) { throw cancel }
-            catch (error: Exception) { values[id] = "余额获取失败 · " + ModelApi.errorLabel(error, listing = false) }
-            finally { fetching[id] = false }
-        }
-    }
-    LaunchedEffect(accounts) { accounts.forEach { refresh(it) } }
-    accounts.forEach { account ->
-        val id = identity(account)
-        Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        ProviderLogo(account.provider); Column(Modifier.weight(1f).padding(horizontal = 10.dp)) { Text(account.name, fontSize = 12.sp); Text(values[id] ?: "正在获取余额…", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        IconButton(enabled = fetching[id] != true, onClick = { refresh(account) }) { Icon(Icons.Outlined.Refresh, "刷新 ${account.name} 余额", Modifier.size(18.dp)) }
-    } }
-}
+@Composable internal fun ModelBalances(vm: CapriModel) { ai.capri.app.AccountBalances(vm) }
 
 private fun contextLabel(model: ModelOption) = (if (model.context != null && model.source == "models_registry") "≈" else "") + Providers.contextLabel(model.context)

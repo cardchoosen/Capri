@@ -34,13 +34,9 @@ import org.json.JSONObject
             finally { busy = false }
         }
     }
-    OutlinedButton(onClick = { open = true; load(0) }) { Text("安装环境档案") }
-    if (open) Dialog(onDismissRequest = { open = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(Modifier.fillMaxSize()) { Column(Modifier.padding(16.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("安装环境档案", style = MaterialTheme.typography.titleLarge)
-                TextButton(onClick = { open = false }) { Text("关闭") }
-            }
+    ai.capri.app.SettingsRow("安装环境档案", "本安装共享 · 查看已观察与验证的能力") { open = true; load(0) }
+    if (open) ai.capri.app.DetailPage(onDismissRequest = { open = false }, title = { Text("安装环境档案") }, text = {
+        Column(Modifier.fillMaxSize()) {
             Text("本安装共享 · 自动维护Markdown · 观察、验证与适用环境分开记录", style = MaterialTheme.typography.bodySmall)
             OutlinedTextField(query, { query = it }, label = { Text("筛选主题或能力") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
             Row {
@@ -50,6 +46,6 @@ import org.json.JSONObject
             }
             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) { MarkdownReply(text) }
-        } }
-    }
+        }
+    })
 }

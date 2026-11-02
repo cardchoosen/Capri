@@ -22,13 +22,13 @@ import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.*
 import org.json.JSONObject
 
-@Composable internal fun ExtensionsPanel(vm: CapriModel, onDismiss: () -> Unit) {
+@Composable internal fun ExtensionsPanel(vm: CapriModel, initialCategory: Int = 2, onDismiss: () -> Unit) {
     val manager = vm.extensions
     val chat = remember { vm.selected }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var revision by remember { mutableIntStateOf(0) }
-    var category by remember { mutableIntStateOf(2) }
+    var category by remember { mutableIntStateOf(initialCategory) }
     var skillCategory by remember { mutableStateOf<SkillCategory?>(null) }
     var busy by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("") }
@@ -72,10 +72,8 @@ import org.json.JSONObject
     }
     // Connections may close or expire while the panel is idle; re-read without connecting services.
     LaunchedEffect(chat) { while (isActive) { delay(2000); revision++ } }
-    Dialog(onDismissRequest = { if (!busy) onDismiss() }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(Modifier.fillMaxWidth().fillMaxHeight(.92f).padding(12.dp)) {
-            Column(Modifier.padding(14.dp)) {
-                Text("能力与扩展", fontSize = 21.sp)
+    ai.capri.app.DetailPage(onDismissRequest = { if (!busy) onDismiss() }, title = { Text("能力与扩展") }, text = {
+            Column(Modifier.fillMaxSize()) {
                 Row(Modifier.padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(selected = category == 2, onClick = { category = 2 }, label = { Text("Tools · ${tools.size}") })
                     FilterChip(selected = category == 0, onClick = { category = 0 }, label = { Text("MCP · ${configs.size}") })
@@ -108,6 +106,7 @@ import org.json.JSONObject
                             }
                         }
                     } else if (category == 1) {
+                        ai.capri.app.extensions.hub.PublicSkillSettings(vm.publicSkills,chat)
                         Text("仅名称与简介参与发现，正文和资源按需读取。支持标准SKILL.md或单技能ZIP；也可让Capri从工作区安装。导入后不自动执行脚本。", fontSize = 12.sp)
                         TextButton(enabled = !busy && vm.jobs.isEmpty(), onClick = { importer.launch(arrayOf("*/*")) }) { Text("导入 Skill / ZIP") }
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -156,8 +155,7 @@ import org.json.JSONObject
                     TextButton(enabled = !busy, onClick = onDismiss) { Text("关闭") }
                 }
             }
-        }
-    }
+    })
     editing?.let { original ->
         var text by remember(original) { mutableStateOf(original.toString(2)) }
         var token by remember(original) { mutableStateOf("") }
@@ -165,10 +163,8 @@ import org.json.JSONObject
         var error by remember(original) { mutableStateOf("") }
         var saving by remember(original) { mutableStateOf(false) }
         val originalId = original.getString("id")
-        Dialog(onDismissRequest = { if (!saving) editing = null }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-            Surface(Modifier.fillMaxWidth().fillMaxHeight(.9f).padding(12.dp)) {
-                Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState())) {
-                    Text("MCP 配置", fontSize = 20.sp)
+        ai.capri.app.DetailPage(onDismissRequest = { if (!saving) editing = null }, title = { Text("MCP 配置") }, text = {
+                Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
                     Text("command为参数数组；本地路径可用\${extension}、\${workspace}。依赖按需安装到扩展专属目录。tools可选，用原工具名筛选。", fontSize = 11.sp)
                     OutlinedTextField(value = text, onValueChange = { text = it }, modifier = Modifier.fillMaxWidth().heightIn(min = 200.dp), label = { Text("配置 JSON") }, enabled = !saving)
                     OutlinedTextField(value = token, onValueChange = { token = it; replaceSecret = true }, label = { Text("Token / API Key（留空保留原值）") }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth(), enabled = !saving)
@@ -201,15 +197,12 @@ import org.json.JSONObject
                         TextButton(enabled = !saving && editingExisting, onClick = { action { manager.disconnectConfig(originalId); manager.store.removeConfig(originalId); "已删除配置" }; editing = null }) { Text("删除配置") }
                     }
                 }
-            }
-        }
+        })
     }
-    skillBody?.let { body -> AlertDialog(onDismissRequest = { skillBody = null }, title = { Text(detailTitle) }, text = { Text(body, Modifier.heightIn(max = 450.dp).verticalScroll(rememberScrollState()), fontSize = 12.sp) }, confirmButton = { TextButton(onClick = { skillBody = null }) { Text("关闭") } }) }
+    skillBody?.let { body -> ai.capri.app.DetailPage(onDismissRequest = { skillBody = null }, title = { Text(detailTitle) }, text = { Text(body, Modifier.fillMaxSize().verticalScroll(rememberScrollState()), fontSize = 12.sp) }, confirmButton = { TextButton(onClick = { skillBody = null }) { Text("关闭") } }) }
     toolDetail?.let { item ->
-        Dialog(onDismissRequest = { toolDetail = null }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-            Surface(Modifier.fillMaxWidth().fillMaxHeight(.9f).padding(12.dp)) {
-                Column(Modifier.padding(16.dp)) {
-                    Text(item.title, fontSize = 20.sp)
+        ai.capri.app.DetailPage(onDismissRequest = { toolDetail = null }, title = { Text(item.title) }, text = {
+                Column(Modifier.fillMaxSize()) {
                     Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
                         Text(item.name, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
                         Text(item.source, fontSize = 12.sp)
@@ -219,7 +212,6 @@ import org.json.JSONObject
                     }
                     TextButton(onClick = { toolDetail = null }) { Text("返回工具列表") }
                 }
-            }
-        }
+        })
     }
 }

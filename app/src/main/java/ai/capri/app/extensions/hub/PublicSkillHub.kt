@@ -27,7 +27,8 @@ internal class PublicSkillHub private constructor(private val context:Context) {
     private val store by lazy { ExtensionStore(context) }
     private val jobs=java.util.concurrent.ConcurrentHashMap<String,Job>()
     private val revision=MutableStateFlow(0L);val updates=revision.asStateFlow()
-    val openRequests=MutableStateFlow(0L)
+    private val prompt=HubApprovalPrompt()
+    val openRequests=prompt.requests
     private val prefs=context.getSharedPreferences("public-skill-hub",Context.MODE_PRIVATE)
     fun enabled()=prefs.getBoolean("enabled",true)
     fun enable(value:Boolean) { prefs.edit().putBoolean("enabled",value).commit();if(value)HubAndroid.schedule(context,true)else HubAndroid.cancel(context);revision.update { it+1 } }
@@ -48,7 +49,8 @@ internal class PublicSkillHub private constructor(private val context:Context) {
     fun read(chat:String,key:String)=contributions.read(chat,key)
     fun running(chat:String,key:String)=jobs["$chat/$key"]?.isActive==true
     fun acknowledge(chat:String,key:String) { contributions.acknowledge(chat,key);revision.update { it+1 } }
-    fun reopen() { openRequests.update { it+1 };revision.update { it+1 } }
+    fun reopen(chat:String,key:String)=prompt.open(chat,read(chat,key))
+    fun dismiss(chat:String,key:String)=prompt.dismiss(chat,key)
     suspend fun execute(chat:String,args:JSONObject):String=withContext(Dispatchers.IO) {
         HubContract.validate(args)
         when(args.getString("action")) {
@@ -59,14 +61,14 @@ internal class PublicSkillHub private constructor(private val context:Context) {
                 val lease=RuntimeGate.beginFiles(context,chat,"Public Skill preview")
                 try {
                     val source=Workspace(File(context.filesDir,"sessions")).file(chat,args.getString("path").removePrefix("/workspace/"))
-                    val record=contributions.prepare(chat,source,args.getString("id"));revision.update { it+1 }
+                    val record=contributions.prepare(chat,source,args.getString("id"));prompt.open(chat,record);revision.update { it+1 }
                     record.put("status",if(record.optString("state")=="awaiting_user")"awaiting_user" else "ok")
                         .put("notice","No files were uploaded by prepare. Native user confirmation publishes the displayed frozen files publicly, before PR review. Chat text cannot approve publication.")
                 }finally{RuntimeGate.endFiles(lease)}
             }
         }.toString()
     }
-    fun decline(chat:String,key:String) { contributions.decline(chat,key);revision.update { it+1 } }
+    fun decline(chat:String,key:String) { contributions.decline(chat,key);prompt.dismiss(chat,key);revision.update { it+1 } }
     /** Called only by the native confirmation button after file preview. */
     fun approve(chat:String,key:String) {
         val jobKey="$chat/$key"

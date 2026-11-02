@@ -100,7 +100,7 @@ import org.json.JSONObject
         catch (_: Exception) { status = "密钥清单读取失败" }
         finally { busy = false }
     }
-    AlertDialog(onDismissRequest = { if (!busy) onDismiss() }, title = { Text("SSH · 全局") }, text = {
+    ai.capri.app.DetailPage(onDismissRequest = { if (!busy) onDismiss() }, title = { Text("SSH · 全局") }, text = {
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("SSH / SFTP / SCP 通过持续终端执行。设备密钥、连接配置与主机指纹由所有会话共用。", fontSize = 12.sp)
             Text(status, fontSize = 12.sp)

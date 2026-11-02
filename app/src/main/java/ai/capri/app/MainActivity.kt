@@ -96,6 +96,9 @@ class MainActivity : ComponentActivity() {
     var knowledgePanel by remember { mutableStateOf(false) }
     var extensionsPanel by remember { mutableStateOf(false) }
     var terminalPanel by remember { mutableStateOf(false) }
+    var settingsRoute by rememberSaveable { mutableStateOf("") }
+    var workbench by remember { mutableStateOf(false) }
+    var extensionCategory by remember { mutableIntStateOf(2) }
     val pendingNativePermission by vm.androidTools.permissions.pending.collectAsState()
     val nativePermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { vm.androidTools.permissions.complete(it); vm.refresh() }
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -202,7 +205,8 @@ class MainActivity : ComponentActivity() {
                         Text("C A P R I", fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, fontSize = 16.sp)
                         Text(if (busy) "●  ${notice ?: "思考中"}" else if (session.kind == SessionKind.PERSONAL) "●  在这儿呢" else "●  随时待命", color = Green, fontSize = 10.sp, letterSpacing = 1.sp)
                     }
-                    IconButton(onClick = { settings = true }) { Icon(Icons.Outlined.Tune, "设置", tint = Red) }
+                    if(tab == 0) IconButton(onClick = { workbench = true }) { Icon(Icons.Outlined.Workspaces, "工作台", tint = Muted) }
+                    IconButton(onClick = { vm.activeTab = 3 }) { Icon(Icons.Outlined.Settings, "打开设置", tint = Muted) }
                 }
                 HorizontalDivider(color = Line)
             }
@@ -210,9 +214,9 @@ class MainActivity : ComponentActivity() {
             // Keep navigation measured throughout IME animation; the keyboard covers it.
             Column(Modifier.navigationBarsPadding()) {
                 HorizontalDivider(color = Line)
-                Row(Modifier.fillMaxWidth().height(48.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
-                    listOf("对话" to Icons.Outlined.ChatBubbleOutline, "文件" to Icons.Outlined.FolderOpen, "运行" to Icons.Outlined.Terminal).forEachIndexed { index, pair ->
-                        TextButton(onClick = { vm.activeTab = index }, colors = ButtonDefaults.textButtonColors(contentColor = if (tab == index) Green else Muted)) { Icon(pair.second, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text(pair.first, fontSize = 12.sp) }
+                NavigationBar(containerColor = Panel, tonalElevation = 0.dp, windowInsets = WindowInsets(0,0,0,0)) {
+                    listOf("对话" to Icons.Outlined.ChatBubbleOutline, "文件" to Icons.Outlined.FolderOpen, "用量" to Icons.Outlined.BarChart, "设置" to Icons.Outlined.Settings).forEachIndexed { index, pair ->
+                        NavigationBarItem(selected = tab == index, onClick = { vm.activeTab = index; focusManager.clearFocus(); keyboard?.hide() }, icon = { Icon(pair.second, null) }, label = { Text(pair.first) }, colors = NavigationBarItemDefaults.colors(selectedIconColor = Green, selectedTextColor = Green, indicatorColor = Green.copy(alpha = .12f), unselectedIconColor = Muted, unselectedTextColor = Muted))
                     }
                 }
             }
@@ -303,30 +307,17 @@ class MainActivity : ComponentActivity() {
                             }; HorizontalDivider(color = Line)
                         } }
                     }
-                    2 -> {
-                        Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp)) {
-                            OutlinedButton(onClick = { settings = true }) { Text("模型 API") }
-                            ai.capri.app.model.ModelBalances(vm)
-                            Text("执行环境", fontSize = 22.sp); Spacer(Modifier.height(12.dp))
-                            OutlinedButton(onClick = { nativeCapabilities = true }) { Icon(Icons.Outlined.PhonelinkSetup, null, Modifier.size(16.dp)); Spacer(Modifier.width(8.dp)); Text("Android 原生能力") }
-                            OutlinedButton(onClick = { terminalPanel = true }) { Icon(Icons.Outlined.Terminal, null, Modifier.size(16.dp)); Spacer(Modifier.width(8.dp)); Text("持续终端") }
-                            OutlinedButton(onClick = { vm.previews.openBrowserHome(session.id); vm.activeTab = 0; focusManager.clearFocus(); keyboard?.hide() }) { Text("浏览器 · 当前会话") }
-                            OutlinedButton(onClick = { sshPanel = true }, enabled = vm.runtime.ready) { Text("SSH · 全局") }
-                            ai.capri.app.agent.rules.RulesSettings(vm.userRules,session.id)
-                            ai.capri.app.extensions.hub.PublicSkillSettings(vm.publicSkills)
-                            OutlinedButton(onClick = { gitAccounts = true }) { Text("Git 账号 · 全局") }
-                            Text("设备、网络、Wi-Fi、定位、应用与系统操作统一由 android 工具调用。", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(vertical = 12.dp))
-                            Text("ON DEVICE / ARM64", color = Green, fontSize = 11.sp, fontFamily = FontFamily.Monospace, letterSpacing = 2.sp)
-                            OutlinedButton(onClick = { extensionsPanel = true }) { Text("能力与扩展 · Tools / MCP / Skills") }
-                            OutlinedButton(onClick = { knowledgePanel = true }) { Text("上下文 / 记忆 / 文档") }
-                            OutlinedButton(onClick = { enhancementsPanel = true }) { Text("增强能力") }
-                            Spacer(Modifier.height(12.dp))
-                            ai.capri.app.nativebridge.RootPanel(vm)
-                            ai.capri.app.environment.InstallationEnvironmentPanel(vm)
-                            EnvironmentPanel(vm)
-                            Spacer(Modifier.height(24.dp)); Text("会话独立目录", color = Green); Text("workspace / 任务文件\nhome / 用户目录\ntmp / 临时文件\nruns / 脚本与执行日志", color = Muted, lineHeight = 28.sp, modifier = Modifier.padding(vertical = 12.dp), fontFamily = FontFamily.Monospace)
-                            Text("运行模型：单 APK · Android 原生调度 · PRoot/Ubuntu。PRoot 与 Android 共用内核，各会话属于同一应用 UID；目录分离不构成恶意代码安全隔离。", color = Muted, lineHeight = 24.sp, fontSize = 13.sp)
-
+                    2 -> UsageScreen(vm)
+                    3 -> MobileSettings(vm) { destination ->
+                        when(destination) {
+                            "models" -> settings = true
+                            "git" -> gitAccounts = true
+                            "ssh" -> sshPanel = true
+                            "tools", "mcp", "skills" -> { extensionCategory = when(destination) { "tools" -> 2; "mcp" -> 0; else -> 1 }; extensionsPanel = true }
+                            "knowledge" -> knowledgePanel = true
+                            "enhancements" -> enhancementsPanel = true
+                            "native" -> nativeCapabilities = true
+                            else -> settingsRoute = destination
                         }
                     }
                 }
@@ -334,9 +325,17 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+    if(workbench) DetailPage(onDismissRequest = { workbench = false }, title = { Text("工作台") }, text = {
+        Column {
+            Text("当前对话 · ${session.title}", style = MaterialTheme.typography.bodySmall)
+            SettingsRow("浏览器", "当前对话的网页与浏览记录", Icons.Outlined.Language) { workbench = false; vm.previews.openBrowserHome(session.id); vm.activeTab = 0; focusManager.clearFocus(); keyboard?.hide() }
+            SettingsRow("终端", "当前对话的持续终端与执行结果", Icons.Outlined.Terminal) { workbench = false; terminalPanel = true }
+        }
+    })
+    if(settingsRoute.isNotBlank()) key(session.id,settingsRoute) { SettingsDestination(vm, settingsRoute) { settingsRoute = "" } }
     if(enhancementsPanel) ai.capri.app.retrieval.EnhancementsPanel(vm) { enhancementsPanel = false }
     if(knowledgePanel) key(vm.memoryRevision) { ai.capri.app.knowledge.KnowledgePanel(vm) { knowledgePanel = false } }
-    if(extensionsPanel) ai.capri.app.extensions.ExtensionsPanel(vm) { extensionsPanel = false }
+    if(extensionsPanel) ai.capri.app.extensions.ExtensionsPanel(vm, initialCategory = extensionCategory) { extensionsPanel = false }
     if(sshPanel) SshPanel(vm.runtime, session.id, onDismiss = { sshPanel = false })
     ai.capri.app.extensions.hub.PublicSkillApproval(vm.publicSkills,vm.current().id)
     if(gitAccounts) ai.capri.app.git.GitAccountsDialog(vm.gitAccounts, onDismiss = { gitAccounts = false })
@@ -350,7 +349,7 @@ class MainActivity : ComponentActivity() {
 @Composable private fun NativeCapabilities(vm: CapriModel, onDismiss: () -> Unit) {
     val capabilities = vm.androidTools.capabilities()
     val actions = capabilities.getJSONArray("actions")
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("Android 原生能力") }, text = {
+    DetailPage(onDismissRequest = onDismiss, title = { Text("Android 权限与能力") }, text = {
         Column {
             Text("${actions.length()} 项已接入动作 · 可选宿主Root后端；不依赖ADB / Shizuku。授权按任务需要申请，系统开关和厂商限制仍可能影响结果。", color = Muted, fontSize = 12.sp)
             Spacer(Modifier.height(12.dp))
