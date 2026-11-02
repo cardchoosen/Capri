@@ -1,0 +1,9 @@
+{
+  "id": "portable-skill",
+  "files": {
+    "SKILL.md": "---\nname: portable-skill\ndescription: Inspect portable example resources.\n---\n\nRead the references.\n",
+    "references.md": "Overview\n",
+    "references/a.md": "Details\n"
+  },
+  "revision": "6cb21dd9edf23d46e1adf4f48b76fdb80a85d00f9002d1a0de839853ee421c81"
+}

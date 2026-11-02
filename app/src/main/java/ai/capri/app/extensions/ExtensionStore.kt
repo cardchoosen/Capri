@@ -319,6 +319,11 @@ internal class ExtensionStore(private val context: Context) : SkillHistory {
             if (!backup.exists() || target.exists()) ai.capri.app.RuntimeFiles.delete(validation)
         }
     }
+    /** Official updates never replace a private definition or a locally changed public Skill. */
+    fun applyPublicSkills(sources: List<File>): JSONObject = synchronized(lock) {
+        ai.capri.app.extensions.hub.HubInstaller(File(root,"public-skills.json")).apply(sources,skillsRoot,context.assets.list("extensions/skills").orEmpty().toSet(),
+            install={source,replace->importSkillDirectory(source,replace);Unit},disable={id->prefs.edit().putBoolean("skill:$id",false).commit();Unit})
+    }
     override fun skillVersions(id: String): JSONArray = synchronized(lock) { val current=skills().firstOrNull { it.id==id } ?: error("Skill not found.");SkillVersions(File(root,"skill-versions")).list(id,SkillVersions.revision(current.directory)) }
     override fun compareSkill(id: String,before: String,after: String): JSONObject = synchronized(lock) { require(skills().any { it.id==id }) { "Skill not found." };SkillVersions(File(root,"skill-versions")).compare(id,before,after) }
     override fun restoreSkill(id: String,revision: String,expected: String): String = synchronized(lock) {

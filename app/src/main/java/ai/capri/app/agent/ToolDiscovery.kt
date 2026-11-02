@@ -134,6 +134,7 @@ internal object CapabilitySearch {
         listOf("coding","code","diagnostic","diagnostics","lint","syntax","lsp","代码","诊断","语法","报错"),
         listOf("job","jobs","cron","schedule","scheduled","reliability","automation","定时","后台","持久目标","可靠性","调度"),
         listOf("delegate","delegation","agent","agents","subtask","parallel","委派","子任务","多智能体","并行"),
+        listOf("public","hub","contribute","contribution","publish","pull request","公共技能","公开贡献","发布技能"),
         listOf("experience","procedure","skill","feedback","任务经验","技能","反馈","经验复用"),
         listOf("snapshot","restore","rollback","version","快照","回滚","恢复文件","版本"),
         listOf("reference","diff","range","引用","差异","对比"),

@@ -48,7 +48,7 @@ private val Muted = Color(0xFF939E94)
 
 class MainActivity : ComponentActivity() {
     private val model: CapriModel by viewModels()
-    override fun onResume() { super.onResume(); model.androidTools.permissions.attach(this) }
+    override fun onResume() { super.onResume(); model.androidTools.permissions.attach(this);ai.capri.app.extensions.hub.HubAndroid.schedule(application) }
     override fun onPause() { model.androidTools.permissions.detach(this); super.onPause() }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -312,6 +312,7 @@ class MainActivity : ComponentActivity() {
                             OutlinedButton(onClick = { terminalPanel = true }) { Icon(Icons.Outlined.Terminal, null, Modifier.size(16.dp)); Spacer(Modifier.width(8.dp)); Text("持续终端") }
                             OutlinedButton(onClick = { vm.previews.openBrowserHome(session.id); vm.activeTab = 0; focusManager.clearFocus(); keyboard?.hide() }) { Text("浏览器 · 当前会话") }
                             OutlinedButton(onClick = { sshPanel = true }, enabled = vm.runtime.ready) { Text("SSH · 全局") }
+                            ai.capri.app.extensions.hub.PublicSkillSettings(vm.publicSkills)
                             OutlinedButton(onClick = { gitAccounts = true }) { Text("Git 账号 · 全局") }
                             Text("设备、网络、Wi-Fi、定位、应用与系统操作统一由 android 工具调用。", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(vertical = 12.dp))
                             Text("ON DEVICE / ARM64", color = Green, fontSize = 11.sp, fontFamily = FontFamily.Monospace, letterSpacing = 2.sp)
@@ -336,6 +337,7 @@ class MainActivity : ComponentActivity() {
     if(knowledgePanel) key(vm.memoryRevision) { ai.capri.app.knowledge.KnowledgePanel(vm) { knowledgePanel = false } }
     if(extensionsPanel) ai.capri.app.extensions.ExtensionsPanel(vm) { extensionsPanel = false }
     if(sshPanel) SshPanel(vm.runtime, session.id, onDismiss = { sshPanel = false })
+    ai.capri.app.extensions.hub.PublicSkillApproval(vm.publicSkills,vm.current().id)
     if(gitAccounts) ai.capri.app.git.GitAccountsDialog(vm.gitAccounts, onDismiss = { gitAccounts = false })
     if(settings) ai.capri.app.model.ModelsPanel(vm, onDismiss = { settings = false })
     if(nativeCapabilities) NativeCapabilities(vm, onDismiss = { nativeCapabilities = false })
