@@ -63,7 +63,7 @@ class AgentJobService:JobService() {
                     val trace=PerformanceTrace(File(store.workspace.root(chat),"metrics/job-${ready.getString("id")}-${System.currentTimeMillis()}.jsonl"))
                     var outcome=PerformanceTrace.Status.ERROR
                     try {
-                        val result=runner.run(context,ready.getString("id"),config) { messages,tools,output,budget,gate ->
+                        val result=runner.run(context,ready.getString("id"),config,ruleSnapshot=ai.capri.app.agent.rules.RulesStore(File(filesDir,"agent-rules")).snapshot(chat)) { messages,tools,output,budget,gate ->
                             var attempt=0
                             budget.execute(ModelRequests.Purpose.DELEGATION,beforeAttempt={ n -> gate(n);attempt=n },onBackoff={ elapsed -> trace.event(PerformanceTrace.Stage.MODEL_BACKOFF,elapsed,PerformanceTrace.Status.RETURNED,purpose=ModelRequests.Purpose.DELEGATION) }) {
                                 val started=PerformanceTrace.now();var status=PerformanceTrace.Status.ERROR

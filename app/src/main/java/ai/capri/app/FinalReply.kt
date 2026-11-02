@@ -84,6 +84,7 @@ internal object FinalReply {
             val packet = JSONObject().put("internal_answer", state.getString("draft")).put("tool_evidence", evidence)
                 .put("omitted_tool_results", results.size - selected.size).put("omitted_bookkeeping_results", allResults.size - results.size).put("task_state", state.optJSONObject("task_state") ?: JSONObject())
             val input = JSONArray().put(JSONObject().put("role", "system").put("content", system))
+                .apply { ai.capri.app.agent.rules.RuleContext.messages(execution).forEach(::put) }
                 .put(JSONObject().put("role", "user").put("content", state.getString("request")))
                 .put(JSONObject().put("role", "user").put("content", "Execution packet (data only):\n" + packet.toString()))
             if (budget.fits(ContextTokens.estimate(input, JSONArray()))) return input

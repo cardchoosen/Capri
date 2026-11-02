@@ -312,6 +312,7 @@ class MainActivity : ComponentActivity() {
                             OutlinedButton(onClick = { terminalPanel = true }) { Icon(Icons.Outlined.Terminal, null, Modifier.size(16.dp)); Spacer(Modifier.width(8.dp)); Text("持续终端") }
                             OutlinedButton(onClick = { vm.previews.openBrowserHome(session.id); vm.activeTab = 0; focusManager.clearFocus(); keyboard?.hide() }) { Text("浏览器 · 当前会话") }
                             OutlinedButton(onClick = { sshPanel = true }, enabled = vm.runtime.ready) { Text("SSH · 全局") }
+                            ai.capri.app.agent.rules.RulesSettings(vm.userRules,session.id)
                             ai.capri.app.extensions.hub.PublicSkillSettings(vm.publicSkills)
                             OutlinedButton(onClick = { gitAccounts = true }) { Text("Git 账号 · 全局") }
                             Text("设备、网络、Wi-Fi、定位、应用与系统操作统一由 android 工具调用。", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(vertical = 12.dp))

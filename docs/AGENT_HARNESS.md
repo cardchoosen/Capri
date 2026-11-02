@@ -112,3 +112,7 @@ Typed knowledge ownership, bounded sourced personal notes, topic corrections, ex
 ## Reliability and durable work
 
 A bounded metadata event journal links checkpoints, recovery, compaction and history revisions. Model attempts and failures are budgeted by purpose without automatic account/provider fallback. Durable goals and Android JobScheduler triggers reuse isolated read-only file delegation for explicitly authorized unattended analysis; general goals retain foreground continuation. Unknown occurrences are never replayed automatically. Fixed offline replay fixtures validate declared invariants, not real-model quality. See [reliability scope](AGENT_RELIABILITY.zh-CN.md) and [optimization status](AGENT_OPTIMIZATION_STATUS.zh-CN.md); Android lifecycle and real-model acceptance remain pending.
+
+## Persistent user rules
+
+Global and chat-scoped rules supplement existing scoped AGENTS.md handling. Each turn receives a bounded frozen user-level snapshot, retained through compaction and forwarded to delivery and delegation. Guarded edits preserve source provenance; rules cannot expand permissions or replace core persona. Changes apply on the next user turn. See [rules scope](AGENT_RULES.zh-CN.md).

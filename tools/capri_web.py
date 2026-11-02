@@ -22,7 +22,7 @@ from urllib.parse import quote
 
 DEFAULT_PORT = 47863
 WEB = Path(__file__).with_name('web')
-METHODS = {'web_events', 'web_state', 'web_revise', 'web_message', 'web_create', 'web_stop', 'web_delete', 'web_select', 'web_attachment', 'web_catalog', 'web_runtime', 'send', 'status'}
+METHODS = {'web_rules', 'web_events', 'web_state', 'web_revise', 'web_message', 'web_create', 'web_stop', 'web_delete', 'web_select', 'web_attachment', 'web_catalog', 'web_runtime', 'send', 'status'}
 
 
 class BridgeError(RuntimeError):
@@ -296,6 +296,7 @@ def server_for(bridge, port=DEFAULT_PORT, token=None):
                 self.reply(403, {'error': 'Invalid host'}); return
             files = {'/': ('index.html', 'text/html; charset=utf-8'),
                      '/app.js': ('app.js', 'text/javascript; charset=utf-8'),
+                     '/rules.js': ('rules.js', 'text/javascript; charset=utf-8'),
                      '/reliability.js': ('reliability.js', 'text/javascript; charset=utf-8'),
                      '/run.js': ('run.js', 'text/javascript; charset=utf-8'),
                      '/models.js': ('models.js', 'text/javascript; charset=utf-8'),

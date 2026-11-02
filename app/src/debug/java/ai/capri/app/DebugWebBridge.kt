@@ -29,6 +29,18 @@ internal object DebugWebBridge {
     }
 
     fun call(vm: CapriModel, method: String, args: Bundle): JSONObject { return when (method) {
+        "web_rules" -> {
+            require(args.getString("epoch")==epoch) { "App restarted; refresh rules." }
+            val session=vm.sessions.firstOrNull{it.id==args.getString("chat_id")}?:error("Unknown chat.")
+            require(session.contextVersion==args.getString("context_id") && session.id !in vm.deletingChats && !vm.resettingMemory && !vm.memoryResetRequired) { "Conversation changed or is unavailable; refresh rules." }
+            val payload=JSONObject(args.getString("payload")?:"{}");val action=payload.getString("action");val scope=payload.optString("scope","chat")
+            if(action=="list")vm.userRules.read(scope,session.id).put("status","ok") else {
+                val id=args.getString("request_id")?:error("Missing rule request ID.");require(runCatching{java.util.UUID.fromString(id).toString()==id}.getOrDefault(false)) { "Rule request ID must be a UUID." }
+                require(action in setOf("save","delete")) { "Unknown rule action." }
+                if(action=="save")vm.userRules.save(scope,session.id,payload.getString("id"),payload.getString("title"),payload.getString("content"),payload.getBoolean("enabled"),payload.getLong("expected_revision"))
+                else vm.userRules.delete(scope,session.id,payload.getString("id"),payload.getLong("expected_revision"))
+            }
+        }
         "web_events" -> {
             val session=vm.sessions.firstOrNull { it.id==args.getString("chat_id") }?:error("Unknown chat.")
             require(session.contextVersion==args.getString("context_id")) { "History changed; refresh events." }

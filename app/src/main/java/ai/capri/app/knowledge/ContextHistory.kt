@@ -112,7 +112,7 @@ internal class ContextHistory(
         return commit(chat, candidate, tools, budget, "extractive")
     }
     fun boundResult(chat: String, name: String, text: String, limit: Int = 16000): String {
-        if (text.length <= limit || name in setOf("profile_search", "personal_memory", "conversation_history", "knowledge", "context_history")) return text
+        if (text.length <= limit || name in setOf("agent_rules", "profile_search", "personal_memory", "conversation_history", "knowledge", "context_history")) return text
         val id = "r" + UUID.randomUUID().toString()
         write(File(directory(chat), "$id.json"), JSONObject().put("tool", name).put("content", text).toString())
         return ToolResultDigest.preview(name, text, id, limit).toString()

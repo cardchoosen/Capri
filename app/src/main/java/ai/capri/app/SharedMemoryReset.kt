@@ -24,6 +24,6 @@ internal object SharedMemoryReset {
         check(!pending(context)) { "重置标记未能清除，请重试" }
     }
     internal fun clearCaches(root: File) {
-        listOf("history-backups", "knowledge", "context-history", "agent-recovery", "agent-programs", "agent-delegates", "agent-events", "agent-jobs", "skill-contributions", "coding-history", "coding-jobs", "task-experience", "skill-feedback", "web-retrieval").forEach { RuntimeFiles.delete(File(root, it)) }
+        listOf("history-backups", "knowledge", "context-history", "agent-recovery", "agent-programs", "agent-delegates", "agent-events", "agent-jobs", "skill-contributions", "agent-rules/chats", "coding-history", "coding-jobs", "task-experience", "skill-feedback", "web-retrieval").forEach { RuntimeFiles.delete(File(root, it)) }
     }
 }
