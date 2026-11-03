@@ -6,9 +6,9 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
-internal enum class ModelProtocol(val label: String) { CHAT("Chat Completions"), RESPONSES("Responses"), ANTHROPIC("Anthropic Messages"), GEMINI("Gemini") }
-internal data class Provider(val id: String, val name: String, val url: String, val protocol: ModelProtocol = ModelProtocol.CHAT, val icon: String = id)
-internal object Providers {
+enum class ModelProtocol(val label: String) { CHAT("Chat Completions"), RESPONSES("Responses"), ANTHROPIC("Anthropic Messages"), GEMINI("Gemini") }
+data class Provider(val id: String, val name: String, val url: String, val protocol: ModelProtocol = ModelProtocol.CHAT, val icon: String = id)
+object Providers {
     val all = listOf(
         Provider("deepseek", "DeepSeek", "https://api.deepseek.com/v1"),
         Provider("qwen", "阿里云百炼 · Qwen", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
@@ -54,13 +54,13 @@ internal object Providers {
             else -> tokens.toString() }
     }
 }
-internal data class ModelOption(val id: String, val name: String = id, val context: Int? = null, val output: Int? = null, val manual: Boolean = false, val source: String = "models_api") {
+data class ModelOption(val id: String, val name: String = id, val context: Int? = null, val output: Int? = null, val manual: Boolean = false, val source: String = "models_api") {
     fun json() = JSONObject().put("id", id).put("name", name).put("context", context ?: JSONObject.NULL).put("output", output ?: JSONObject.NULL).put("manual", manual).put("source", source)
     companion object {
         fun parse(o: JSONObject) = ModelOption(o.getString("id"), o.optString("name", o.getString("id")), o.optInt("context").takeIf { it > 0 }, o.optInt("output").takeIf { it > 0 }, o.optBoolean("manual"), o.optString("source", "models_api"))
     }
 }
-internal data class ModelAccount(val id: String = UUID.randomUUID().toString(), val provider: String, val name: String,
+data class ModelAccount(val id: String = UUID.randomUUID().toString(), val provider: String, val name: String,
     val endpoint: String, val key: String, val protocol: ModelProtocol, val models: List<ModelOption> = emptyList()) {
     fun config(model: ModelOption) = ModelConfig(endpoint, model.id, key, protocol.name, id, model.context, model.output, model.source, provider, model.name)
     fun json() = JSONObject().put("id", id).put("provider", provider).put("name", name).put("endpoint", endpoint).put("key", key)
@@ -72,7 +72,7 @@ internal data class ModelAccount(val id: String = UUID.randomUUID().toString(), 
 }
 
 /** Storage callback encrypts the complete document. Selections use account IDs, never secret copies. */
-internal class ModelAccounts(private val read: () -> String?, private val write: (String) -> Unit, private val legacy: () -> ModelConfig, private val decorate: (ModelAccount) -> ModelAccount = { it }) {
+class ModelAccounts(private val read: () -> String?, private val write: (String) -> Unit, private val legacy: () -> ModelConfig, private val decorate: (ModelAccount) -> ModelAccount = { it }) {
     private var state: JSONObject? = null
     private var cachedAccounts: List<ModelAccount>? = null
     @Synchronized private fun state(): JSONObject {

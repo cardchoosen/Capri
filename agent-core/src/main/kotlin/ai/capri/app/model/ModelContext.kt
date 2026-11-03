@@ -18,7 +18,7 @@ import kotlin.coroutines.resumeWithException
 import kotlin.math.ceil
 
 /** Estimates include serialized tools and protocol overhead; they are not tokenizer counts. */
-internal object ContextTokens {
+object ContextTokens {
     fun text(text: String): Long {
         var units = 0.0
         text.codePoints().forEach { cp -> units += when {
@@ -31,7 +31,7 @@ internal object ContextTokens {
     fun message(message: JSONObject): Long {
         message.optJSONObject("_capri_wire")?.optJSONArray("payload")?.let { return text(it.toString()) + 12 }
         val public = JSONObject(message.toString()); public.keys().asSequence().filter { it.startsWith("_capri_") }.toList().forEach { public.remove(it) }
-        val inputs = message.optJSONArray(ai.capri.app.InputAttachments.KEY)
+        val inputs = message.optJSONArray("_capri_inputs")
         val vision = if (inputs == null) 0 else (0 until inputs.length()).count { inputs.getJSONObject(it).optInt("width") > 0 } * 4096L
         return text(public.toString()) + 12 + vision
     }
@@ -39,7 +39,7 @@ internal object ContextTokens {
         (0 until messages.length()).sumOf { message(messages.getJSONObject(it)) }
 }
 
-internal data class ContextBudget(
+data class ContextBudget(
     val window: Int, val output: Int, val safety: Int, val source: String, val factor: Double = 1.15
 ) {
     val input: Int get() = window - output - safety
@@ -50,7 +50,7 @@ internal data class ContextBudget(
         .put("capacity_source", source).put("count_method", "estimate_calibrated_by_prompt_usage")
 }
 
-internal data class ModelCapacity(val window: Int, val maxOutput: Int?, val source: String) {
+data class ModelCapacity(val window: Int, val maxOutput: Int?, val source: String) {
     fun budget(factor: Double = 1.15): ContextBudget {
         val output = minOf(maxOutput ?: 8192, 16384, window / 8).coerceAtLeast(1)
         val safety = maxOf(128, window / 20)
@@ -59,7 +59,7 @@ internal data class ModelCapacity(val window: Int, val maxOutput: Int?, val sour
 }
 
 /** Account/endpoint/model scoped cache. Never persists credentials or provider error bodies. */
-internal class ModelContexts(
+class ModelContexts(
     private val root: File,
     client: OkHttpClient = OkHttpClient(),
     private val now: () -> Long = System::currentTimeMillis,
@@ -80,7 +80,7 @@ internal class ModelContexts(
         val file = File(root, identity(config) + ".json")
         val temporary = File(root, file.name + ".tmp")
         temporary.writeText(record.toString())
-        check(temporary.renameTo(file)) { "模型能力缓存写入失败" }
+        check(temporary.renameTo(file)) { "Model capacity cache write failed." }
         root.listFiles()?.filter { it.extension == "json" }?.sortedByDescending { it.lastModified() }
             ?.drop(64)?.forEach { it.delete() }
     }
@@ -122,7 +122,7 @@ internal class ModelContexts(
             record.put("window", windowHint)
         } else {
             val factor = maxOf(attempted.factor * 1.5, attempted.input.toDouble() / raw.coerceAtLeast(1) * 1.35)
-            if (factor > 16) throw ai.capri.app.knowledge.ContextBudgetFailure("无法可靠估算该模型的上下文；检查点已保留，请缩小本次输入。")
+            if (factor > 16) throw ai.capri.app.knowledge.ContextBudgetFailure("Cannot reliably estimate model context; checkpoint preserved. Narrow the input.")
             record.put("factor", factor)
         }
         record.put("source", "server_feedback").put("expires", now() + 3_600_000)
@@ -151,7 +151,7 @@ internal class ModelContexts(
                     val result = runCatching { response.use { r ->
                         if (!r.isSuccessful || r.body == null) return@use null
                         val source = r.body!!.source()
-                        require(!source.request(1_048_577)) { "模型目录过大" }
+                        require(!source.request(1_048_577)) { "Model catalog exceeds the size limit." }
                         source.readUtf8()
                     } }
                     if (continuation.isActive) continuation.resumeWith(result)

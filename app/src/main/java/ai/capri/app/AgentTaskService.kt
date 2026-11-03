@@ -2,6 +2,10 @@ package ai.capri.app
 
 import android.app.*
 import android.content.Intent
+import android.content.Context
+import android.content.BroadcastReceiver
+import android.content.IntentFilter
+import androidx.core.content.ContextCompat
 import android.content.pm.ServiceInfo
 import android.os.*
 import androidx.core.app.NotificationCompat
@@ -21,6 +25,8 @@ class AgentTaskService:Service() {
     private var engine:AgentTaskEngine?=null
     private var ready=false
     private var stopping=false
+    private var policyReceiverRegistered=false
+    private val policyReceiver=object:BroadcastReceiver(){override fun onReceive(context:Context?,intent:Intent?){update()}}
     private var wake:PowerManager.WakeLock?=null
     private val handler=Handler(Looper.getMainLooper())
     private val renew=object:Runnable{override fun run(){if(ready && !stopping && engine?.jobs?.isNotEmpty()==true){wake?.acquire(WAKE_TIMEOUT);handler.postDelayed(this,WAKE_TIMEOUT/2)}}}
@@ -34,7 +40,9 @@ class AgentTaskService:Service() {
             ServiceCompat.startForeground(this,NOTICE,notification(),if(Build.VERSION.SDK_INT>=34)ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0)
             engine=AgentRuntime.get(application).taskEngine
             wake=getSystemService(PowerManager::class.java).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,"Capri:agent-kernel").apply{setReferenceCounted(false)}
-            ready=true;engine?.attach(this);update()
+            ready=true;engine?.attach(this)
+            ContextCompat.registerReceiver(this,policyReceiver,IntentFilter(PowerManager.ACTION_DEVICE_IDLE_MODE_CHANGED).apply { addAction(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED) },ContextCompat.RECEIVER_NOT_EXPORTED)
+            policyReceiverRegistered=true;update()
         }catch(error:Exception){android.util.Log.w("CapriKernel","host_initialization_failed type=${error.javaClass.simpleName}");engine?.failPromotion(error);stopSelf()}
     }
     override fun onStartCommand(intent:Intent?,flags:Int,startId:Int):Int {
@@ -71,12 +79,14 @@ class AgentTaskService:Service() {
         val open=PendingIntent.getActivity(this,0,Intent(this,MainActivity::class.java),PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         fun action(name:String,id:Int)=PendingIntent.getService(this,id,Intent(this,AgentTaskService::class.java).setAction(name),PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val count=engine?.jobs?.size?:0
+        val power=getSystemService(PowerManager::class.java)
+        val dozeRestricted=power.isDeviceIdleMode && !power.isIgnoringBatteryOptimizations(packageName)
         return NotificationCompat.Builder(this,CHANNEL).setSmallIcon(R.drawable.ic_capri)
             .setContentTitle(if(count>0)"Capri · $count 个任务运行中" else "Capri · 内核待命")
-            .setContentText(if(count>0)"黑屏及切换应用后继续执行 · 点击返回" else "手机与 Web 可连接 · 点击返回")
+            .setContentText(if(dozeRestricted)"深度省电可能暂停网络 · 点击管理后台运行" else if(count>0)"黑屏及切换应用后继续执行 · 点击返回" else "手机与 Web 可连接 · 点击返回")
             .setContentIntent(open).setOngoing(true).setSilent(true).setOnlyAlertOnce(true)
             .apply{if(count>0)addAction(0,"停止任务",action(STOP_TASKS,0))}
             .addAction(0,"关闭内核",action(STOP_HOST,1)).build()
     }
-    override fun onDestroy(){ready=false;shutdown.cancel();releaseWake();engine?.detach(this);super.onDestroy()}
+    override fun onDestroy(){ready=false;if(policyReceiverRegistered){unregisterReceiver(policyReceiver);policyReceiverRegistered=false};shutdown.cancel();releaseWake();engine?.detach(this);super.onDestroy()}
 }

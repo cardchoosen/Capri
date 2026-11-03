@@ -7,14 +7,7 @@ internal object HistoryEditing {
     const val INITIAL = "main"
     fun validId(id: String) = id == INITIAL || runCatching { UUID.fromString(id).toString() == id }.getOrDefault(false)
     fun contextKey(chat: Session) = if (chat.contextVersion == INITIAL) chat.id else "${chat.id}:history:${chat.contextVersion}"
-    fun scope(key: String): Triple<String, String?, Boolean> {
-        val legacy = key.contains(":branch:")
-        val parts = key.split(if (legacy) ":branch:" else ":history:")
-        require(parts.size in 1..2 && parts[0].matches(Regex("[a-zA-Z0-9-]+"))) { "Invalid history scope." }
-        val revision = parts.getOrNull(1)
-        require(revision == null || revision != INITIAL && validId(revision)) { "Invalid history revision." }
-        return Triple(parts[0],revision,legacy)
-    }
+    fun scope(key: String) = ai.capri.core.HistoryScope.parse(key)
     fun copy(chat: Session) = chat.copy(messages = chat.messages.toMutableList())
     fun restore(chat: Session, previous: Session) {
         chat.messages.clear();chat.messages.addAll(previous.messages)

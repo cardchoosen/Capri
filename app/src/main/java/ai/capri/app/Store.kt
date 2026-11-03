@@ -19,7 +19,6 @@ data class Entry(val role: String, val text: String, internal val reveal: FinalR
 enum class SessionKind { TASK, PERSONAL }
 data class Session(val id: String = UUID.randomUUID().toString(), var title: String = "新会话", val messages: MutableList<Entry> = mutableListOf(), val kind: SessionKind = SessionKind.TASK,
     var contextVersion: String = HistoryEditing.INITIAL, var historyVersion: Long = 0, var historyEdited: Boolean = false, var legacyContext: Boolean = false)
-data class ModelConfig(val endpoint: String = "https://api.openai.com/v1", val model: String = "", val key: String = "", val protocol: String = "CHAT", val accountId: String = "", val contextWindow: Int? = null, val maxOutput: Int? = null, val contextSource: String = "models_api", val providerId: String = "", val modelName: String = "")
 
 class Workspace(private val base: File) {
     internal fun sessionDirectory(id: String): File {

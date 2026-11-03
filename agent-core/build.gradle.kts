@@ -4,6 +4,7 @@ plugins {
 }
 kotlin { jvmToolchain(17) }
 dependencies {
+    api("com.squareup.okhttp3:okhttp:4.12.0")
     api("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
     compileOnly("org.json:json:20240303")
     testImplementation("org.json:json:20240303")

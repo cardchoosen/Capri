@@ -5,7 +5,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /** One immutable contract snapshot shared by discovery, catalog and pre-dispatch checks. */
-internal class ToolRegistry(specifications: JSONArray) {
+class ToolRegistry(specifications: JSONArray) {
     class Definition(val name: String, contract: JSONObject) {
         private val encoded = contract.toString()
         val contract get() = JSONObject(encoded)
@@ -52,7 +52,7 @@ internal class ToolRegistry(specifications: JSONArray) {
 }
 
 /** Common JSON Schema shape checks. Tool-specific validators and authorization remain authoritative. */
-internal object ToolInput {
+object ToolInput {
     fun check(value: Any?, schema: JSONObject, root: JSONObject = schema, depth: Int = 0) {
         require(depth <= 48) { "Tool input/schema nesting limit exceeded." }
         schema.optString("\$ref").takeIf { it.isNotBlank() }?.let { ref ->

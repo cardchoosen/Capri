@@ -10,6 +10,7 @@ import java.text.NumberFormat
     val packageInfo = remember { context.packageManager.getPackageInfo(context.packageName,0) }
     val debug = context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0
     when(route) {
+        "kernel" -> KernelSettings(onBack)
         "rules" -> ai.capri.app.agent.rules.RulesSettings(vm.userRules, vm.current().id, initiallyOpen = true, onClose = onBack)
         "root" -> ScrollDetail("Root", onBack) { ai.capri.app.nativebridge.RootPanel(vm) }
         "environment" -> ScrollDetail("执行环境", onBack) {
@@ -28,7 +29,7 @@ import java.text.NumberFormat
             ConfigIntro("USB · 电脑与手机", "网页与手机共用会话、模型和文件。")
             ConfigGroup("连接状态") { ConfigFact("当前版本",if(debug) "支持 USB 开发网页" else "未开放开发网页连接") }
             ConfigGroup("连接步骤") {
-                ConfigFact("01 · 连接手机", "通过 USB 连接已授权的电脑，保持 Capri 打开。")
+                ConfigFact("01 · 连接手机", "通过 USB 连接已授权的电脑，打开一次 Capri 启动内核后可退后台。")
                 ConfigFact("02 · 打开网页", "在电脑启动项目的 Web 客户端，访问它显示的本地地址。")
                 ConfigFact("03 · 核对连接", "以网页顶部的实时状态为准；手机更新或进程重启后刷新网页。")
             }

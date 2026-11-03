@@ -1,25 +1,23 @@
 package ai.capri.app.knowledge
 
-import ai.capri.app.agent.TaskState
-import ai.capri.app.agent.TurnState
 import ai.capri.app.model.ContextBudget
 import ai.capri.app.model.ContextTokens
 import org.json.JSONArray
 import org.json.JSONObject
 
-internal data class ContextDecision(val target: ContextBudget, val maximumGroups: Int = Int.MAX_VALUE, val forceOne: Boolean = false)
-internal interface ContextStrategy {
+data class ContextDecision(val target: ContextBudget, val maximumGroups: Int = Int.MAX_VALUE, val forceOne: Boolean = false)
+interface ContextStrategy {
     val name: String
     fun decide(messages: JSONArray, tools: JSONArray, budget: ContextBudget): ContextDecision?
 }
-internal class PressureContextStrategy : ContextStrategy {
+class PressureContextStrategy : ContextStrategy {
     override val name = "pressure"
     override fun decide(messages: JSONArray, tools: JSONArray, budget: ContextBudget): ContextDecision? =
         if (budget.tokens(ContextTokens.estimate(messages, tools)) < budget.input * .85) null
         else ContextDecision(budget.copy(safety = budget.safety + budget.input / 5))
 }
 /** Experimental, injected explicitly. At most one old group per new user boundary when hard budget fits. */
-internal class MicroContextStrategy : ContextStrategy {
+class MicroContextStrategy : ContextStrategy {
     override val name = "micro"
     companion object {
         fun lastBoundary(messages: JSONArray): JSONObject? = (1 until messages.length()).map { messages.getJSONObject(it) }.lastOrNull {
@@ -41,15 +39,15 @@ internal class MicroContextStrategy : ContextStrategy {
 }
 
 /** Pure selection. No history mutation, disk writes, summary calls or tool dispatch. */
-internal object ContextWindow {
+object ContextWindow {
     data class Selection(val removed: Set<Int>, val oldNotes: Set<Int>, val protectedUsers: Set<Int>)
     fun note(m: JSONObject) = m.optString("role") == "user" && (m.has("_capri_context_archive") || m.optString("_capri_context_kind") == "archive")
     fun auxiliary(m: JSONObject) = note(m) || m.optString("_capri_context_kind") == "skill"
     private fun user(m: JSONObject) = m.optString("role") == "user" && !auxiliary(m)
     fun select(messages: JSONArray, tools: JSONArray, budget: ContextBudget, noteReserve: Long, maximumGroups: Int = Int.MAX_VALUE, forceOne: Boolean = false): Selection? {
         val users = (1 until messages.length()).filter { user(messages.getJSONObject(it)) }
-        val origin = TurnState.snapshot(messages).optString("origin")
-        val request = TaskState.snapshot(messages).optString("request")
+        val origin = (messages.optJSONObject(0)?.optJSONObject("_capri_turn") ?: JSONObject()).optString("origin")
+        val request = (messages.optJSONObject(0)?.optJSONObject("_capri_task_state") ?: JSONObject()).optString("request")
         val originAt = users.firstOrNull { origin.isNotBlank() && messages.getJSONObject(it).optString("_capri_user_entry") == origin }
             ?: users.lastOrNull { val content = messages.getJSONObject(it).optString("content")
                 request.isNotBlank() && (content == request || content.startsWith(request + "\n") || content.startsWith(request + "；"))

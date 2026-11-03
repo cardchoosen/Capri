@@ -4,7 +4,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /** A preview is never the complete result or proof of task success. Original bytes remain archived. */
-internal object ToolResultDigest {
+object ToolResultDigest {
     private val metadata = setOf("id","kind","published_at","provider","status","state","action","exit_code","success","applied","path","name","sha256","mime","size","count","total","total_chars","next_offset","offset","has_more","cursor","next","command_id","terminal_id","environment_receipt","url","title","reference","citation","source","source_id","line","line_number","start_line","end_line","reason","truncated","cached","next_line","next_column","column","scan_truncated","fetched_at","read_at","bytes","partial")
     private val textFields = setOf("output","stdout","stderr","text","content","snippet","preview")
     private fun clip(text:String, limit:Int):String {
@@ -16,7 +16,7 @@ internal object ToolResultDigest {
         require(limit >= 1024) { "Tool preview limit must be at least 1024 characters." }
         val original=runCatching{JSONObject(text)}.getOrNull()
         val base=JSONObject().put("status",original?.optString("status")?.takeIf{it.isNotBlank()}?:"result_offloaded")
-            .put("result_incomplete",ai.capri.app.agent.CompletionEvidence.unsuccessful(text)).put("truncated",true).put("reference",reference).put("total_chars",text.length).put("preview_kind",kind(name))
+            .put("result_incomplete",ai.capri.app.agent.ResultSignals.unsuccessful(text)).put("truncated",true).put("reference",reference).put("total_chars",text.length).put("preview_kind",kind(name))
             .put("notice","Partial preview only. Read the archived result with context_history reference/offset; do not repeat operations to recover output. A returned invocation is not proof of success.")
         var textLimit=(limit/6).coerceAtLeast(64);var items=8
         fun digest(value:JSONObject,depth:Int):JSONObject=JSONObject().apply {

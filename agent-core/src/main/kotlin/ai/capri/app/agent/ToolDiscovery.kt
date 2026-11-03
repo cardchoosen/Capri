@@ -5,7 +5,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /** Per-turn schema working set. Discovery never connects services or changes authorization. */
-internal class ToolDiscovery(private val maximumLoaded: Int = 8, private val schemaBudget: Long = 8000) {
+class ToolDiscovery(private val maximumLoaded: Int = 8, private val schemaBudget: Long = 8000) {
     private var registry = ToolRegistry(JSONArray())
     private val loaded = linkedSetOf<String>()
     private var services = JSONArray()
@@ -105,21 +105,21 @@ internal class ToolDiscovery(private val maximumLoaded: Int = 8, private val sch
         .put("searches",searches).put("empty_searches",emptySearches).put("evictions",evictions).put("schema_changes",schemaChanges)
         .put("invocations",invocations).put("bridge_invocations",bridgeInvocations).put("used_unique",used.size).put("rejected",rejected).put("resolution_ms_total",resolutionNanos/1_000_000)
     fun specifications(): List<JSONObject> {
-        val search=TaskState.spec("tool_search","Find registered tools or configured services by capability, synonyms or tool name. Accept English or localized queries; queries batches up to four alternatives. Matching schemas load for the next request within a bounded working set. Search never executes or connects services. No match is not proof of impossibility.",JSONObject()
+        val search=ai.capri.core.ToolContracts.spec("tool_search","Find registered tools or configured services by capability, synonyms or tool name. Accept English or localized queries; queries batches up to four alternatives. Matching schemas load for the next request within a bounded working set. Search never executes or connects services. No match is not proof of impossibility.",JSONObject()
             .put("query",JSONObject().put("type","string").put("minLength",1).put("maxLength",300))
             .put("queries",JSONObject().put("type","array").put("items",JSONObject().put("type","string").put("minLength",1).put("maxLength",300)).put("minItems",1).put("maxItems",4))
             .put("limit",JSONObject().put("type","integer").put("minimum",1).put("maximum",8)),emptyList())
         search.getJSONObject("function").getJSONObject("parameters").put("oneOf",JSONArray().put(JSONObject().put("required",JSONArray().put("query"))).put(JSONObject().put("required",JSONArray().put("queries"))))
-        return listOf(search,TaskState.spec("tool_describe","Load schemas for 1..8 known tool names within the working-set budget. Does not connect unavailable services or execute tools.",JSONObject()
+        return listOf(search,ai.capri.core.ToolContracts.spec("tool_describe","Load schemas for 1..8 known tool names within the working-set budget. Does not connect unavailable services or execute tools.",JSONObject()
             .put("names",JSONObject().put("type","array").put("items",JSONObject().put("type","string").put("minLength",1).put("maxLength",128)).put("minItems",1).put("maxItems",8)),listOf("names")),
-            TaskState.spec("tool_invoke","Invoke one known specialized tool or connected MCP tool using its exact arguments without a separate schema-loading round trip. Use only when the contract is known; otherwise search/describe first. Control, nested and core-tool targets are rejected. Existing validation, permissions, cancellation and recovery apply. Does not activate services, retry or replay operations. Result is the target tool's result; invocation alone does not prove success.",JSONObject()
+            ai.capri.core.ToolContracts.spec("tool_invoke","Invoke one known specialized tool or connected MCP tool using its exact arguments without a separate schema-loading round trip. Use only when the contract is known; otherwise search/describe first. Control, nested and core-tool targets are rejected. Existing validation, permissions, cancellation and recovery apply. Does not activate services, retry or replay operations. Result is the target tool's result; invocation alone does not prove success.",JSONObject()
                 .put("name",JSONObject().put("type","string").put("minLength",1).put("maxLength",128))
                 .put("arguments",JSONObject().put("type","object").put("description","Exact target arguments as an object, not serialized JSON text.")),listOf("name","arguments")))
     }
 }
 
 /** Query normalization data only; no model calls, network lookups or unbounded fuzzy matching. */
-internal object CapabilitySearch {
+object CapabilitySearch {
     private val groups=listOf(
         listOf("android","phone","device","手机","安卓","设备","截图","应用"),
         listOf("browser","browse","webpage","navigate","浏览器","打开网页"),
