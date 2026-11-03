@@ -56,7 +56,10 @@ internal object FinalReply {
 
     fun messages(core: String, kind: SessionKind, time: String, memories: String, state: JSONObject,
                  execution: JSONArray, budget: ContextBudget): JSONArray {
-        val system = core + "\n" + PersonaRuntime.context(kind, time, memories) + "\n" + instructions.trimIndent()
+        val detailPolicy = if (kind == SessionKind.PERSONAL)
+            "Default personal-chat delivery: be very brief and conversational, usually one to three short spoken sentences. Give the relevant result and your reaction in ordinary language. Do not turn a technical topic or a long internal draft into an unsolicited technical lesson, log recap or implementation report. Expand technical depth only when the user asks for details, mechanisms, implementation or steps. Preserve material failures, unresolved work, limitations and needed artifact links. For requested options or lists, keep each item brief unless detail was requested. Formal documents, full code and exact requested formats must remain complete; this is not a hard character limit."
+        else "Task-chat delivery: provide the result and technical detail required by the task and requested format."
+        val system = core + "\n" + PersonaRuntime.context(kind, time, memories) + "\n" + instructions.trimIndent() + "\n" + detailPolicy
         val ids = state.optJSONArray("evidence_calls")?.let { a -> (0 until a.length()).map { a.getString(it) }.toSet() }
         val bookkeeping = setOf("task_state", "tool_search", "tool_describe", "ask_user", "model_info", "profile_search")
         val internalIds = (0 until execution.length()).flatMap { i ->

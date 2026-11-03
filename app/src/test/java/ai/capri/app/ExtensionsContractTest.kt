@@ -23,7 +23,7 @@ class ExtensionsContractTest {
             val source = dir.resolve("SKILL.md")
             source.writeText("---\nname: sample\ndescription: Test useful task\n---\nDo something")
             assertEquals("sample", SkillParser.parse(dir).id)
-            for (bad in listOf("---\nname: other\ndescription: Test\n---\n", "---\nname: sample\nname: duplicate\ndescription: Test\n---\n", "---\nname: sample\ndescription: !!java.lang.ProcessBuilder {}\n---\n")) {
+            for (bad in listOf("---\nname: []\ndescription: Test\n---\n", "---\nname: sample\nname: duplicate\ndescription: Test\n---\n", "---\nname: sample\ndescription: !!java.lang.ProcessBuilder {}\n---\n")) {
                 source.writeText(bad); assertTrue(runCatching { SkillParser.parse(dir) }.isFailure)
             }
             assertTrue(runCatching { ExtensionPolicy.relative(root, "../outside") }.isFailure)

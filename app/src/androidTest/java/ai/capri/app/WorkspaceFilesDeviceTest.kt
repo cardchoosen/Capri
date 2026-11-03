@@ -50,7 +50,7 @@ class WorkspaceFilesDeviceTest {
             File(root, "extensions/skills/capri-browser/SKILL.md").apply { parentFile!!.mkdirs(); writeText("旧版内置指引") }
             val store = ExtensionStore(fixture)
             val names = context.assets.list("extensions/skills").orEmpty()
-            assertEquals(6, names.size)
+            assertEquals(10, names.size)
             for (name in names) {
                 val directory = File(root, "extensions/skills/$name")
                 val info = SkillParser.parse(directory, true)

@@ -158,8 +158,8 @@ internal object DebugWebRuntime {
                     // No raw command/env/URL or stored credential is exported by routine snapshots.
                     JSONObject().put("id", c.getString("id")).put("name", c.optString("name")).put("type", c.getString("type"))
                         .put("enabled", c.optBoolean("enabled")).put("state", vm.extensions.state(chat, c.getString("id"))).put("has_secret", vm.extensions.hasCredential(c))
-                })).put("skills", JSONArray(vm.extensions.store.skills().map { s -> JSONObject().put("id", s.id).put("name", s.name).put("builtin", s.builtin)
-                    .put("enabled", vm.extensions.store.enabled(s)).put("category", vm.extensions.store.category(s).id) }))
+                })).put("skills", JSONArray(vm.extensions.skills.catalog(chat).skills.map { s -> JSONObject().put("id", s.id).put("name", s.name).put("builtin", s.builtin)
+                    .put("enabled", vm.extensions.store.enabled(s)).put("category", vm.extensions.store.category(s).id).put("source",s.source).put("permission",vm.extensions.skills.permission(chat,s)).put("autoinvoke",vm.extensions.skills.automatic(s)).put("description",s.description) })).put("skill_settings",vm.extensions.skills.settings()).put("skill_warnings",JSONArray(vm.extensions.skills.catalog(chat).warnings))
             }
             "knowledge" -> {
                 val personal = vm.sessions.first { it.id == chat }.kind == SessionKind.PERSONAL
@@ -172,7 +172,7 @@ internal object DebugWebRuntime {
                 }
             }
             "enhancements" -> JSONObject().put("deepseek_web", vm.enhancements.enabled(ai.capri.app.retrieval.ProviderCapabilities.DEEPSEEK_WEB))
-                .put("supported", ai.capri.app.retrieval.ProviderCapabilities.deepSeek(vm.store.config(chat))).put("status", vm.enhancements.deepSeekStatus)
+                .put("supported", ai.capri.app.retrieval.ProviderCapabilities.deepSeek(vm.store.config(chat))).put("status", vm.enhancements.deepSeekStatus).put("rea", vm.extensions.rea.snapshot())
             "archive" -> withContext(Dispatchers.IO) { obj(vm.installationEnvironment.document(p)) }
             "browser" -> obj(vm.browser.execute(chat, JSONObject().put("action", "tabs")))
             else -> error("Unknown Run section.")
@@ -233,6 +233,7 @@ internal object DebugWebRuntime {
             "browser_home" -> { vm.select(chat); vm.previews.openBrowserHome(chat); vm.activeTab = 0; result("Browser preview opened on phone.") }
             "battery_settings" -> { ai.capri.app.terminal.TerminalBackgroundPolicy.openSettings(context); result("Complete system settings on the phone, then return to Capri.") }
             "root_request" -> { idle(vm); confirmed(p); obj(vm.androidTools.execute(JSONObject().put("action", "root_request"))) }
+            "rea_enhancement" -> { idle(vm); vm.extensions.setReaEnabled(chat, p.getBoolean("enabled")); result(vm.extensions.rea.snapshot()) }
             "enhancement" -> { val value = p.getBoolean("enabled"); require(!value || ai.capri.app.retrieval.ProviderCapabilities.deepSeek(vm.store.config(chat))); if (value) confirmed(p)
                 vm.enhancements.enable(ai.capri.app.retrieval.ProviderCapabilities.DEEPSEEK_WEB, value); result() }
             "git_save" -> { idle(vm); withContext(Dispatchers.IO) { val a = vm.gitAccounts.saveFromSettings(p.getString("host"), p.optString("username"), p.optString("token")); result(a.host + " · " + a.username) } }
@@ -269,11 +270,18 @@ internal object DebugWebRuntime {
                     }; result()
                 }
             }
+            "skill_settings", "skill_refresh", "skill_project" -> { idle(vm); withContext(Dispatchers.IO) {
+                when(action) {
+                    "skill_settings" -> { vm.extensions.skills.configure(p.getJSONObject("settings")); result() }
+                    "skill_project" -> { vm.extensions.skills.project(chat,p.getString("path")); result() }
+                    else -> { val context = currentCoroutineContext(); vm.extensions.skills.refreshSources { context.ensureActive() } }
+                }
+            } }
             "skill_toggle", "skill_category", "skill_remove", "skill_import" -> { idle(vm); withContext(Dispatchers.IO) {
                 val store = vm.extensions.store
                 when (action) {
-                    "skill_toggle" -> store.enable(store.skills().first { it.id == p.getString("id") }, p.getBoolean("enabled"))
-                    "skill_category" -> store.setCategory(store.skills().first { it.id == p.getString("id") }, ai.capri.app.extensions.SkillCategory.from(p.getString("category")))
+                    "skill_toggle" -> store.enable(vm.extensions.skills.catalog(chat).skills.first { it.id == p.getString("id") }, p.getBoolean("enabled"))
+                    "skill_category" -> store.setCategory(vm.extensions.skills.catalog(chat).skills.first { it.id == p.getString("id") }, ai.capri.app.extensions.SkillCategory.from(p.getString("category")))
                     "skill_remove" -> { confirmed(p); store.removeSkill(p.getString("id")) }
                     else -> { confirmed(p); return@withContext upload(chat, p.getString("upload_id"), "skill") { file -> result(file.inputStream().use { store.importSkill(it, p.optBoolean("zip")) }) } }
                 }; result()

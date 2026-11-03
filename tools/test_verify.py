@@ -1,8 +1,28 @@
 import unittest
-from verify import instrumentation_ok, instrumentation_cases
+from verify import instrumentation_ok, instrumentation_cases, verification_plan
+from argparse import Namespace
 
 
 class VerificationTest(unittest.TestCase):
+    def test_default_plan_builds_without_running_suites(self):
+        args = Namespace(case=[], profile='local', device=False, full=False, unit_test=[], host_test=[])
+        tasks, cases, host = verification_plan(args)
+        self.assertEqual([':app:assembleDebug'], tasks)
+        self.assertEqual([], cases)
+        self.assertIsNone(host)
+
+    def test_focused_plan_uses_only_selected_tests_and_case(self):
+        args = Namespace(case=['Example#smoke'], profile='rea', device=True, full=False,
+                         unit_test=['ExampleTest'], host_test=['test_verify.VerificationTest'])
+        tasks, cases, host = verification_plan(args)
+        self.assertEqual([':app:assembleDebug', ':app:testDebugUnitTest', '--tests', 'ExampleTest', ':app:assembleDebugAndroidTest'], tasks)
+        self.assertEqual(['Example#smoke'], cases)
+        self.assertEqual(['python3', '-m', 'unittest', 'test_verify.VerificationTest'], host)
+        args.full = True
+        tasks, _, host = verification_plan(args)
+        self.assertNotIn('--tests', tasks)
+        self.assertIn('discover', host)
+
     def test_adb_success_is_not_test_success(self):
         self.assertFalse(instrumentation_ok('INSTRUMENTATION_CODE: -1\nFAILURES!!!\nTests run: 1, Failures: 1'))
         self.assertFalse(instrumentation_ok('INSTRUMENTATION_CODE: -1'))
@@ -40,12 +60,12 @@ class TimingTraceTest(unittest.TestCase):
         from analyze_agent_run import summarize_trace
         report = summarize_trace({'events': [
             {'stage': 'turn', 'status': 'started', 'duration_ms': 0},
-            {'stage': 'model_request', 'duration_ms': 1000},
-            {'stage': 'model_headers', 'duration_ms': 700},
-            {'stage': 'model_body', 'duration_ms': 250},
-            {'stage': 'model_parse', 'duration_ms': 50, 'usage': {'prompt_tokens': 12}},
-            {'stage': 'tool', 'duration_ms': 500},
-            {'stage': 'prepare', 'duration_ms': 400, 'detail_ms': {'package_operations': 300}},
+            {'stage': 'model_request', 'offset_ms': 1000, 'duration_ms': 1000},
+            {'stage': 'model_headers', 'offset_ms': 700, 'duration_ms': 700},
+            {'stage': 'model_body', 'offset_ms': 950, 'duration_ms': 250},
+            {'stage': 'model_parse', 'offset_ms': 1000, 'duration_ms': 50, 'usage': {'prompt_tokens': 12}},
+            {'stage': 'tool', 'offset_ms': 1500, 'duration_ms': 500},
+            {'stage': 'prepare', 'offset_ms': 1400, 'duration_ms': 400, 'detail_ms': {'package_operations': 300}},
             {'stage': 'turn', 'status': 'ok', 'duration_ms': 1600}]})
         self.assertEqual(1600, report['total_ms']); self.assertEqual(100, report['other_ms'])
         self.assertEqual(12, report['tokens']['prompt_tokens'])

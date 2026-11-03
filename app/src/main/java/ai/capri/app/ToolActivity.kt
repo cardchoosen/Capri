@@ -48,7 +48,8 @@ internal fun toolLabel(name: String, args: JSONObject?): String = when (name) {
         "prepare" -> "Prepare environment"; "verify" -> "Verify environment"; "refresh" -> "Refresh environment checks"
         "lookup" -> "Search environment facts"; "document" -> "Read environment archive"; "record" -> "Record environment observation"; else -> "Inspect environment"
     }
-    "extensions" -> when (args?.optString("action")) { "install_skill" -> "Install Skill"; "install_mcp" -> "Install MCP"; "load_skill" -> "Load Skill"; "activate" -> "Connect MCP"; "deactivate" -> "Disconnect MCP"; "read_resource" -> "Read Skill resource"; else -> "Find extensions" }
+    "skill" -> when (args?.optString("action", "load")) { "list" -> "Discover Skills"; "read" -> "Read Skill resource"; "project" -> "Select Skill project"; "refresh" -> "Refresh Skill sources"; else -> "Load Skill" }
+    "extensions" -> when (args?.optString("action")) { "rea_target" -> "Acquire REA target"; "rea_status" -> "Inspect REA status"; "install_skill" -> "Install Skill"; "install_mcp" -> "Install MCP"; "activate" -> "Connect MCP"; "deactivate" -> "Disconnect MCP"; else -> "Find extensions" }
     "python_run" -> "Run short task"; "list_files" -> "List files"; "read_file" -> "Read file"
     "search_files" -> "Search file contents"; "edit_file" -> "Edit file"
     "write_file" -> "Write file"; "send_file" -> "Send attachment"; else -> name

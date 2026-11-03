@@ -55,3 +55,16 @@ Markdown使用Markwon 4.6.2（core/tables/strikethrough），源码及许可：h
 内置11项厂商/平台PNG来自LobeHub Lobe Icons，`@lobehub/icons-static-png` 2.5.0、dark变体；MIT，原许可证随APK保存于assets/licenses/lobe-icons.txt。仅作为品牌识别，来源https://github.com/lobehub/lobe-icons ，文件摘要见provider-icons.json；界面不从远端加载图标。
 
 模型容量参考数据来自Models.dev官方`@opencode-ai/models` 0.0.115离线快照（2026-10-25），仅提取已纳入厂商的556条文本/工具模型context/output字段，约32KB；MIT，许可证assets/licenses/models-dev.txt，摘要见model-catalog.json。https://github.com/anomalyco/models.dev 。接口数据优先，资料回退界面带≈，不作为账号实际额度或中转服务窗口保证。
+
+## REA managed reverse-engineering enhancement
+
+- Upstream: https://github.com/morluto/rea, npm `rea-agents` 6.8.0, MIT. Capri launches the published MCP; it does not copy its analysis implementation. Upstream license and third-party notices remain in the installed package.
+- `assets/rea/source.json` pins the Node ARM64 distribution, REA npm integrity, JADX bridge JAR, Ghidra archive, and Capri dependency-lock digest. REA's published tarball did not include a usable shrinkwrap; `engine-package.json` / `engine-lock.json` lock the public package dependency tree for the managed installation. Static setup suppresses lifecycle scripts and optional packages; the explicit runtime profile separately prepares Frida 17.23.2.
+- Node, REA, JDK/JADX, Ghidra and Frida are downloaded into the application environment, not embedded in the APK. Ubuntu packages retain apt signature checks and their own license files. JADX/headless bridge, Ghidra (Apache-2.0), Node, Frida and all transitive dependencies retain their own terms; REA's MIT license does not relicense them.
+- Ghidra 12.1.4's official release has no bundled Linux ARM64 decompiler. The native profile builds the included decompiler source with the phone's Ubuntu compiler. Its archive digest is published at https://github.com/NationalSecurityAgency/ghidra/releases/tag/Ghidra_12.1.4_build. No license keys, paid engine installations or system trust changes are supplied.
+
+- APK resource decoding uses the independently downloaded official Apktool 3.0.3 JAR and a managed launcher, not the older Ubuntu Apktool package. Its observed official HTTPS artifact digest is pinned in source.json; no publisher signature verification is claimed. It is not bundled in the APK.
+
+## Hermes Agent architectural reference
+
+The Kotlin agent harness described in [AGENT_HARNESS.md](AGENT_HARNESS.md) was independently implemented with reference to [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) (MIT). No Hermes Python source, runtime or dependency is bundled by this change. Reference links and inspected components are recorded in the architecture document.

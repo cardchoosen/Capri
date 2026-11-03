@@ -21,11 +21,11 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 internal object ExtensionPolicy {
-    fun id(value: String): String = value.also { require(it.matches(Regex("[a-z0-9]+(-[a-z0-9]+)*")) && it.length <= 64) { "ID 仅允许小写英文、数字及单个连字符，最长64字符" } }
+    fun id(value: String): String = value.also { require(it.matches(Regex("[a-z0-9]+(-[a-z0-9]+)*")) && it.length <= 64) { "ID must use lowercase letters, digits and single hyphens, up to 64 characters." } }
     fun relative(root: File, path: String): File {
-        require(path.isNotBlank() && !File(path).isAbsolute && '\\' !in path) { "资源路径必须是相对路径" }
+        require(path.isNotBlank() && !File(path).isAbsolute && '\\' !in path) { "Resource path must be relative." }
         val result = File(root, path).canonicalFile
-        require(result.path.startsWith(root.canonicalPath + File.separator)) { "资源路径越界" }
+        require(result.path.startsWith(root.canonicalPath + File.separator)) { "Resource path escapes its source." }
         return result
     }
     fun config(raw: JSONObject): JSONObject {
@@ -62,26 +62,6 @@ internal object ExtensionPolicy {
         // Secrets have a separate encrypted settings field. Never accept arbitrary environment/header payloads.
         require(!obj.has("headers") && !obj.has("env") && !obj.has("token")) { "凭据请使用单独的Token字段；暂不支持任意headers/env" }
         return obj
-    }
-}
-
-internal data class SkillInfo(val id: String, val name: String, val description: String, val directory: File, val builtin: Boolean, val category: SkillCategory = SkillCategory.GENERAL)
-internal object SkillParser {
-    fun parse(directory: File, builtin: Boolean = false): SkillInfo {
-        val source = File(directory, "SKILL.md")
-        require(source.isFile && source.length() <= 128_000) { "缺少SKILL.md或文件超过128KB" }
-        val text = source.readText().replace("\r\n", "\n")
-        require(text.startsWith("---\n")) { "SKILL.md需要YAML元数据" }
-        val end = text.indexOf("\n---\n", 4)
-        require(end >= 0) { "YAML元数据未闭合" }
-        val options = LoaderOptions().apply { isAllowDuplicateKeys = false; maxAliasesForCollections = 0; codePointLimit = 128_000 }
-        val metadata = Yaml(SafeConstructor(options)).load<Any>(text.substring(4, end)) as? Map<*, *> ?: error("元数据须为对象")
-        val name = ExtensionPolicy.id(metadata["name"] as? String ?: error("缺少name"))
-        require(name == directory.name) { "技能name必须与目录名一致" }
-        val description = metadata["description"] as? String ?: error("缺少description")
-        require(description.length in 1..1024)
-        val category = (metadata["metadata"] as? Map<*, *>)?.get("capri/category") as? String
-        return SkillInfo(name, name, description, directory, builtin, SkillCategory.from(category))
     }
 }
 
@@ -230,12 +210,18 @@ internal class ExtensionStore(private val context: Context) : SkillHistory {
         }
     }
     fun removeConfig(id: String) = synchronized(lock) { writeConfigs(JSONArray(configs().filterNot { it.getString("id") == id })); secretPrefs.edit().remove(id).apply(); Unit }
-    fun skills(): List<SkillInfo> = synchronized(lock) { skillsRoot.listFiles().orEmpty().filter { it.isDirectory }.mapNotNull {
-        runCatching { SkillParser.parse(it, context.assets.list("extensions/skills").orEmpty().contains(it.name)) }.getOrNull()
-    }.sortedBy { it.id } }
+    private fun scanSkills(): Pair<List<SkillInfo>, List<String>> = synchronized(lock) {
+        val warnings = mutableListOf<String>()
+        val definitions = skillsRoot.listFiles().orEmpty().filter { it.isDirectory }.mapNotNull { directory ->
+            runCatching { SkillParser.parse(directory, context.assets.list("extensions/skills").orEmpty().contains(directory.name)) }
+                .onFailure { warnings += "Skill ${directory.name} could not be parsed; inspect its frontmatter and resource limits." }.getOrNull()
+        }.sortedBy { it.id }
+        definitions to warnings
+    }
+    fun skills(): List<SkillInfo> = scanSkills().first
+    fun skillWarnings(): List<String> = scanSkills().second
     fun category(skill: SkillInfo) = SkillCategory.from(prefs.getString("skill-category:${skill.id}", skill.category.id))
     fun setCategory(skill: SkillInfo, category: SkillCategory) = synchronized(lock) {
-        require(skills().any { it.id == skill.id }) { "Skill no longer exists." }
         check(prefs.edit().putString("skill-category:${skill.id}", category.id).commit()) { "Unable to save Skill category." }
     }
     fun enabled(skill: SkillInfo) = prefs.getBoolean("skill:${skill.id}", true)
@@ -268,7 +254,7 @@ internal class ExtensionStore(private val context: Context) : SkillHistory {
                 // A root-level SKILL.md is accepted; determine its canonical name through frontmatter.
                 val skillFile = File(source, "SKILL.md"); require(skillFile.length() <= 128_000) { "技能文件超过128KB" }
                 val text = skillFile.readText()
-                val name = nameOf(text)
+                val name = nameOf(text, if(source == stage) null else source.name)
                 installStage(source, name, replace)
             } else {
                 val raw = input.use { stream -> val out = java.io.ByteArrayOutputStream(); val buffer = ByteArray(4096); while (out.size() <= 128_000) { val n = stream.read(buffer, 0, minOf(buffer.size, 128_001 - out.size())); if (n < 0) break; out.write(buffer, 0, n) }; out.toByteArray() }; require(raw.size <= 128_000) { "技能文件超过128KB" }
@@ -285,14 +271,15 @@ internal class ExtensionStore(private val context: Context) : SkillHistory {
             ExtensionInstall.copyDirectory(source, copy)
             val skillFile = File(copy, "SKILL.md")
             require(skillFile.isFile && skillFile.length() <= 128_000) { "技能目录根部需有不超过128KB的SKILL.md" }
-            installStage(copy, nameOf(skillFile.readText()), replace)
+            installStage(copy, nameOf(skillFile.readText(), source.name), replace)
         } finally { ai.capri.app.RuntimeFiles.delete(stage) }
     }
-    private fun nameOf(text: String): String {
+    private fun nameOf(text: String, directoryId: String? = null): String {
         val normalized = text.replace("\r\n", "\n"); require(normalized.startsWith("---\n")); val end = normalized.indexOf("\n---\n", 4); require(end > 0)
         val options = LoaderOptions().apply { isAllowDuplicateKeys = false; maxAliasesForCollections = 0; codePointLimit = 128_000 }
         val header = Yaml(SafeConstructor(options)).load<Any>(normalized.substring(4, end)) as? Map<*, *> ?: error("元数据无效")
-        return ExtensionPolicy.id(header["name"] as? String ?: error("缺少name"))
+        val explicit = (header["metadata"] as? Map<*, *>)?.get("capri/id") as? String
+        return ExtensionPolicy.id(explicit ?: directoryId ?: header["name"] as? String ?: error("A standalone Skill needs an ID in metadata.capri/id or a portable name."))
     }
     private fun installStage(source: File, name: String, replace: Boolean): String {
         val target = File(skillsRoot, name)

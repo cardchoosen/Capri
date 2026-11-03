@@ -15,7 +15,7 @@ class ToolSurfaceTest {
             KnowledgeTool.historySpecification(), PersonalMemory.specification(), TaskExperienceContract.specification(), ai.capri.app.agent.delegation.DelegateContract.specification(), ai.capri.app.agent.reliability.JobContract.specification(), ai.capri.app.extensions.hub.HubContract.specification(), ai.capri.app.agent.rules.RulesContract.specification(), ConversationHistory.specification(),
             ShortTaskContract.specification(), ai.capri.app.program.ProgramContract.specification(), ai.capri.app.coding.CodingAssistContract.specification(), CapabilityContract.specification(), ai.capri.app.nativebridge.NativeCatalog.spec(),
             ai.capri.app.terminal.TerminalContract.specification(), ai.capri.app.browser.BrowserContract.specification(),
-            ai.capri.app.extensions.ExtensionInstall.specification(),
+            ai.capri.app.extensions.ExtensionInstall.specification(), ai.capri.app.extensions.SkillTool.specification(),
             ai.capri.app.retrieval.WebContract.search(), ai.capri.app.retrieval.WebContract.read(), TaskState.specification())))
         val discovery = ToolDiscovery()
         val eager = discovery.assemble(all)

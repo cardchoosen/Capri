@@ -62,19 +62,22 @@ internal object ExtensionInstall {
     }
     fun specification(): JSONObject {
         fun string(description: String) = JSONObject().put("type", "string").put("description", description)
-        val actions = listOf("list", "search", "load_skill", "read_resource", "activate", "deactivate", "install_skill", "install_mcp")
+        val actions = listOf("list", "search", "activate", "deactivate", "rea_status", "rea_target", "install_skill", "install_mcp")
         val properties = JSONObject()
             .put("action", JSONObject().put("type", "string").put("enum", JSONArray(actions)))
             .put("query", string("Search keywords."))
-            .put("id", string("Installed MCP configuration or Skill ID."))
-            .put("path", string("read_resource: path relative to the Skill. install_skill: workspace SKILL.md, single-Skill ZIP or directory. install_mcp: workspace MCP configuration JSON. Installation also accepts /workspace/ paths."))
-            .put("offset", JSONObject().put("type", "integer").put("minimum", 0).put("description", "Character offset for read_resource, default 0."))
+            .put("id", string("Installed MCP configuration ID."))
+            .put("path", string("rea_target: one workspace APK, alternatively use package_name. install_skill: workspace SKILL.md, single-Skill ZIP or directory. install_mcp: workspace MCP configuration JSON. /workspace/ paths accepted."))
+            .put("package_name", string("rea_target only: exact installed Android package ID visible to Capri. Copies base/split APKs to this chat with a digest manifest; no private app data or execution. Visibility/access failures require a workspace APK; no Root fallback."))
             .put("replace", JSONObject().put("type", "boolean").put("description", "install_skill only: true explicitly updates an existing user Skill. Default false; built-ins cannot be replaced."))
             .put("source_path", string("install_mcp only: optional local-server source directory copied to persistent extension storage, referenced with \${extension} in command. Exclude venv/node_modules and declare dependencies in configuration. Not accepted for remote MCP."))
-        val branches = JSONArray().put(JSONObject().put("properties", JSONObject().put("action", JSONObject().put("enum", JSONArray(actions.take(6))))))
+        val branches = JSONArray().put(JSONObject().put("properties", JSONObject().put("action", JSONObject().put("enum", JSONArray(actions.take(5))))))
         for (action in listOf("install_skill", "install_mcp")) branches.put(JSONObject().put("properties", JSONObject().put("action", JSONObject().put("const", action))).put("required", JSONArray(listOf("path"))))
+        branches.put(JSONObject().put("properties", JSONObject().put("action", JSONObject().put("const", "rea_target")))
+            .put("oneOf", JSONArray().put(JSONObject().put("required", JSONArray(listOf("package_name"))).put("not", JSONObject().put("required", JSONArray(listOf("path")))))
+                .put(JSONObject().put("required", JSONArray(listOf("path"))).put("not", JSONObject().put("required", JSONArray(listOf("package_name")))))))
         return JSONObject().put("type", "function").put("function", JSONObject().put("name", "extensions")
-            .put("description", "Discover/load Skills, connect MCP services, or install them from this workspace. install_skill accepts SKILL.md, ZIP or a directory and makes it available across chats. install_mcp reads one {id,name,type,...} JSON object: remote uses an HTTPS url; local uses a command array and optional python_packages/npm_packages. enabled defaults true. Installation does not connect or execute; activate prepares declared dependencies and connects. Users bind credentials on the Run tab; configuration contains no secrets. Existing MCP IDs cannot be overwritten. Inspect list after uncertain installation; installation is not proof of connection or successful invocation. Before creating a Skill, load skill-creator and read its installation reference as needed.")
+            .put("description", "Discover/connect MCP services, inspect managed REA with rea_status, snapshot an explicit installed package or workspace APK with rea_target (up to 128 files / 1 GiB), or install MCP/Skills from this workspace. REA requires the user-enabled enhancement; activate capri-rea-apk, capri-rea-javascript, capri-rea-native or capri-rea-runtime for its task profile. Initial activation may prepare shared dependencies; inspect state after uncertain completion, never repeatedly reinstall. Use skill to discover and load Skill guidance. install_skill accepts SKILL.md, ZIP or a directory and makes it available across chats. install_mcp reads one {id,name,type,...} JSON object: remote uses an HTTPS url; local uses a command array and optional python_packages/npm_packages. enabled defaults true. Installation does not connect or execute; activate prepares declared dependencies and connects. Users bind credentials on the Run tab; configuration contains no secrets. Existing MCP IDs cannot be overwritten. Inspect list after uncertain installation; installation is not proof of connection or successful invocation. Before creating a Skill, use skill to load skill-creator and read its installation reference as needed.")
             .put("parameters", JSONObject().put("type", "object").put("properties", properties).put("required", JSONArray(listOf("action"))).put("additionalProperties", false).put("oneOf", branches)))
     }
 }

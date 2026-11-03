@@ -112,13 +112,13 @@ class PythonRuntime(private val context: Context, private val workspace: Workspa
     }
     private fun stop(process: Process) = OwnedProcesses.stop(process)
     /** MCP uses raw pipes, no PTY, bootstrap, Git broker, or global SSH mounts. */
-    internal fun startExtensionProcess(id: String, extension: File, run: File, command: List<String>, tokenEnvironment: Pair<String, String>? = null): Process =
+    internal fun startExtensionProcess(id: String, extension: File, run: File, command: List<String>, tokenEnvironment: Pair<String, String>? = null, realIdentity: Boolean = false): Process =
         RuntimeGate.start(context, id, "MCP") {
             check(ready) { status() }
             val home = File(workspace.folder(id, "extensions"), extension.parentFile!!.name + "/home").apply { mkdirs() }
-            val tmp = File(home.parentFile, "tmp").apply { mkdirs() }
+            val tmp = (if (realIdentity) ai.capri.app.rea.ReaIntegration.temporary(context,id,extension.parentFile!!.name) else File(home.parentFile, "tmp")).apply { mkdirs() }
             val cache = File(context.filesDir, "runtime/package-cache").apply { mkdirs() }
-            val args = listOf(proot.path, "--kill-on-exit", "--link2symlink", "-0", "-r", rootfs.path,
+            val args = listOf(proot.path, "--kill-on-exit", "--link2symlink") + (if (realIdentity) emptyList() else listOf("-0")) + listOf("-r", rootfs.path,
                 "-b", "/dev", "-b", "/proc", "-b", "${workspace.folder(id, "workspace").path}:/workspace",
                 "-b", "${home.path}:/root", "-b", "${tmp.path}:/tmp", "-b", "${extension.path}:/extension",
                 "-b", "${cache.path}:/opt/capri/cache", "-w", "/workspace", "/usr/bin/env", "-i",

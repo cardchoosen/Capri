@@ -54,6 +54,7 @@ function controls() {
   $('catalog-open').disabled=!connected||!state;
   $('run-open').disabled=!connected||!state;
   $('attach-input').disabled=!connected||!state||state.preparing||state.deleting;
+  $('skill-mention').disabled=!connected||!state||state.preparing;
   const locked=historyLocked();for(const b of document.querySelectorAll('.user-edit,.user-retry'))b.disabled=locked;
   if(historyEditor){const stale=historyTarget&&(chat!==historyTarget.chat_id||epoch!==historyTarget.epoch||state?.context_id!==historyTarget.from_context||state?.history_revision!==historyTarget.history_revision);historyEditor.send.disabled=locked||!!stale;if(stale)historyEditor.error.textContent='历史记录已变化，请取消后重新编辑。';}
   $('stop').hidden = !state?.busy; $('stop').disabled = !connected || dispatching;
@@ -153,6 +154,7 @@ function resetMessages() { historyLoad++;historyTarget=null;historyEditor=null;g
 function requestRefresh(){clearTimeout(pollTimer);if(polling){refreshAgain=true;return;}void refresh();}
 function switchChat(id){
   window.CapriDocuments?.beforeSwitch();
+  closeSkillPicker();
   if(state){views.set(chat,{state:{...state,entries:[...entries.values()],before:olderCursor},top:$('messages').scrollTop,pinned:viewport.pinned});if(views.size>5)views.delete(views.keys().next().value);}
   chat=id;sessionStorage.setItem('capri-chat',chat);state=null;resetMessages();
   const cached=views.get(chat);if(cached){render(cached.state,true);$('messages').scrollTop=cached.top;viewport.lastTop=cached.top;viewport.pinned=cached.pinned;$('latest').hidden=cached.pinned;}
@@ -203,6 +205,7 @@ function renderMessages(data, initial, older=false) {
   if(older)viewport.restore({...reading,pinned:false});else if(initial)viewport.bottom();else viewport.restore(reading);
 }
 function render(data,initial=false){
+  if(chat!==data.chat_id||epoch!==data.epoch)closeSkillPicker();
   window.CapriDocuments?.sync(data);
   state=data;epoch=data.epoch;chat=data.chat_id;sessionStorage.setItem('capri-chat',chat);
   const task=data.run_state;const budget=task?.budget;$('task-state').textContent=(task?.label||'')+(budget?` · 请求 ${budget.used}/${budget.maximum}`:'');
@@ -249,7 +252,7 @@ $('refresh').onclick=()=>{if(!polling){chat='';state=null;resetMessages();reques
 $('older').onclick=async()=>{const gen=generation;try{const data=await api('web_state',{chat_id:chat,before:olderCursor,context_id:state?.context_id});if(gen===generation)renderMessages(data,false,true);}catch(error){failure(error.message);}};
 $('ack').onclick=()=>{pendingSet(null);failure('');requestRefresh();};
 $('composer').onsubmit=async event=>{event.preventDefault();const text=$('input').value.trim();if((!text&&!state?.input_drafts?.length)||$('send').disabled)return;
-  viewport.bottom();const request={request_id:crypto.randomUUID(),chat_id:chat,epoch,from_context:state.context_id,history_revision:state.history_revision};pendingSet(request);dispatching=true;controls();try{await api('send',{...request,text:text||'请查看附件。',input_ids:(state.input_drafts||[]).map(file=>file.id)});$('input').value='';pendingSet(null);}catch(error){failure(error.message);}finally{dispatching=false;controls();requestRefresh();}};
+  closeSkillPicker();viewport.bottom();const request={request_id:crypto.randomUUID(),chat_id:chat,epoch,from_context:state.context_id,history_revision:state.history_revision};pendingSet(request);dispatching=true;controls();try{await api('send',{...request,text:text||'请查看附件。',input_ids:(state.input_drafts||[]).map(file=>file.id)});$('input').value='';pendingSet(null);}catch(error){failure(error.message);}finally{dispatching=false;controls();requestRefresh();}};
 $('input').onkeydown=event=>{if(event.key==='Enter'&&!event.shiftKey&&!event.isComposing){event.preventDefault();$('composer').requestSubmit();}};
 $('create').onclick=async()=>{const request={request_id:crypto.randomUUID(),epoch};pendingSet(request);dispatching=true;controls();try{const result=await api('web_create',request);chat=result.chat_id;state=null;resetMessages();pendingSet(null);}catch(error){failure(error.message);}finally{dispatching=false;controls();requestRefresh();}};
 $('stop').onclick=async()=>{dispatching=true;controls();try{await api('web_stop',{chat_id:chat,epoch});}catch(error){failure(error.message);}finally{dispatching=false;controls();requestRefresh();}};
@@ -273,7 +276,7 @@ function catalogText(tag,text){const node=document.createElement(tag);node.textC
 function catalogMetadata(item){
   if(catalogCategory==='tools')return item.source;
   if(catalogCategory==='mcp')return `${item.type} · ${item.enabled?'已启用':'已停用'} · ${item.active?'当前会话已选择':'当前会话未选择'} · ${item.state}`;
-  return `${item.skill_category==='weapon'?'Weapon':'General'} · ${item.builtin?'内置':'用户'} · ${item.enabled?'已启用':'已停用'}`;
+  return `${item.skill_category==='weapon'?'Weapon':'General'} · ${item.source||'user'} · ${item.autoinvoke?'自动发现':'仅手动'} · ${item.permission||'allow'} · ${item.enabled?'已启用':'已停用'}`;
 }
 async function loadCatalog(append=false){
   if(!$('catalog-dialog').open)return;
@@ -338,6 +341,53 @@ async function submitHistorical(mode){
   catch(e){if(historyEditor)historyEditor.error.textContent=e.message;failure(e.message);}
   finally{dispatching=false;controls();requestRefresh();}
 }
+
+let skillRequest=0,skillItems=[],skillOwner=null,skillSelection=null;
+function closeSkillPicker(focus=false){
+  skillRequest++;$('skill-picker').hidden=true;$('skill-mention').setAttribute('aria-expanded','false');
+  skillOwner=null;if(focus)$('skill-mention').focus();
+}
+function renderSkillOptions(){
+  const list=$('skill-options'),query=$('skill-query').value.trim().toLowerCase();list.replaceChildren();
+  const matches=skillItems.filter(s=>[s.name,s.id,s.description].join(' ').toLowerCase().includes(query));
+  for(const skill of matches){
+    const option=document.createElement('button');option.type='button';option.className='skill-option';
+    const title=document.createElement('strong');title.textContent=skill.name;
+    const id=document.createElement('small');id.textContent='@'+skill.id;
+    const description=document.createElement('span');description.textContent=skill.description||'';
+    option.append(title,id,description);option.onclick=()=>{
+      if(!skillOwner||skillOwner.chat!==chat||skillOwner.epoch!==epoch)return closeSkillPicker();
+      const input=$('input'),position=skillSelection?.value===input.value?skillSelection:null;
+      const start=position?.start??input.value.length,end=position?.end??start;
+      const prefix=start&&!/\s/.test(input.value[start-1])?' ':'';
+      input.setRangeText(prefix+'@'+skill.id+' ',start,end,'end');closeSkillPicker();input.focus();
+    };list.append(option);
+  }
+  $('skill-status').textContent=matches.length?'':'没有匹配的 Skill';
+}
+$('skill-mention').onclick=async()=>{
+  if(!$('skill-picker').hidden)return closeSkillPicker(true);
+  const input=$('input');skillSelection={value:input.value,start:input.selectionStart,end:input.selectionEnd};
+  const owner={chat,epoch},request=++skillRequest;skillOwner=owner;skillItems=[];
+  $('skill-query').value='';$('skill-options').replaceChildren();$('skill-status').textContent='正在读取 Skills…';
+  $('skill-picker').hidden=false;$('skill-mention').setAttribute('aria-expanded','true');$('skill-query').focus();
+  try{
+    const data=await api('web_runtime',{epoch:owner.epoch,chat_id:owner.chat,action:'snapshot',payload:{section:'extensions'}});
+    if(request!==skillRequest||chat!==owner.chat||epoch!==owner.epoch)return;
+    skillItems=(data.skills||[]).filter(s=>s.enabled&&s.permission!=='deny');renderSkillOptions();
+  }catch(error){if(request===skillRequest)$('skill-status').textContent=error.message;}
+};
+$('skill-query').oninput=renderSkillOptions;
+$('skill-picker').onkeydown=event=>{
+  if(event.key==='Escape'){event.preventDefault();closeSkillPicker(true);return;}
+  const buttons=Array.from($('skill-options').children),index=buttons.indexOf(document.activeElement);
+  if(event.key==='ArrowDown'||event.key==='ArrowUp'){
+    event.preventDefault();const next=index+(event.key==='ArrowDown'?1:-1);
+    if(next<0)$('skill-query').focus();else buttons[Math.min(next,buttons.length-1)]?.focus();
+  }else if(event.key==='Enter'&&document.activeElement===$('skill-query')){event.preventDefault();buttons[0]?.click();}
+};
+document.addEventListener('pointerdown',event=>{if(!event.target.closest('.skill-control'))closeSkillPicker();});
+document.addEventListener('focusin',event=>{if(!event.target.closest('.skill-control')&&!$('skill-picker').hidden)closeSkillPicker();});
 
 // One local reading preference for all conversation text, including code and document tabs.
 (() => {

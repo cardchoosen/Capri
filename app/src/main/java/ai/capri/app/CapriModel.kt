@@ -415,6 +415,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
             .put(ai.capri.app.terminal.TerminalContract.specification())
             .put(ai.capri.app.browser.BrowserContract.specification())
             .put(extensions.specification())
+            .put(ai.capri.app.extensions.SkillTool.specification())
             .put(ai.capri.app.retrieval.WebContract.search())
             .put(ai.capri.app.retrieval.WebContract.read())
             .put(TaskState.specification())
@@ -434,6 +435,16 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
         val preparingTurn = PerformanceTrace.now()
         var preparedTurn = false
         try {
+        val explicitSkills = withContext(Dispatchers.IO) {
+            val ids = extensions.skills.mentions(session.id, latestUser.text)
+            if (ids.isEmpty()) emptyList() else {
+                val lease = RuntimeGate.beginFiles(getApplication(), session.id, "Skill references")
+                try { ids.map { currentCoroutineContext().ensureActive(); extensions.skills.load(session.id, it, explicit = true) } }
+                finally { RuntimeGate.endFiles(lease) }
+            }
+        }
+        explicitSkills.forEach { ai.capri.app.extensions.SkillContext.persist(session.messages, it) }
+        if (explicitSkills.isNotEmpty()) persist()
         val savedRaw = withContext(Dispatchers.IO) { recovery.load(conversation) }
         if(savedRaw!=null)taskEvents.transition(conversation,savedRaw,"resume",latestUser.id)
         val ruleSnapshot=withContext(Dispatchers.IO){userRules.snapshot(session.id)}
@@ -470,6 +481,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
             val instruction = if (continuing) "接续检查点，已记录的工具不得因网络重试重复执行。"
                 else "这是新请求；先前记录仅用于核验现存资源，不要自行继续先前目标。"
             if (pendingFinal == null && latestUser.control == null) messages.put(JSONObject().put("role", "user").put("_capri_user_entry", latestUser.id).put("content", latestUser.text + InputAttachments.manifest(latestUser.inputs?.let { raw -> JSONArray(raw).let { a -> (0 until a.length()).map { a.getJSONObject(it) } } } ?: emptyList()) + "；" + instruction).apply { latestUser.inputs?.let { put(InputAttachments.KEY, JSONArray(it)) } })
+            explicitSkills.forEach { messages.put(JSONObject().put("role", "user").put("content", ai.capri.app.extensions.SkillLibrary.render(it))) }
         } else {
             val history = session.messages.toList()
             val nextUser = (history.indexOfFirst { it.id == latestUser.id } + 1 until history.size).firstOrNull { history[it].role == "user" } ?: history.size
@@ -495,6 +507,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
         preparedTurn = true
         val requests = ModelRequests(MAX_MODEL_CALLS, reservedDelivery = 1)
         val delegationBudget = ai.capri.app.agent.delegation.DelegateBudget()
+        val skillContext = ai.capri.app.extensions.SkillContext.Turn()
         val discovery = ToolDiscovery(schemaBudget = (contextBudget.input / 4).coerceIn(256, 8000).toLong())
         val latestRequest = if (continuing) TaskState.snapshot(messages).optString("request", latestUser.text) else latestUser.text
         val previousToolIds = if (continuing) emptySet() else (0 until messages.length()).map { messages.getJSONObject(it) }
@@ -599,6 +612,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
             notices[session.id] = ToolPresentation.progress(name); refresh()
             val toolStarted = PerformanceTrace.now()
             var toolStatus = PerformanceTrace.Status.RETURNED
+            var loadedSkill: JSONObject? = null
             val rawResult = try {
                 // Dynamic/discovery calls refresh availability between calls; immutable built-ins reuse this turn's snapshot.
                 function = withContext(Dispatchers.IO) {
@@ -615,6 +629,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                 val currentSnapshot = snapshot(session)
                 val personalSnapshot = snapshot(personalSession())
                 val historySnapshot = if (name == "conversation_history") sessions.map(::snapshot) else emptyList()
+                val toolContext = currentCoroutineContext()
                 withContext(Dispatchers.IO) {
                     when (name) {
                         "tool_search", "tool_describe" -> discovery.execute(name, args)
@@ -695,6 +710,20 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                         "context_history" -> contextHistory.query(conversation, session.messages.toList(), args)
                         "python_env" -> pythonEnvironment.execute(session.id, args)
                         "environment", "environment_check" -> capabilityTool.execute(session.id, args, trace)
+                        "skill" -> {
+                            val lease = RuntimeGate.beginFiles(getApplication(), session.id, "Skill operation")
+                            try { when (ai.capri.app.extensions.SkillTool.validate(args)) {
+                                "load" -> {
+                                    val snapshot = extensions.skills.load(session.id, args.getString("id"))
+                                    loadedSkill = snapshot
+                                    if (ai.capri.app.extensions.SkillContext.contains(messages, snapshot)) JSONObject(snapshot.toString()).apply { remove("body"); put("already_in_context", true) }.toString() else snapshot.toString()
+                                }
+                                "list" -> extensions.skills.list(session.id).toString()
+                                "read" -> extensions.skills.readResource(session.id, args.getString("id"), args.getString("path"), args.optInt("offset", 0)).toString()
+                                "project" -> { extensions.skills.project(session.id, args.getString("path")); extensions.skills.list(session.id).toString() }
+                                else -> extensions.skills.refreshSources { toolContext.ensureActive() }.toString()
+                            } } finally { RuntimeGate.endFiles(lease) }
+                        }
                         "skill_hub" -> publicSkills.execute(session.id,args)
                         "extensions" -> extensions.execute(session.id, args)
                         "browser" -> browser.execute(session.id, args)
@@ -738,6 +767,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                 val obj = JSONObject(rawResult)
                 obj.put("environment_receipt", installationEnvironment.receipt(name, "session:${session.id}", rawResult)).toString()
             }.getOrDefault(rawResult) else rawResult
+            loadedSkill?.let { ai.capri.app.extensions.SkillContext.persist(session.messages, it) }
             runCatching { taskEvents.emit(conversation,"tool_result",JSONObject().put("origin_id",latestUser.id).put("call_id",call.getString("id")).put("state",if(CompletionEvidence.unsuccessful(result))"partial" else "returned")) }
             return withContext(Dispatchers.IO) { contextHistory.boundResult(conversation, name, result) }
         }
@@ -782,6 +812,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                 val reserve = contextBudget.tokens(additions.sumOf { ai.capri.app.model.ContextTokens.message(it) }).toInt()
                 val fitBudget = contextBudget.copy(safety = contextBudget.safety + reserve)
                 messages = withContext(Dispatchers.IO) {
+                    skillContext.refresh(extensions.skills, session.id, messages)
                     taskExperience.refreshLegacyDefinitions(messages) { id -> extensions.store.withSkill(id) { skill -> ai.capri.app.extensions.SkillVersions.revision(skill.directory) } }
                     taskExperience.observeVisible(conversation,messages)
                     knowledgeTool.refreshResults(session.id, messages)
@@ -828,7 +859,8 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
                 val name = runCatching { ai.capri.app.agent.ToolRegistry.function(call).getString("name") }.getOrDefault(call.getJSONObject("function").getString("name"))
                 val label = if (name.startsWith("mcp_")) extensions.label(session.id, name) else name
                 if (!ToolPresentation.isInternal(name)) {
-                    session.messages.add(Entry("tool", "$label\n$result")); persist()
+                    val display = if (name == "skill") runCatching { JSONObject(result).apply { remove("body") }.toString() }.getOrDefault(result.take(16000)) else result
+                    session.messages.add(Entry("tool", "$label\n$display")); persist()
                 }
                 messages.put(JSONObject().put("role", "tool").put("tool_call_id", call.getString("id")).put("content", result))
                 checkpoint()

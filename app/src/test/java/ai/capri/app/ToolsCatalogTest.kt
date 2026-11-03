@@ -29,9 +29,9 @@ class ToolsCatalogTest {
         assertFalse(schema.toString().contains("toolpack"))
         val parameters = schema.getJSONObject("parameters")
         val branches = parameters.getJSONArray("oneOf")
-        assertEquals(3, branches.length())
+        assertEquals(4, branches.length()) // Includes the installed-package/workspace-APK target branch.
         val actions = parameters.getJSONObject("properties").getJSONObject("action").getJSONArray("enum").toString()
-        assertTrue(actions.contains("install_mcp")); assertTrue(actions.contains("install_skill"))
+        assertTrue(actions.contains("install_mcp")); assertTrue(actions.contains("install_skill")); assertTrue(actions.contains("rea_target"))
         val config = JSONObject("""{"id":"sample","name":"Sample","type":"remote","url":"https://example.com/mcp"}""")
         assertEquals("sample", ExtensionPolicy.config(config).getString("id"))
         assertTrue(runCatching { ExtensionPolicy.config(config.put("toolpack", JSONObject())) }.isFailure)

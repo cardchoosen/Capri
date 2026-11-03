@@ -14,3 +14,10 @@
 - Keep schemas, runtime validation, dispatch, and documentation consistent. Make failures and partial results explicit; a successful tool invocation does not establish that the user's task succeeded.
 - Prefer direct file operations, bounded outputs, useful batching, and reuse of existing environment evidence. Avoid redundant inspection, polling, dependency installation, and verification. Preserve session isolation, permission checks, cancellation, and recovery semantics.
 - Validate meaningful behavior and compatibility. Compare correctness, invalid calls, repeated operations, context cost, and measured latency; do not assume English alone improves performance or optimize call count at the expense of correctness.
+
+## Development verification
+
+- Default to one incremental build and one relevant core-path check. Pure web/docs changes do not require an Android build or installation.
+- `tools/verify.py` builds only by default. Select a JVM test with `--unit-test`, a Python module with `--host-test`, or a single native smoke case with `--device --case Class#method`. Existing device profiles are optional suites; `--full` explicitly adds all JVM/host/resource checks.
+- Reuse the current build and installed APK when unchanged. Do not repeat a successful check unless a subsequent relevant change or failure warrants it. Do not run full suites, multiple equivalent samples, background endurance tests or repeated installs for routine changes.
+- Expand testing only for an observed failure, a material unresolved risk or an explicit request. Preserve tests for diagnosis; do not delete useful regressions merely to shorten routine verification. Report the checks actually run and their scope.

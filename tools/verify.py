@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """One build/deploy/test entry point. Logs and measured timings stay in ignored work/verify.
 
-  python3 tools/verify.py --profile local
+  python3 tools/verify.py
+  python3 tools/verify.py --unit-test ai.capri.app.ReaTargetsContractTest
   python3 tools/verify.py --profile capability --device --approve-capri-install
   python3 tools/verify.py --profile runtime --device --cleanup-test
 
-Device profiles are deliberate impact-based selections, not a claim of full coverage.
+Default: build only. Add --case for one device smoke test, --unit-test/--host-test
+for focused regressions, or --full for all JVM/host/resource checks. Device profiles
+are optional impact-based selections, not a claim of full coverage.
 Only connected USB devices (-d); never clears application data or retries an Agent task.
 """
 import argparse
@@ -26,6 +29,7 @@ PACKAGE = 'ai.capri.app'
 RUNNER = PACKAGE + '.test/androidx.test.runner.AndroidJUnitRunner'
 PROFILES = {
     'local': [],
+    'agent-harness': ['ai.capri.app.AgentHarnessDeviceTest', 'ai.capri.app.FinalReplyCheckpointDeviceTest', 'ai.capri.app.CodingDeviceTest#projectRulesPatchesAndRealVerification', 'ai.capri.app.KnowledgeDeviceTest#longHistoryBudgetArchivingAndRecoveryPairing', 'ai.capri.app.KnowledgeDeviceTest#persistenceSourcesScopesDisableDeleteAndSnapshots', 'ai.capri.app.ToolLanguageDeviceTest'],
     'retrieval': ['ai.capri.app.WebRetrievalDeviceTest'],
     'web-research': ['ai.capri.app.WebResearchDeviceTest'],
     'tools': ['ai.capri.app.ToolsDeviceTest#toolsPanelUsesActualBuiltinsAndConnectedMcp', 'ai.capri.app.ToolLanguageDeviceTest', 'ai.capri.app.WebCatalogDeviceTest'],
@@ -39,11 +43,28 @@ PROFILES = {
     'short-task': ['ai.capri.app.ShortTaskDeviceTest'],
     'history-edit': ['ai.capri.app.HistoryEditingDeviceTest'],
     'web-runtime': ['ai.capri.app.WebRuntimeDeviceTest'],
+    'rea': ['ai.capri.app.ReaDeviceTest'],
+    'rea-targets': ['ai.capri.app.ReaTargetsDeviceTest'],
     'coding': ['ai.capri.app.CodingDeviceTest#projectRulesPatchesAndRealVerification', 'ai.capri.app.ToolLanguageDeviceTest'],
     'execution': ['ai.capri.app.ExecutionToolsDeviceTest', 'ai.capri.app.InstallationEnvironmentDeviceTest'],
     'capability': ['ai.capri.app.CapabilityDeviceTest'],
     'runtime': ['ai.capri.app.CapabilityDeviceTest', 'ai.capri.app.LegacySessionResetDeviceTest'],
 }
+
+
+def verification_plan(args):
+    cases = args.case or PROFILES[args.profile]
+    tasks = [':app:assembleDebug']
+    if args.full or args.unit_test:
+        tasks.append(':app:testDebugUnitTest')
+        if not args.full:
+            for test in args.unit_test:
+                tasks.extend(['--tests', test])
+    if args.device and cases:
+        tasks.append(':app:assembleDebugAndroidTest')
+    host = (['python3', '-m', 'unittest', 'discover', '-s', 'tools', '-p', 'test_*.py', '-v'] if args.full else
+            ['python3', '-m', 'unittest', *args.host_test] if args.host_test else None)
+    return tasks, cases, host
 
 
 def instrumentation_ok(text):
@@ -90,14 +111,14 @@ class Verification:
             raise RuntimeError('JDK17+ required; pass --java-home or set JAVA_HOME')
         self.adb = args.adb or os.environ.get('CAPRI_ADB') or str(Path.home() / 'Library/Android/sdk/platform-tools/adb')
 
-    def command(self, name, command, timeout=900, instrument=False):
+    def command(self, name, command, timeout=900, instrument=False, cwd=ROOT):
         print(f'{name}…', flush=True)
         start = time.monotonic()
         log = self.directory / (name + '.log')
         # File-backed output avoids pipe deadlocks and lets the external caller tail progress.
         events = []
         with log.open('w') as output:
-            proc = subprocess.Popen(command, cwd=ROOT, env=self.env, stdout=output, stderr=subprocess.STDOUT)
+            proc = subprocess.Popen(command, cwd=cwd, env=self.env, stdout=output, stderr=subprocess.STDOUT)
             try:
                 if instrument:
                     with log.open() as reader:
@@ -199,24 +220,26 @@ class Verification:
         try:
             if self.args.device:
                 self.command('device', [self.adb, '-d', 'get-state'], timeout=20)
-            tasks = [':app:assembleDebug', ':app:testDebugUnitTest']
-            if self.args.device and PROFILES[self.args.profile]: tasks += [':app:assembleDebugAndroidTest']
+            tasks, cases, host = verification_plan(self.args)
+            self.report['scope'] = {'full': self.args.full, 'unit_tests': self.args.unit_test,
+                                    'host_tests': self.args.host_test, 'device_cases': cases if self.args.device else []}
             self.command('gradle', ['./gradlew', *tasks])
-            self.command('host-tests', ['python3', '-m', 'unittest', 'discover', '-s', 'tools', '-p', 'test_*.py', '-v'])
-            hashes = json.loads((ROOT / 'docs/runtime-sha256.json').read_text())
-            for file, expected in hashes.items():
-                if hashlib.sha256((ROOT / file).read_bytes()).hexdigest() != expected:
-                    raise RuntimeError('Runtime resource hash mismatch: ' + file)
-            self.report['verified_resource_hashes'] = len(hashes)
+            if host:
+                self.command('host-tests', host, cwd=ROOT if self.args.full else ROOT / 'tools')
+            if self.args.full:
+                hashes = json.loads((ROOT / 'docs/runtime-sha256.json').read_text())
+                for file, expected in hashes.items():
+                    if hashlib.sha256((ROOT / file).read_bytes()).hexdigest() != expected:
+                        raise RuntimeError('Runtime resource hash mismatch: ' + file)
+                self.report['verified_resource_hashes'] = len(hashes)
             if self.args.device:
                 self.install(PACKAGE, ROOT / 'app/build/outputs/apk/debug/app-debug.apk')
-                if PROFILES[self.args.profile]:
+                if cases:
                     self.install(PACKAGE + '.test', ROOT / 'app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk')
                     if self.args.profile in ('browser', 'network', 'extensions'):
                         self.command('foreground', [self.adb, '-d', 'shell', 'am', 'start', '-n', PACKAGE + '/.MainActivity'], timeout=20)
                     self.command('instrumentation', [self.adb, '-d', 'shell', 'am', 'instrument', '-w', '-r',
-                        '-e', 'terminal_background', 'true', '-e', 'terminal_wait_seconds', '63',
-                        '-e', 'class', ','.join(PROFILES[self.args.profile]), RUNNER], timeout=1200, instrument=True)
+                        '-e', 'class', ','.join(cases), RUNNER], timeout=4200 if self.args.profile == 'rea' else 1200, instrument=True)
             self.report['passed'] = True
         except Exception as error:
             self.report.update(passed=False, error=str(error))
@@ -236,12 +259,18 @@ class Verification:
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--profile', choices=PROFILES, default='local')
+    parser.add_argument('--full', action='store_true', help='run all JVM/host tests and runtime resource hashes')
+    parser.add_argument('--unit-test', action='append', default=[], metavar='CLASS[.METHOD]', help='run selected JVM tests; repeat to select more')
+    parser.add_argument('--host-test', action='append', default=[], metavar='MODULE', help='run selected Python unittest modules, e.g. test_rea_runtime')
+    parser.add_argument('--case', action='append', default=[], metavar='CLASS#METHOD', help='run only these native cases instead of the profile; requires --device')
     parser.add_argument('--device', action='store_true', help='deploy; selected profile also runs its native tests')
     parser.add_argument('--adb')
     parser.add_argument('--java-home')
     parser.add_argument('--approve-capri-install', action='store_true')
     parser.add_argument('--cleanup-test', action='store_true', help='remove test APK after verification; main app stays')
     args = parser.parse_args()
+    if args.case and not args.device:
+        parser.error("--case requires --device")
     lockdir = ROOT / 'work/verify'; lockdir.mkdir(parents=True, exist_ok=True)
     with (lockdir / '.lock').open('w') as lock:
         try: fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)

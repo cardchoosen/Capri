@@ -36,6 +36,7 @@ import org.json.JSONObject
     var job by remember { mutableStateOf<Job?>(null) }
     var editingExisting by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<JSONObject?>(null) }
+    var skillSettings by remember { mutableStateOf(false) }
     var skillBody by remember { mutableStateOf<String?>(null) }
     var detailTitle by remember { mutableStateOf("Skill 指令") }
     var toolDetail by remember { mutableStateOf<CatalogTool?>(null) }
@@ -47,7 +48,8 @@ import org.json.JSONObject
     val modelRevision by vm.updates.collectAsState()
     val allConfigs = remember(revision, modelRevision) { manager.store.configs() }
     val configs = allConfigs
-    val skills = remember(revision, modelRevision) { manager.store.skills() }
+    val skillCatalog by produceState(SkillLibrary.Catalog(emptyList(),emptyList()), revision, modelRevision) { value = withContext(Dispatchers.IO) { manager.skills.catalog(chat) } }
+    val skills = skillCatalog.skills
     fun action(block: suspend () -> String) {
         if (busy) return
         job = scope.launch { busy = true; status = "处理中…"
@@ -108,25 +110,31 @@ import org.json.JSONObject
                     } else if (category == 1) {
                         ai.capri.app.extensions.hub.PublicSkillSettings(vm.publicSkills,chat)
                         Text("仅名称与简介参与发现，正文和资源按需读取。支持标准SKILL.md或单技能ZIP；也可让Capri从工作区安装。导入后不自动执行脚本。", fontSize = 12.sp)
-                        TextButton(enabled = !busy && vm.jobs.isEmpty(), onClick = { importer.launch(arrayOf("*/*")) }) { Text("导入 Skill / ZIP") }
+                        Row {
+                            TextButton(enabled = !busy && vm.jobs.isEmpty(), onClick = { importer.launch(arrayOf("*/*")) }) { Text("导入 Skill / ZIP") }
+                            TextButton(enabled = !busy && vm.jobs.isEmpty(), onClick = { skillSettings = true }) { Text("来源 / 权限") }
+                            TextButton(enabled = !busy && vm.jobs.isEmpty(), onClick = { action { val context=currentCoroutineContext(); manager.skills.refreshSources { context.ensureActive() }.toString() } }) { Text("刷新来源") }
+                        }
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             FilterChip(selected = skillCategory == null, onClick = { skillCategory = null }, label = { Text("All") })
                             SkillCategory.entries.forEach { type -> FilterChip(selected = skillCategory == type, onClick = { skillCategory = type }, label = { Text(type.title) }) }
                         }
+                        skillCatalog.warnings.forEach { Text(it,fontSize=11.sp,color=MaterialTheme.colorScheme.error) }
                         skills.filter { skillCategory == null || manager.store.category(it) == skillCategory }.forEach { skill ->
                             ConfigGroup("") {
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Column(Modifier.weight(1f).padding(top = 12.dp)) { Text(skill.name, color = MaterialTheme.colorScheme.primary); Text("${manager.store.category(skill).title} · ${if (skill.builtin) "内置" else "用户导入"}", fontSize = 11.sp, color = if (manager.store.category(skill) == SkillCategory.WEAPON) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant) }
+                                Column(Modifier.weight(1f).padding(top = 12.dp)) { Text(skill.name, color = MaterialTheme.colorScheme.primary); Text("${manager.store.category(skill).title} · ${skill.source} · ${if(manager.skills.automatic(skill)) "自动发现" else "仅手动"} · ${manager.skills.permission(chat,skill)}", fontSize = 11.sp, color = if (manager.store.category(skill) == SkillCategory.WEAPON) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant) }
                                 Switch(checked = manager.store.enabled(skill), enabled = !busy && vm.jobs.isEmpty(), onCheckedChange = { manager.store.enable(skill, it); revision++ })
                             }
                             Text(skill.description,style=MaterialTheme.typography.bodySmall,maxLines=3,overflow=TextOverflow.Ellipsis)
                             FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                                TextButton(onClick = { detailTitle = "Skill 指令"; skillBody = skill.directory.resolve("SKILL.md").readText() }) { Text("查看指令") }
+                                TextButton(onClick = { detailTitle = "Skill 指令"; skillBody = skill.file.readText() }) { Text("查看指令") }
                                 TextButton(enabled = !busy && vm.jobs.isEmpty(), onClick = { action {
                                     manager.store.setCategory(skill, if (manager.store.category(skill) == SkillCategory.WEAPON) SkillCategory.GENERAL else SkillCategory.WEAPON)
                                     "分类已更新"
                                 } }) { Text(if (manager.store.category(skill) == SkillCategory.WEAPON) "Move to General" else "Move to Weapon") }
-                                if (!skill.builtin) TextButton(enabled = !busy && vm.jobs.isEmpty(), onClick = { action { manager.store.removeSkill(skill.id); "已删除技能，已生成的会话产物保留" } }) { Text("删除") }
+                                if (skill.autoinvoke) TextButton(onClick = { val setting=manager.skills.settings(); val ids=setting.getJSONArray("manual");val old=(0 until ids.length()).map{ids.getString(it)};setting.put("manual",org.json.JSONArray(if(skill.id in old)old-skill.id else old+skill.id));manager.skills.configure(setting);revision++ }) { Text(if(manager.skills.automatic(skill)) "设为仅手动" else "参与自动发现") }
+                                if (skill.source == "user") TextButton(enabled = !busy && vm.jobs.isEmpty(), onClick = { action { manager.store.removeSkill(skill.id); "已删除技能，已生成的会话产物保留" } }) { Text("删除") }
                             }
                             }
                         }
@@ -215,6 +223,7 @@ import org.json.JSONObject
                     }
         })
     }
+    if (skillSettings) SkillLibrarySettings(vm) { skillSettings=false;revision++ }
     skillBody?.let { body -> ai.capri.app.DetailPage(onDismissRequest = { skillBody = null }, title = { Text(detailTitle) }, text = { Text(body, Modifier.fillMaxSize().verticalScroll(rememberScrollState()), fontSize = 12.sp) }, confirmButton = { TextButton(onClick = { skillBody = null }) { Text("关闭") } }) }
     toolDetail?.let { item ->
         ai.capri.app.DetailPage(onDismissRequest = { toolDetail = null }, title = { Text(item.title) }, text = {

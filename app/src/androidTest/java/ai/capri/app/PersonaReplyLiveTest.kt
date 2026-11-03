@@ -2,12 +2,8 @@ package ai.capri.app
 
 import ai.capri.app.model.ModelApi
 import ai.capri.app.model.ModelWire
-import android.content.Intent
-import androidx.lifecycle.ViewModelProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
-import androidx.test.runner.lifecycle.Stage
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -32,25 +28,10 @@ class PersonaReplyLiveTest {
         val personal = store.load().single { it.kind == SessionKind.PERSONAL }
         val config = store.config(personal.id)
         require(config.key.isNotBlank() && config.model.isNotBlank()) { "Configure a model before live evaluation" }
-        instrumentation.runOnMainSync {
-            app.startActivity(Intent(app, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        }
-        var tools: JSONArray? = null
-        for (attempt in 0 until 50) {
-            instrumentation.runOnMainSync {
-                ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED)
-                    .filterIsInstance<MainActivity>().firstOrNull { !it.isFinishing && !it.isDestroyed }?.let {
-                        tools = ViewModelProvider(it)[CapriModel::class.java].builtinTools()
-                    }
-            }
-            if (tools != null) break
-            Thread.sleep(100)
-        }
-        val definitions = requireNotNull(tools)
-        val rules = app.assets.open("persona/core.txt").bufferedReader().use { it.readText() } + "\n" +
-            app.assets.open("runtime/execution_rules.txt").bufferedReader().use { it.readText() } + "\n" + ExecutionGuidance.text +
-            PersonaRuntime.context(SessionKind.PERSONAL, java.time.ZonedDateTime.now().toString(), "")
+        val core = app.assets.open("persona/core.txt").bufferedReader().use { it.readText() }
+        val rules = FinalReply.executionIdentity
         val allScenarios = listOf(
+            Triple("brief_options", "这个skill还能往哪扩展，列几个方向吧", ""),
             Triple("long_reference_recap", "capri，上次讨论的那个skill扩展方案是什么来着，再给我看看", """{"status":"ok","output":"# 后续扩展（未实现）\n归档了五条方向：同名热点方案、IPv6方向、路由器端镜像、VPN引流、应用内观察。前两条在当时测试条件下未跑通，后三条缺少条件、未实现。这里记录的是当时的讨论和观察，不是对硬件与网络的永久判定。这五条均不在当前skill的已实现能力里，已有脚本功能不变。","complete":true,"has_more":false}"""),
             Triple("cached_environment", "诶，怎么一下就查完了，你这回真动了root吗？", """{"status":"ok","data":{"checks_reused":3,"checks_run":0,"root_invocations":0,"current_command_verified":false}}"""),
             Triple("partial_failure", "先不用继续执行，只根据刚才的结果告诉我做到哪了。", """{"status":"ok","exit_code":0,"output":"Generated capri.png. PIL Image.verify passed. Preview failed: renderer unavailable.","output_truncated":false}"""),
@@ -63,7 +44,7 @@ class PersonaReplyLiveTest {
         val scenarios = allScenarios.filter { selected == null || it.first in selected }
         require(scenarios.isNotEmpty())
         val report = JSONObject().put("persona_version", PersonaRuntime.VERSION).put("model", config.model)
-            .put("note", "Synthetic replay evidence; no real tool execution, chat or memory writes. Style requires human review.")
+            .put("note", "Text-only final stage with synthetic execution evidence; no tools, chat or memory writes. Style requires human review.")
         val samples = JSONArray(); report.put("samples", samples)
         val output = File(app.cacheDir, "persona-final-replies-live.json")
         output.writeText(report.toString(2))
@@ -88,15 +69,22 @@ class PersonaReplyLiveTest {
                     JSONObject().put("id", "fixture-read").put("type", "function").put("function", JSONObject().put("name", tool).put("arguments", args.toString())))))
                 messages.put(JSONObject().put("role", "tool").put("tool_call_id", "fixture-read").put("content", evidence))
             }
-            // DeepSeek thinking mode requires a reasoning field on replayed assistant tool calls.
-            // This is an explicit synthetic fixture, not a recovered private model trace.
-            if (config.protocol == "CHAT" && ai.capri.app.retrieval.ProviderCapabilities.deepSeek(config)) {
-                for (i in 0 until messages.length()) messages.getJSONObject(i).let { m ->
-                    if (m.optString("role") == "assistant") m.put("_capri_scope", ModelWire.scope(config))
-                        .put("reasoning_content", "Synthetic replay fixture: use the supplied prior evidence without executing it again.")
-                }
+            val draft = when (id) {
+                "brief_options" -> "Three proposed future extensions, all unimplemented: (1) Export execution logs: serialize events into JSON, support filters and timestamps, and retain error codes. (2) Offline previews: cache verified files and render local previews without a network connection, with cache expiry and version checks. (3) Incremental updates: compare version manifests and hashes to download only changed resources and verify integrity. These are possible directions, not implemented features."
+                "long_reference_recap" -> "The archived document lists five proposed extensions. Two did not work under earlier test conditions; three remain unimplemented because prerequisites are missing. All five are proposals, not existing skill capabilities."
+                "cached_environment" -> "Three valid cached checks were reused. Zero new probes and zero Root invocations occurred."
+                "partial_failure" -> "The PNG file capri.png was generated and verified; preview failed because the renderer was unavailable. The file remains valid."
+                "correction" -> "The earlier claim of definite support was unjustified. Only the driver name is known; actual capability has not been tested."
+                "exact_format" -> "| 项目 | 结果 |\n|---|---|\n| 已复用检查 | 3项 |\n| 实际Root执行 | 0次 |"
+                "detailed" -> "Cached results describe earlier evidence, not a new privileged operation. The application verifies actual host UID on each real Root execution. Reading cached evidence does not launch Root."
+                else -> "The user spent the afternoon procrastinating and is casually talking with Capri. Respond to the conversation without assigning work or inventing shared experiences."
             }
-            val body = ModelWire.request(config, PersonaRuntime.requestMessages(messages, SessionKind.PERSONAL), definitions, 4096)
+            messages.put(JSONObject().put("role", "assistant").put("content", draft))
+            val state = FinalReply.mark(messages, input, draft)
+            val finalInput = FinalReply.messages(core, SessionKind.PERSONAL, java.time.ZonedDateTime.now().toString(), "", state,
+                messages, ai.capri.app.model.ModelCapacity(65536, 4096, "live-test").budget())
+            val body = FinalReply.body(config, finalInput, 4096)
+            assertFalse(body.has("tools"))
             val request = ModelApi.headers(config, Request.Builder().url(ModelWire.url(config)))
                 .post(body.toString().toRequestBody("application/json".toMediaType())).build()
             val started = System.nanoTime()

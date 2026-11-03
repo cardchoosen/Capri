@@ -1,0 +1,1 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="ai.capri.fixture"><uses-sdk android:minSdkVersion="23" android:targetSdkVersion="36"/><application android:label="@string/app_name" android:hasCode="true"/></manifest>

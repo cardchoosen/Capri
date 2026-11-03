@@ -55,8 +55,8 @@ internal class ContextHistory(
         write(File(directory(chat), "summary.txt"), summary)
         return JSONArray().put(JSONObject().put("role", "system").put("content", rules)).apply {
             if (lastTurn(chat).isNotBlank()) put(JSONObject().put("role", "user").put("content", "[Capri 归档摘录] " + lastTurn(chat)).put("_capri_context_kind", "archive"))
-            entries.filter { it.role in setOf("user", "assistant") }.forEach {
-                put(JSONObject().put("role", it.role).apply { if (it.role == "user") put("_capri_user_entry", it.id) }.put("content", it.text + (it.inputs?.let { raw -> ai.capri.app.InputAttachments.manifest((0 until JSONArray(raw).length()).map { i -> JSONArray(raw).getJSONObject(i) }) } ?: "")).apply { it.inputs?.let { raw -> put(ai.capri.app.InputAttachments.KEY, JSONArray(raw)) } })
+            ai.capri.app.extensions.SkillContext.freshEntries(entries).forEach {
+                put(JSONObject().put("role", it.role).apply { if (it.role == "user") { if (entries.any { e -> e.id == it.id && e.role == "user" }) put("_capri_user_entry", it.id) else put("_capri_context_kind", "skill") } }.put("content", it.text + (it.inputs?.let { raw -> ai.capri.app.InputAttachments.manifest((0 until JSONArray(raw).length()).map { i -> JSONArray(raw).getJSONObject(i) }) } ?: "")).apply { it.inputs?.let { raw -> put(ai.capri.app.InputAttachments.KEY, JSONArray(raw)) } })
             }
         }
     }
@@ -112,7 +112,7 @@ internal class ContextHistory(
         return commit(chat, candidate, tools, budget, "extractive")
     }
     fun boundResult(chat: String, name: String, text: String, limit: Int = 16000): String {
-        if (text.length <= limit || name in setOf("agent_rules", "profile_search", "personal_memory", "conversation_history", "knowledge", "context_history")) return text
+        if (text.length <= limit || name == "skill" || name in setOf("agent_rules", "profile_search", "personal_memory", "conversation_history", "knowledge", "context_history")) return text
         val id = "r" + UUID.randomUUID().toString()
         write(File(directory(chat), "$id.json"), JSONObject().put("tool", name).put("content", text).toString())
         return ToolResultDigest.preview(name, text, id, limit).toString()

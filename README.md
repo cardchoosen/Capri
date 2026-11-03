@@ -10,6 +10,7 @@ Android 原生个人 AI Agent，在手机上执行任务。
 - Android 原生工具与浏览器操作，可选宿主 Root 检测、授权与命令执行
 - 全局 Git / SSH 配置
 - MCP 扩展与按需加载的 Skills
+- REA 逆向增强：APK / DEX 与资源、JavaScript、原生反编译及 Frida 运行时接入
 - Tools 能力目录，查看内置与已连接 MCP 工具
 - 免费网页搜索、正文读取与来源引用，可选供应商增强
 - 可追溯的历史摘录、分作用域的长期记忆与文本资料检索
@@ -17,16 +18,19 @@ Android 原生个人 AI Agent，在手机上执行任务。
 
 ## 相关文档
 
-- [电脑网页与 USB 自动连接](docs/USB_WEB.md)：登录自启、设备检测、断线恢复和对话模型选择
-- [文件与图片输入](docs/INPUT_ATTACHMENTS.md)：两端附件草稿、图片视觉输入与统一工具折叠
-
-- [Agent 内核架构](docs/AGENT_HARNESS.zh-CN.md)：执行循环、工具调度与可恢复上下文
-- [Agent 优化待办](docs/AGENT_OPTIMIZATION_TODO.zh-CN.md)：十个方向、60 个子项
-- [执行循环与任务控制](docs/AGENT_TURN_CONTROL.zh-CN.md)：阶段、补充要求、澄清、预算、交付证据与停滞处理
+- [上下文管理](docs/AGENT_CONTEXT.zh-CN.md)：约束原文保护、完整交互归档、类型化预览与微压缩实验
 
 - [响应耗时与人物收尾](docs/AGENT_LATENCY.zh-CN.md)：请求用途与耗时归因、纯 JSON 直接交付、辅助摘要离线评测
 
-- [上下文管理](docs/AGENT_CONTEXT.zh-CN.md)：约束原文保护、完整交互归档、类型化预览与微压缩实验
+- [执行循环与任务控制](docs/AGENT_TURN_CONTROL.zh-CN.md)：任务阶段、执行中补充、澄清接续、请求预算、交付证据和停滞处理
+
+- [Agent 优化待办](docs/AGENT_OPTIMIZATION_TODO.zh-CN.md)：十个方向、60 个子项，逐项讨论与验收
+
+- [Agent harness architecture](docs/AGENT_HARNESS.md): Hermes-inspired execution, deferred tool discovery, recoverable task state and context handoffs
+
+- [电脑网页与 USB 自动连接](docs/USB_WEB.md)：登录自启、设备检测、断线恢复和对话模型选择
+
+- [文件与图片输入](docs/INPUT_ATTACHMENTS.md)：两端附件草稿、图片视觉输入与统一工具折叠
 
 - [工具发现与能力感知](docs/AGENT_DISCOVERY.zh-CN.md)：能力状态、核心工具直供、检索、受控桥接和定义工作集
 

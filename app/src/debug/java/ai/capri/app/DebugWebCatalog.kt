@@ -41,15 +41,16 @@ internal object DebugWebCatalog {
                         .put("type", config.getString("type")).put("enabled", config.optBoolean("enabled"))
                         .put("active", manager.store.active(chat, key)).put("state", manager.state(chat, key))
                 }
-                else -> manager.store.skills().filter { skillType == "all" || manager.store.category(it).id == skillType }.map {
+                else -> manager.skills.catalog(chat).skills.filter { skillType == "all" || manager.store.category(it).id == skillType }.map {
                     JSONObject().put("id", it.id).put("name", it.name).put("description", it.description)
-                        .put("enabled", manager.store.enabled(it)).put("builtin", it.builtin).put("skill_category", manager.store.category(it).id)
+                        .put("enabled", manager.store.enabled(it)).put("builtin", it.builtin).put("skill_category", manager.store.category(it).id).put("source", it.source).put("permission", manager.skills.permission(chat,it)).put("autoinvoke", manager.skills.automatic(it))
                 }
             }
             if (id.isNotBlank()) {
                 val item = rows.firstOrNull { it.getString("id") == id } ?: error("Catalog item no longer available.")
-                if (category == "skills") manager.store.withSkill(id) { skill ->
-                    val file = File(skill.directory, "SKILL.md")
+                if (category == "skills") run {
+                    val skill = manager.skills.catalog(chat).skills.first { it.id == id }
+                    val file = skill.file
                     require(file.isFile && file.length() <= 128000) { "Skill document unavailable or oversized." }
                     val text = file.readText(); val page = ExecutionResult.textPage(text, offset)
                     val next = minOf(offset, text.length) + page.length

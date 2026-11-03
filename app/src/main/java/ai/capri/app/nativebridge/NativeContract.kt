@@ -57,7 +57,7 @@ internal object NativeCatalog {
         .put("parameters", JSONObject().put("type", "object").put("required", JSONArray(listOf("action")))
             .put("properties", JSONObject()
                 .put("action", JSONObject().put("type", "string").put("enum", JSONArray(actions.map { it.name })))
-                .put("params", JSONObject().put("type", "object").put("description", "Action-specific arguments; inspect capabilities for details. wifi_info takes none; examples: request_permissions {group:location}, open_settings {page:wifi}, launch_app {package_name:application.id}.")))))
+                .put("params", JSONObject().put("type", "object").put("description", "Action-specific arguments. device_info, battery_info, wifi_info, network_info, storage_info and display_info take none: call them directly without a capabilities probe. Query capabilities only for unknown action requirements. Examples: request_permissions {group:location}, open_settings {page:wifi}, launch_app {package_name:application.id}.")))))
 }
 
 internal fun JSONObject.requiredText(name: String, max: Int = 4000): String {

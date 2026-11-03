@@ -168,6 +168,12 @@ internal object ModelWire {
         message.put("content", text.toString()).put("_capri_wire", JSONObject().put("scope", scope(c)).put("payload", parts))
         if (calls.length() > 0) message.put("tool_calls", calls)
         return JSONObject().put("choices", JSONArray().put(JSONObject().put("message", message).put("finish_reason", if (length) "length" else if (calls.length() > 0) "tool_calls" else "stop")))
+            .apply { getJSONArray("choices").getJSONObject(0).put("native_finish_reason", when (protocol) {
+                ModelProtocol.RESPONSES -> raw.optString("status")
+                ModelProtocol.ANTHROPIC -> raw.optString("stop_reason")
+                ModelProtocol.GEMINI -> raw.getJSONArray("candidates").getJSONObject(0).optString("finishReason")
+                else -> "unknown"
+            }) }
             .put("usage", usage)
     }
 }
