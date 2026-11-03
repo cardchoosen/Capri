@@ -22,7 +22,7 @@ class TurnControlTest {
         val m = JSONArray().put(JSONObject().put("role", "system").put("content", "rules"))
         val phases = mutableListOf<TurnState.Phase>(); val executed = mutableListOf<String>(); val delivered = mutableListOf<String>()
         var checkpoint = ""; var queued = false; var wait = false
-        override fun phase(value: TurnState.Phase) { phases += value }
+        override fun phase(value: AgentLoop.Phase) { phases += TurnState.Phase.valueOf(value.name) }
         override suspend fun acceptInput(): Boolean = queued.also { if (it) { queued = false; append(JSONObject().put("role", "user").put("content", "Use the corrected path")) } }
         override fun canExecute() = !queued && !wait
         override fun waiting() = wait

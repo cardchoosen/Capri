@@ -108,13 +108,13 @@ class Bridge:
             if error.code != 'bridge_unavailable': raise
             info = {'error': 'not_ready: provider unavailable'}
         if str(info.get('error', '')).startswith('not_ready'):
-            # Starting the Activity initializes its ViewModel; no message/task is submitted.
+            # Start only the shell-authorized kernel host; no Activity, message or task is submitted.
             with self.target.lock:
                 now = time.monotonic()
                 if self.target.last_launch is not None and now - self.target.last_launch < 15:
                     raise BridgeError('app_not_ready', 'Waiting for Capri startup; repeated launches are throttled.')
                 self.target.last_launch = now
-            subprocess.run(self.adb + ['shell', 'am', 'start', '-W', '-n', 'ai.capri.app/.MainActivity'],
+            subprocess.run(self.adb + ['shell', 'am', 'start-foreground-service', '-n', 'ai.capri.app/.AgentTaskService'],
                            capture_output=True, check=True, timeout=12)
             deadline = time.monotonic() + 6
             while 'error' in info and time.monotonic() < deadline:
@@ -122,8 +122,10 @@ class Bridge:
                 info = self._content('web_connect', {})
                 if 'error' in info and not str(info['error']).startswith('not_ready'):
                     break
+        if str(info.get('error','')).startswith('kernel_stopped'):
+            raise BridgeError('kernel_stopped','Capri kernel was stopped. Open Capri to enable it; no task was submitted.')
         if 'error' in info:
-            raise BridgeError('app_not_ready', 'Capri could not initialize its debug bridge. Open the phone app and check its state.')
+            raise BridgeError('app_not_ready', 'Capri kernel is unavailable or explicitly stopped. Open Capri to enable it; no task was submitted.')
         name = info.get('socket', '')
         if not name.startswith('ai.capri.app.web.') or not name.rsplit('.', 1)[-1].isdigit():
             raise BridgeError('invalid_endpoint', 'Invalid phone endpoint.')
@@ -157,13 +159,16 @@ class Bridge:
                     if not raw.endswith(b'\n'):
                         raise OSError('Phone response incomplete')
                     result = json.loads(raw)
-                    # An orphaned socket or weak ViewModel may survive Activity destruction.
+                    if str(result.get('error','')).startswith('kernel_stopped'):
+                        raise BridgeError('kernel_stopped','Capri kernel was stopped. Open Capri to enable it; no task was submitted.')
+                    # A stale socket can outlive a replaced runtime.
                     if str(result.get('error', '')).startswith('not_ready'):
                         raise BridgeError('app_not_ready', 'Capri needs to initialize its debug bridge.')
                     self.last_used = time.monotonic()
                     return result
                 except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
                     self._disconnect()
+                    if isinstance(error,BridgeError) and error.code=='kernel_stopped':raise
                     if method not in {'web_events', 'web_state', 'web_attachment', 'web_catalog', 'web_message', 'status'} or attempt:
                         if isinstance(error, BridgeError):
                             raise

@@ -12,7 +12,7 @@ internal object TurnState {
         DELIVERING("整理回复"), WAITING("等待补充信息"), COMPLETED("已完成"), INCOMPLETE("尚未完成"),
         BUDGET("请求预算已用尽"), CANCELLED("已停止"), FAILED("执行中断")
     }
-    class Redirect : Exception("New user input requires reassessment before delivery.")
+    class Redirect : AgentLoop.Redirect()
     fun snapshot(messages: JSONArray?): JSONObject = messages?.optJSONObject(0)?.optJSONObject(KEY)?.let { JSONObject(it.toString()) } ?: JSONObject()
     fun ensure(messages: JSONArray, origin: Entry, continuing: Boolean) {
         if (!continuing || !messages.getJSONObject(0).has(KEY)) messages.getJSONObject(0).put(KEY,

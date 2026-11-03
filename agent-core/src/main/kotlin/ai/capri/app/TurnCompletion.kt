@@ -4,7 +4,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /** A bounded guard for obvious action preambles, not a general proof of task completion. */
-internal class TurnCompletion {
+class TurnCompletion {
     enum class Decision { ACCEPT, CONTINUE, INCOMPLETE }
     var corrections = 0
         private set

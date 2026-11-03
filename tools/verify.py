@@ -55,6 +55,11 @@ PROFILES = {
 def verification_plan(args):
     cases = args.case or PROFILES[args.profile]
     tasks = [':app:assembleDebug']
+    core=getattr(args,'core_test',[])
+    if args.full or core:
+        tasks.append(':agent-core:test')
+        if not args.full:
+            for test in core:tasks.extend(['--tests',test])
     if args.full or args.unit_test:
         tasks.append(':app:testDebugUnitTest')
         if not args.full:
@@ -222,7 +227,7 @@ class Verification:
                 self.command('device', [self.adb, '-d', 'get-state'], timeout=20)
             tasks, cases, host = verification_plan(self.args)
             self.report['scope'] = {'full': self.args.full, 'unit_tests': self.args.unit_test,
-                                    'host_tests': self.args.host_test, 'device_cases': cases if self.args.device else []}
+                                    'host_tests': self.args.host_test, 'core_tests':self.args.core_test, 'device_cases': cases if self.args.device else []}
             self.command('gradle', ['./gradlew', *tasks])
             if host:
                 self.command('host-tests', host, cwd=ROOT if self.args.full else ROOT / 'tools')
@@ -260,6 +265,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--profile', choices=PROFILES, default='local')
     parser.add_argument('--full', action='store_true', help='run all JVM/host tests and runtime resource hashes')
+    parser.add_argument('--core-test', action='append', default=[], metavar='CLASS[.METHOD]', help='run selected portable kernel JVM tests; repeat to select more')
     parser.add_argument('--unit-test', action='append', default=[], metavar='CLASS[.METHOD]', help='run selected JVM tests; repeat to select more')
     parser.add_argument('--host-test', action='append', default=[], metavar='MODULE', help='run selected Python unittest modules, e.g. test_rea_runtime')
     parser.add_argument('--case', action='append', default=[], metavar='CLASS#METHOD', help='run only these native cases instead of the profile; requires --device')

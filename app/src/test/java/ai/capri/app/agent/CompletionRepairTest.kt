@@ -85,7 +85,7 @@ class CompletionRepairTest {
             override val used get() = used
             override val maximum = 6
             override val request = "Check public Skill sync status"
-            override fun phase(value: TurnState.Phase) { phases += value }
+            override fun phase(value: AgentLoop.Phase) { phases += TurnState.Phase.valueOf(value.name) }
             override suspend fun prepare() = AgentLoop.Input(messages, JSONArray(), 1024)
             override suspend fun infer(input: AgentLoop.Input): JSONObject {
                 used++

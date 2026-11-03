@@ -1,7 +1,6 @@
 package ai.capri.app
 
 import android.os.Bundle
-import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -110,7 +109,7 @@ internal object DebugWebRuntime {
                 check(operations.values.none { it.job?.isActive == true }) { "Another Run operation is active; inspect its result first." }
                 while (operations.size >= 64) operations.remove(operations.keys.first())
                 val op = Operation(fingerprint, chat, JSONObject().put("operation_id", id).put("state", "running")); operations[id] = op
-                op.job = vm.viewModelScope.launch {
+                op.job = vm.runtimeScope.launch {
                     try {
                         val data = mutation.withLock {
                             check(vm.sessions.any { it.id == chat } && chat !in vm.deletingChats) { "Session unavailable." }

@@ -29,6 +29,7 @@ class AgentTaskDeviceTest {
                 }
             }
             assertTrue("Foreground promotion was not acknowledged",ready.await(12,TimeUnit.SECONDS))
+            ins.runOnMainSync{assertTrue(vm.taskEngine.cpuLeaseHeld)}
             @Suppress("DEPRECATION")
             assertTrue(context.getSystemService(ActivityManager::class.java).getRunningServices(100).any{it.service.className==AgentTaskService::class.java.name&&it.foreground})
             scenario.recreate()
@@ -37,15 +38,12 @@ class AgentTaskDeviceTest {
             scenario.close()
             ins.runOnMainSync{assertTrue(tasks.all{it.isActive})}
             val notice=context.getSystemService(NotificationManager::class.java).activeNotifications.firstOrNull{it.id==31_000_003}
-            if(notice!=null)notice.notification.actions.single().actionIntent.send()
+            if(notice!=null)notice.notification.actions.first{it.title.toString()=="停止任务"}.actionIntent.send()
             else context.startService(Intent(context,AgentTaskService::class.java).setAction("ai.capri.app.agent.STOP"))
             assertTrue("Stop action did not cancel both tasks",finished.await(5,TimeUnit.SECONDS))
             runBlocking{tasks.forEach{it.join()}}
             ins.runOnMainSync{assertTrue(vm.jobs.isEmpty())}
-            @Suppress("DEPRECATION")
-            for(i in 0..40){if(context.getSystemService(ActivityManager::class.java).getRunningServices(100).none{it.service.className==AgentTaskService::class.java.name})break;Thread.sleep(50)}
-            @Suppress("DEPRECATION")
-            assertFalse(context.getSystemService(ActivityManager::class.java).getRunningServices(100).any{it.service.className==AgentTaskService::class.java.name})
+            ins.runOnMainSync{assertTrue(vm.taskEngine.hostAvailable);assertFalse(vm.taskEngine.cpuLeaseHeld)}
         }finally{
             ins.runOnMainSync{tasks.forEach{it.cancel()}}
             runBlocking{tasks.forEach{it.join()}}

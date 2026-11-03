@@ -23,6 +23,11 @@ class VerificationTest(unittest.TestCase):
         self.assertNotIn('--tests', tasks)
         self.assertIn('discover', host)
 
+    def test_portable_core_has_its_own_selected_test_task(self):
+        args=Namespace(case=[],profile='local',device=False,full=False,unit_test=[],host_test=[],core_test=['ai.capri.core.KernelTest'])
+        tasks,_,_=verification_plan(args)
+        self.assertEqual([':app:assembleDebug',':agent-core:test','--tests','ai.capri.core.KernelTest'],tasks)
+
     def test_adb_success_is_not_test_success(self):
         self.assertFalse(instrumentation_ok('INSTRUMENTATION_CODE: -1\nFAILURES!!!\nTests run: 1, Failures: 1'))
         self.assertFalse(instrumentation_ok('INSTRUMENTATION_CODE: -1'))

@@ -8,14 +8,17 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /** Model-independent turn controller. Android services, persistence and transport are ports. */
-internal class AgentLoop(private val host: Host) {
+class AgentLoop(private val host: Host) {
+    enum class Phase { PREPARING, THINKING, TOOLS, RECOVERING, DELIVERING, WAITING, COMPLETED, INCOMPLETE, BUDGET, CANCELLED, FAILED }
+    open class Redirect:Exception("New input requires reassessment before delivery.")
     data class Input(val messages: JSONArray, val tools: JSONArray, val output: Int)
     enum class Outcome { COMPLETE, INCOMPLETE, BUDGET, WAITING }
     interface Host {
         val used: Int
         val maximum: Int
         val request: String
-        fun phase(value: TurnState.Phase) {}
+        fun phase(value: Phase) {}
+        fun normalizeTool(call:JSONObject):JSONObject=call.getJSONObject("function")
         suspend fun acceptInput(): Boolean = false
         fun canExecute(): Boolean = true
         fun waiting(): Boolean = false
@@ -39,34 +42,34 @@ internal class AgentLoop(private val host: Host) {
     }
     suspend fun run(): Outcome = try { runLoop() }
     catch (cancel: kotlinx.coroutines.CancellationException) {
-        host.phase(TurnState.Phase.CANCELLED)
+        host.phase(Phase.CANCELLED)
         kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { host.checkpoint() }
         throw cancel
     } catch (error: Exception) {
         if (error is ai.capri.app.ModelRequestFailure && error.budgetExhausted) {
             host.status("本轮请求预算已用尽；检查点已保留，可发送“继续”。")
-            host.phase(TurnState.Phase.BUDGET); host.checkpoint(); Outcome.BUDGET
+            host.phase(Phase.BUDGET); host.checkpoint(); Outcome.BUDGET
         } else {
-        host.phase(TurnState.Phase.FAILED); host.checkpoint(); throw error
+        host.phase(Phase.FAILED); host.checkpoint(); throw error
         }
     }
     private suspend fun runLoop(): Outcome {
         var completion = TurnCompletion()
         var adjustments = 0
         var planCorrections = 0
-        val progress = ProgressGuard(host.progressState())
+        val progress = ProgressGuard(host.progressState(),host::normalizeTool)
         while (host.used < host.maximum - 1) { // Reserve one request for persona delivery.
             currentCoroutineContext().ensureActive()
             if (host.acceptInput()) { progress.reset(); planCorrections = 0; completion = TurnCompletion() }
-            if (host.waiting()) { host.phase(TurnState.Phase.WAITING); host.checkpoint(); return Outcome.WAITING }
-            host.phase(TurnState.Phase.PREPARING)
+            if (host.waiting()) { host.phase(Phase.WAITING); host.checkpoint(); return Outcome.WAITING }
+            host.phase(Phase.PREPARING)
             val input = host.prepare()
             host.checkpoint()
             if (host.used >= host.maximum - 1) break
-            host.phase(TurnState.Phase.THINKING)
+            host.phase(Phase.THINKING)
             val response = try { host.infer(input) } catch (error: ModelContextRejected) {
                 if (adjustments++ >= 2) throw IllegalStateException("Context was rejected repeatedly; the checkpoint is preserved.", error)
-                host.phase(TurnState.Phase.RECOVERING)
+                host.phase(Phase.RECOVERING)
                 host.rebudget(error, input)
                 continue
             }
@@ -79,7 +82,7 @@ internal class AgentLoop(private val host: Host) {
             host.decision(choice, calls.length(), "received", completion.corrections)
             if (choice.optString("finish_reason") == "length") {
                 host.status("模型输出达到上限；截断的工具参数未执行，检查点已保留，可发送“继续”。")
-                host.phase(TurnState.Phase.BUDGET); host.checkpoint()
+                host.phase(Phase.BUDGET); host.checkpoint()
                 return Outcome.BUDGET
             }
             val priorIds = (0 until input.messages.length()).flatMap { i ->
@@ -99,7 +102,7 @@ internal class AgentLoop(private val host: Host) {
                 host.checkpoint()
                 if (retry) continue
                 host.status("任务尚未完成：模型未继续执行。已有结果和检查点已保留，可发送“继续”。")
-                host.phase(TurnState.Phase.INCOMPLETE); host.checkpoint()
+                host.phase(Phase.INCOMPLETE); host.checkpoint()
                 return Outcome.INCOMPLETE
             }
             if (calls.length() == 0) {
@@ -107,10 +110,10 @@ internal class AgentLoop(private val host: Host) {
                 val issue = host.completionIssue()
                 if (issue != null) {
                     if (planCorrections++ >= 1 || host.used >= host.maximum - 1) {
-                        host.phase(TurnState.Phase.DELIVERING); host.checkpoint()
+                        host.phase(Phase.DELIVERING); host.checkpoint()
                         try { host.deliverIncomplete("Completion assessment could not be reconciled after a repair attempt. The task remains partial; summarize verified existing results, unresolved work and any concrete blocker. Do not claim completion or repeat operations. " + issue) }
-                        catch (_: TurnState.Redirect) { progress.reset(); planCorrections = 0; completion = TurnCompletion(); continue }
-                        host.phase(TurnState.Phase.INCOMPLETE); host.checkpoint()
+                        catch (_: Redirect) { progress.reset(); planCorrections = 0; completion = TurnCompletion(); continue }
+                        host.phase(Phase.INCOMPLETE); host.checkpoint()
                         return Outcome.INCOMPLETE
                     }
                     host.append(JSONObject().put("role", "system").put("content", issue))
@@ -118,15 +121,15 @@ internal class AgentLoop(private val host: Host) {
                     continue
                 }
                 host.decision(choice, 0, "accepted_final", completion.corrections)
-                host.phase(TurnState.Phase.DELIVERING); host.checkpoint()
-                try { host.deliver(content) } catch (_: TurnState.Redirect) { progress.reset(); planCorrections = 0; completion = TurnCompletion(); continue }
+                host.phase(Phase.DELIVERING); host.checkpoint()
+                try { host.deliver(content) } catch (_: Redirect) { progress.reset(); planCorrections = 0; completion = TurnCompletion(); continue }
                 val complete = host.completeOutcome()
-                host.phase(if (complete) TurnState.Phase.COMPLETED else TurnState.Phase.INCOMPLETE)
+                host.phase(if (complete) Phase.COMPLETED else Phase.INCOMPLETE)
                 return if (complete) Outcome.COMPLETE else Outcome.INCOMPLETE
             }
             // Persist proposed calls first. Recovery marks missing results unknown instead of replaying them.
             host.checkpoint()
-            host.phase(TurnState.Phase.TOOLS)
+            host.phase(Phase.TOOLS)
             ToolScheduler().runControlled(calls, host::execute, { call, result ->
                 host.record(call, result)
                 progress.observe(call, result)?.let { warning ->
@@ -135,14 +138,14 @@ internal class AgentLoop(private val host: Host) {
                 host.saveProgress(progress.snapshot()); host.checkpoint()
             }, host::canExecute)
             if (host.acceptInput()) { progress.reset(); planCorrections = 0; completion = TurnCompletion(); continue }
-            if (host.waiting()) { host.phase(TurnState.Phase.WAITING); host.checkpoint(); return Outcome.WAITING }
+            if (host.waiting()) { host.phase(Phase.WAITING); host.checkpoint(); return Outcome.WAITING }
             if (progress.stalled) {
                 host.status("任务暂停：多次调用没有带来新进展。已有结果和检查点已保留，请补充信息或发送“继续”后调整方法。")
-                host.phase(TurnState.Phase.INCOMPLETE); host.checkpoint(); return Outcome.INCOMPLETE
+                host.phase(Phase.INCOMPLETE); host.checkpoint(); return Outcome.INCOMPLETE
             }
         }
         host.status("本轮模型请求预算已用尽；结果已保留，发送“继续”可接续。")
-        host.phase(TurnState.Phase.BUDGET); host.checkpoint()
+        host.phase(Phase.BUDGET); host.checkpoint()
         return Outcome.BUDGET
     }
     private fun validateCalls(calls: JSONArray, priorIds: Set<String>) {

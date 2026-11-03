@@ -5,7 +5,7 @@ import org.json.JSONObject
 import java.security.MessageDigest
 
 /** Bounded feedback, persisted as hashes only. Never caches or replays tool operations. */
-internal class ProgressGuard(saved: JSONObject? = null) {
+class ProgressGuard(saved: JSONObject? = null,private val normalize:(JSONObject)->JSONObject = {it.getJSONObject("function")}) {
     private val recent = ArrayDeque<String>().apply { saved?.optJSONArray("recent")?.let { a -> (0 until a.length()).toList().takeLast(12).forEach { addLast(a.getString(it)) } } }
     var stalled = false
         private set
@@ -18,12 +18,12 @@ internal class ProgressGuard(saved: JSONObject? = null) {
         else -> value.toString()
     }
     fun observe(call: JSONObject, result: String): String? {
-        val function = runCatching { ToolRegistry.function(call) }.getOrDefault(call.getJSONObject("function")); val name = function.getString("name")
+        val function = runCatching { normalize(call) }.getOrDefault(call.getJSONObject("function")); val name = function.getString("name")
         if (name in setOf("task_state", "ask_user")) return null
         val args = runCatching { JSONObject(function.optString("arguments")) }.getOrNull()
         val data = runCatching { JSONObject(result) }.getOrNull()
         val poll = name == "terminal" && args?.optString("action") == "read"
-        val kind = if (poll) "unchanged_poll" else if (CompletionEvidence.unsuccessful(result)) "repeated_failure" else "repeated_operation"
+        val kind = if (poll) "unchanged_poll" else if (ResultSignals.unsuccessful(result)) "repeated_failure" else "repeated_operation"
         val stable = data?.let { JSONObject(it.toString()).apply { listOf("elapsed_ms", "duration_ms", "timestamp").forEach(::remove) } }
         if (poll) args?.remove("wait_ms")
         val signature = name + "\u0000" + (args?.let(::canonical) ?: function.optString("arguments")) + "\u0000" + (stable?.let(::canonical) ?: result)

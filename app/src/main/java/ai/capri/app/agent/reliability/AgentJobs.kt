@@ -101,7 +101,7 @@ internal class AgentJobs(private val root:File,private val events:AgentEvents,pr
         if(!cancelled) {
             val failures=if(success)0 else job.optInt("failures")+1;job.put("failures",failures)
             if(interrupted)job.put("state","interrupted")
-            else if(job.getString("trigger")=="interval" && failures<3)job.put("state","waiting").put("due_at",clock()+job.getLong("interval_ms"))
+            else if(job.getString("trigger")=="interval" && failures<3)job.put("state","waiting").put("due_at",ai.capri.core.KernelSchedule.nextInterval(clock(),job.getLong("interval_ms")))
             else job.put("state",if(failures>=3)"needs_review" else if(success)"completed" else "failed")
         }
         JSONObject(job.toString())

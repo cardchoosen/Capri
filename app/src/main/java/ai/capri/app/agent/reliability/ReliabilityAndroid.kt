@@ -18,6 +18,7 @@ internal object ReliabilityAndroid {
     fun events(context:Context)=AgentEvents(File(context.filesDir,"agent-events"))
     fun jobs(context:Context)=AgentJobs(File(context.filesDir,"agent-jobs"),events(context))
     fun schedule(context:Context,immediate:Boolean=false):Boolean {
+        if(!KernelHost.enabled(context))return false
         val jobs=jobs(context)
         if(jobs.scopes().isEmpty())return true
         val scheduler=context.getSystemService(JobScheduler::class.java)
@@ -27,7 +28,7 @@ internal object ReliabilityAndroid {
         if(scheduler.getPendingJob(PERIODIC)==null)accepted=scheduler.schedule(periodic)==JobScheduler.RESULT_SUCCESS
         // One coalesced wakeup. Periodic reconciliation remains the fallback if Android defers it.
         val next=if(immediate)System.currentTimeMillis() else jobs.nextWakeAt()
-        if(next!=null && scheduler.getPendingJob(WAKE)==null)accepted=(scheduler.schedule(JobInfo.Builder(WAKE,component).setMinimumLatency(if(immediate)0 else (next-System.currentTimeMillis()).coerceAtLeast(60000)).setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY).build())==JobScheduler.RESULT_SUCCESS) && accepted
+        if(next!=null && scheduler.getPendingJob(WAKE)==null)accepted=(scheduler.schedule(JobInfo.Builder(WAKE,component).setMinimumLatency(if(immediate)0 else ai.capri.core.KernelSchedule.wakeDelay(next,System.currentTimeMillis(),60000)).setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY).build())==JobScheduler.RESULT_SUCCESS) && accepted
         return accepted
     }
     fun publish(context:Context,scope:String,kind:String,sourceId:String,state:String) {
@@ -41,6 +42,7 @@ class AgentJobService:JobService() {
     private val scope=CoroutineScope(SupervisorJob()+Dispatchers.IO)
     private val runs=java.util.concurrent.ConcurrentHashMap<Int,Job>()
     override fun onStartJob(params:JobParameters):Boolean {
+        if(!KernelHost.enabled(this))return false
         if(runs.containsKey(params.jobId))return true
         val job=scope.launch(start=CoroutineStart.LAZY) {
             var reschedule=true

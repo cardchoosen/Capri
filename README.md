@@ -18,6 +18,8 @@ Android 原生个人 AI Agent，在手机上执行任务。
 
 ## 相关文档
 
+- [内核独立专项](docs/KERNEL_INDEPENDENCE.zh-CN.md)：独立 JVM 内核、无页面宿主、后台 Web 接入与定时任务扩展
+
 - [上下文管理](docs/AGENT_CONTEXT.zh-CN.md)：约束原文保护、完整交互归档、类型化预览与微压缩实验
 
 - [响应耗时与人物收尾](docs/AGENT_LATENCY.zh-CN.md)：请求用途与耗时归因、纯 JSON 直接交付、辅助摘要离线评测

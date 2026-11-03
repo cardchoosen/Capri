@@ -11,7 +11,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /** Consecutive known-safe reads may overlap; every other call is an ordered barrier. */
-internal class ToolScheduler(private val concurrency: Int = 4) {
+class ToolScheduler(private val concurrency: Int = 4) {
     companion object {
         private val disk = Semaphore(4)
         private val network = Semaphore(2)

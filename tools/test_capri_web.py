@@ -163,7 +163,7 @@ class RecoveryTest(unittest.TestCase):
             with self.assertRaises(BridgeError) as error: DeviceTarget().resolve('adb')
             self.assertEqual('device_ambiguous', error.exception.code)
 
-    def test_app_is_started_only_when_provider_reports_not_ready(self):
+    def test_headless_kernel_is_started_only_when_provider_reports_not_ready(self):
         import io
         from unittest.mock import Mock, patch
         from capri_web import Bridge
@@ -176,10 +176,21 @@ class RecoveryTest(unittest.TestCase):
             connection=Mock();connection.makefile.return_value=io.BytesIO()
             with patch('capri_web.subprocess.run',return_value=Mock(stdout='12345\n')) as command, patch('capri_web.socket.create_connection',return_value=connection), patch('capri_web.time.sleep'):
                 bridge._connect()
-                starts=[c for c in command.call_args_list if 'start' in c.args[0]]
+                starts=[c for c in command.call_args_list if 'start-foreground-service' in c.args[0]]
                 self.assertEqual(0 if ready is True else 1,len(starts))
+                self.assertFalse(any('ai.capri.app/.MainActivity' in c.args[0] for c in command.call_args_list))
                 self.assertEqual(1 if ready is True else 2,bridge._content.call_count)
                 bridge.close()
+
+    def test_explicit_kernel_stop_is_not_undone_by_health_polling(self):
+        from unittest.mock import Mock,patch
+        from capri_web import Bridge,BridgeError
+        bridge=Bridge('adb','phone');bridge.target.resolve=Mock()
+        bridge._content=Mock(return_value={'error':'kernel_stopped: Open Capri to enable the kernel.'})
+        with patch('capri_web.subprocess.run') as command:
+            with self.assertRaises(BridgeError) as error:bridge._connect()
+            self.assertEqual('kernel_stopped',error.exception.code)
+            command.assert_not_called()
 
     def test_expired_idle_socket_is_replaced_before_sending_a_mutation(self):
         import io

@@ -58,6 +58,12 @@ class ModelRequestsTest {
         try{policy.execute(ModelRequests.Purpose.DELIVERY){throw IOException()};fail()}catch(_:ModelRequestFailure){}
         assertEquals(2,policy.used);assertEquals(1000L,clock)
     }
+    @Test fun platformInputFailuresPassThroughWithoutTransportRetry()=runBlocking {
+        class InputFailure:Exception(),ModelInputFailure
+        val failure=InputFailure();val policy=ModelRequests(pause={fail("Input hydration must not be retried")})
+        try{policy.execute{throw failure};fail()}catch(error:InputFailure){assertSame(failure,error)}
+        assertEquals(1,policy.used)
+    }
     @Test fun budgetIncludesRetriesAndCancellationStopsImmediately() = runBlocking {
         val policy = ModelRequests(maximum = 2, pause = {})
         var calls = 0

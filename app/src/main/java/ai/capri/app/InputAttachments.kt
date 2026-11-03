@@ -12,7 +12,7 @@ import java.nio.file.Files
 import java.security.MessageDigest
 import java.util.UUID
 
-internal class InputAttachmentFailure(cause: Exception) : Exception("Input attachments could not be prepared; original files remain available.", cause)
+internal class InputAttachmentFailure(cause: Exception) : Exception("Input attachments could not be prepared; original files remain available.", cause), ModelInputFailure
 
 /** User-selected, chat-scoped inputs. Uploading never executes a file or sends a model request. */
 internal class InputAttachments(private val directory: File, private val workspace: Workspace) {

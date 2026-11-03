@@ -10,11 +10,11 @@ import java.io.IOException
 import java.net.ProtocolException
 import javax.net.ssl.SSLException
 
-internal class ModelHttpError(val code: Int, val retryAfterMs: Long? = null) : Exception("HTTP $code")
-internal class ModelRequestFailure(val category: String, cause: Exception, val budgetExhausted: Boolean = false) : Exception(category, cause)
+class ModelHttpError(val code: Int, val retryAfterMs: Long? = null) : Exception("HTTP $code")
+class ModelRequestFailure(val category: String, cause: Exception, val budgetExhausted: Boolean = false) : Exception(category, cause)
 
 /** Retries only the model transport. The caller's tool dispatcher is never retried here. */
-internal class ModelRequests(
+class ModelRequests(
     private val maximum: Int = 50,
     private val pause: suspend (Long) -> Unit = { delay(it) },
     private val reservedDelivery: Int = 0,
@@ -58,9 +58,9 @@ internal class ModelRequests(
             }
             catch (cancel: CancellationException) { throw cancel }
             catch (failure:ModelRequestFailure) { throw failure }
-            catch (input: InputAttachmentFailure) { throw input }
             catch (context: ai.capri.app.model.ModelContextRejected) { failed(purpose);throw context }
             catch (error: Exception) {
+                if(error is ModelInputFailure)throw error
                 failed(purpose)
                 val category = when (error) {
                     is ModelHttpError -> "模型接口 HTTP ${error.code}"
@@ -94,3 +94,6 @@ internal class ModelRequests(
         }
     }
 }
+
+/** Platform adapters mark input hydration failures so transport never retries them. */
+interface ModelInputFailure

@@ -22,16 +22,17 @@ internal object DebugBridge {
     private data class Request(val chat: String, val start: Int, val text: String, val context: String = HistoryEditing.INITIAL, var end: Int? = null, var job: kotlinx.coroutines.Job? = null, val inputIds: List<String> = emptyList())
     private val requests = linkedMapOf<String, Request>()
     fun attach(model: CapriModel) { this.model = WeakReference(model) }
-    fun currentModel() = model.get()
+    fun currentModel() = AgentRuntime.current() ?: model.get()
     fun runtime(args: Bundle): DebugWebRuntime.Ticket = DebugWebRuntime.prepare(model.get() ?: error("not_ready: open Capri first"), args)
     fun catalog(args: Bundle): DebugWebCatalog.Ticket = DebugWebCatalog.prepare(model.get() ?: error("not_ready: open Capri first"), args)
     fun attachment(args: Bundle): DebugWebAttachments.Ticket = DebugWebAttachments.prepare(
         model.get() ?: error("not_ready: open Capri first"), args)
     fun call(method: String, args: Bundle): JSONObject {
         check(Looper.myLooper() == Looper.getMainLooper())
-        val vm = model.get() ?: return JSONObject().put("error", "not_ready: open Capri first")
+        val vm = currentModel() ?: return JSONObject().put("error", "not_ready: open Capri first")
+        if(!KernelHost.enabled(vm.getApplication()))return JSONObject().put("error","kernel_stopped: Open Capri to enable the kernel.")
         return when (method) {
-            "web_connect" -> DebugSocketBridge.connectionInfo()
+            "web_connect" -> if(vm.taskEngine.hostAvailable)DebugSocketBridge.connectionInfo() else JSONObject().put("error","not_ready: Kernel host is not running.")
             "web_rules", "web_events", "web_state", "web_revise", "web_message", "web_create", "web_stop", "web_delete", "web_select" -> DebugWebBridge.call(vm, method, args)
             "sessions" -> JSONObject().put("sessions", JSONArray().apply {
                 vm.sessions.forEach { put(JSONObject().put("chat_id", it.id).put("title", it.title).put("busy", vm.jobs.containsKey(it.id))) }
@@ -115,6 +116,7 @@ class DebugProvider : ContentProvider() {
     override fun call(method: String, arg: String?, extras: Bundle?): Bundle {
         val uid = Binder.getCallingUid()
         if (uid != Process.myUid() && uid != 2000 && uid != 0) throw SecurityException("ADB shell only")
+        if(!KernelHost.enabled(requireNotNull(context)))return Bundle().apply{putString("json",JSONObject().put("error","kernel_stopped: Open Capri to enable the kernel.").toString())}
         val task = FutureTask { try {
             val decoded = extras?.getString("payload")?.let { encoded ->
                 val json = DebugPayload.decode(encoded)

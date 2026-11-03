@@ -47,7 +47,7 @@ private val Muted = Color(0xFF939E94)
 
 class MainActivity : ComponentActivity() {
     private val model: CapriModel get() = AgentRuntime.get(application)
-    override fun onResume() { super.onResume(); model.androidTools.permissions.attach(this);ai.capri.app.extensions.hub.HubAndroid.schedule(application) }
+    override fun onResume() { super.onResume(); KernelHost.startFromUi(application); model.androidTools.permissions.attach(this);ai.capri.app.extensions.hub.HubAndroid.schedule(application) }
     override fun onPause() { model.androidTools.permissions.detach(this); super.onPause() }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

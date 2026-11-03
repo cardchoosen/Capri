@@ -72,6 +72,8 @@ internal object DebugSocketBridge {
                     require(raw.length <= if(uploadChunk)1500000 else 64000) { "Request exceeds its method limit." }
                     val task = FutureTask {
                         try {
+                            check(AgentRuntime.current()?.let{KernelHost.enabled(it.getApplication())}==true) { "kernel_stopped: Open Capri to enable the kernel." }
+                            check(AgentRuntime.current()?.taskEngine?.hostAvailable==true) { "not_ready: Kernel host is not running; no dispatch occurred." }
                             val bundle = Bundle().apply {
                                 for (key in listOf("text", "request_id", "chat_id", "epoch", "category", "query", "id", "skill_type", "action", "entry_id", "from_context", "context_id", "mode", "draft_id")) if (values.has(key)) putString(key, values.getString(key))
                                 for (key in listOf("offset", "before", "revision", "entry")) if (values.has(key)) putInt(key, values.getInt(key))

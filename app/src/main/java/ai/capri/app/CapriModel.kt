@@ -8,8 +8,6 @@ import ai.capri.app.agent.ToolDiscovery
 import android.app.Application
 import android.util.Log
 import java.io.File
-import androidx.lifecycle.AndroidViewModel
-import androidx.lifecycle.viewModelScope
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
@@ -25,7 +23,9 @@ import org.json.JSONObject
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
-class CapriModel(app: Application) : AndroidViewModel(app) {
+class CapriModel(private val app: Application) {
+    internal val runtimeScope=CoroutineScope(SupervisorJob()+Dispatchers.Main.immediate)
+    @Suppress("UNCHECKED_CAST") fun <T:Application> getApplication():T=app as T
     companion object { const val MAX_MODEL_CALLS = 50 }
     internal val userRules = ai.capri.app.agent.rules.RulesStore(File(app.filesDir,"agent-rules"))
     internal val publicSkills = ai.capri.app.extensions.hub.PublicSkillHub.get(app)
@@ -141,21 +141,21 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
         private set
     private var migrationJob: Job? = null
     init {
-        if (pendingDeletions.isNotEmpty()) viewModelScope.launch {
+        if (pendingDeletions.isNotEmpty()) runtimeScope.launch {
             for (chat in pendingDeletions) if (sessions.none { it.id == chat }) {
                 try { withContext(Dispatchers.IO) { cleanupDeletedSession(chat) } }
                 catch (_: Exception) { deletionError = "已删除的会话仍有文件待清理，下次启动会重试"; refresh() }
             }
         }
-        viewModelScope.launch { runtime.environment.state.collect { refresh() } }
-        viewModelScope.launch { runtime.environment.chats.collect { refresh() } }
+        runtimeScope.launch { runtime.environment.state.collect { refresh() } }
+        runtimeScope.launch { runtime.environment.chats.collect { refresh() } }
         runCatching { durableJobs.scopes().forEach(durableJobs::recover);ai.capri.app.agent.reliability.ReliabilityAndroid.schedule(app,true) }
         ai.capri.app.extensions.hub.HubAndroid.schedule(app)
         if (migrating) startMigration() else prepareSession(selected)
     }
     private fun startMigration() {
         if (migrationJob?.isActive == true) return
-        migrationJob = viewModelScope.launch {
+        migrationJob = runtimeScope.launch {
             try {
                 // Service keeps the base setup alive; the await shares its single installer lock.
                 startPreparationService(selected, true)
@@ -197,7 +197,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
         if (runtimeBusy || migrating) return
         runtimeBusy = true; runtimeResult = "正在检查执行环境…"; refresh()
         val chat = selected
-        viewModelScope.launch {
+        runtimeScope.launch {
             try { runtimeResult = capabilityTool.execute(chat, JSONObject().put("action", "inspect")) }
             catch (cancel: CancellationException) { throw cancel }
             catch (error: Exception) { runtimeResult = "环境检查未完成：${error.message?.take(1000)}" }
@@ -208,14 +208,14 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
         if (runtimeBusy || migrating || deletingChats.isNotEmpty()) return
         if (jobs.isNotEmpty()) { runtimeResult = "请等待所有会话任务结束后再维护环境"; refresh(); return }
         runtimeBusy = true; runtimeResult = "正在${action.label}…"; refresh()
-        viewModelScope.launch {
+        runtimeScope.launch {
             try { runtimeResult = EnvironmentMaintenance(getApplication(), store.workspace, runtime).perform(chat, action) }
             catch (cancel: CancellationException) { runtimeResult = "维护已中断；部分清理可能已完成"; throw cancel }
             catch (error: Exception) { runtimeResult = "维护未完成：${error.message?.take(1000)}" }
             finally { runtimeBusy = false; refresh() }
         }
     }
-    override fun onCleared() { taskEngine.dispose(); codingDiagnostics.dispose(); programs.dispose(); browser.dispose(); extensions.dispose(); super.onCleared() }
+    internal fun dispose() { taskEngine.dispose(); codingDiagnostics.dispose(); programs.dispose(); browser.dispose(); extensions.dispose(); runtimeScope.cancel() }
     fun refresh() { tick.value++ }
     fun current() = sessions.first { it.id == selected }
     internal fun personalSession() = sessions.first { it.kind == SessionKind.PERSONAL }
@@ -245,7 +245,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
         if (chat in deletingChats) return true
         deletingChats.add(chat)
         deletionError = ""; refresh()
-        viewModelScope.launch {
+        runtimeScope.launch {
             var committed = false
             try {
                 runtime.environment.sessionLock(chat) {
@@ -282,7 +282,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
         if (resettingMemory || migrating || runtimeBusy || deletingChats.isNotEmpty()) return
         if (jobs.isNotEmpty()) { memoryResetStatus = "请先停止或等待所有对话任务结束"; refresh(); return }
         resettingMemory = true; memoryResetRequired = true; memoryResetStatus = "正在重置共同经历…"; refresh()
-        viewModelScope.launch {
+        runtimeScope.launch {
             try {
                 // Cancellation cannot leave UI/model writes running across the destructive commit.
                 withContext(Dispatchers.IO + NonCancellable) {
@@ -775,7 +775,9 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
             override val used get() = requests.used
             override val maximum get() = MAX_MODEL_CALLS
             override val request get() = latestRequest + "\n" + TaskState.snapshot(messages).optJSONArray("user_context").toString()
-            override fun phase(value: TurnState.Phase) {
+            override fun normalizeTool(call:JSONObject)=ai.capri.app.agent.ToolRegistry.function(call)
+            override fun phase(phase: AgentLoop.Phase) {
+                val value=TurnState.Phase.valueOf(phase.name)
                 TurnState.phase(messages, value)
                 messages.getJSONObject(0).getJSONObject(TurnState.KEY).put("budget", requests.report())
                 notices[session.id] = value.label; updateView()

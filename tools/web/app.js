@@ -64,7 +64,7 @@ async function api(method, args) {
   const response = await fetch('/api/call', { method: 'POST', headers: {'Content-Type':'application/json', Authorization:'Bearer '+token}, body:JSON.stringify({method,args}), signal:AbortSignal.timeout(60000) });
   const result = await response.json();
   if (!response.ok || result.error) {
-    const messages={device_offline:'等待已选择的手机连接；请检查 USB 和调试授权。',device_unauthorized:'请在手机上允许这台电脑进行 USB 调试。',device_ambiguous:'检测到多台手机，请用 --serial 指定设备。',app_not_ready:'正在恢复 Capri，请检查手机是否需要解锁或确认启动。',bridge_unavailable:'手机调试入口不可用，请确认安装的是 Capri Debug 版本。',connection_lost:'连接已断开，正在自动恢复；未确认的操作不会自动重发。'};
+    const messages={kernel_stopped:'内核已关闭；请打开手机上的 Capri 后恢复连接。',device_offline:'等待已选择的手机连接；请检查 USB 和调试授权。',device_unauthorized:'请在手机上允许这台电脑进行 USB 调试。',device_ambiguous:'检测到多台手机，请用 --serial 指定设备。',app_not_ready:'正在恢复 Capri，请检查手机是否需要解锁或确认启动。',bridge_unavailable:'手机调试入口不可用，请确认安装的是 Capri Debug 版本。',connection_lost:'连接已断开，正在自动恢复；未确认的操作不会自动重发。'};
     const error=new Error(response.status===401?'访问凭证已变化，请用电脑服务的“打开网页”命令重新进入。':messages[result.code]||result.error||'连接失败');error.code=result.code;throw error;
   }
   return result;
@@ -245,7 +245,7 @@ async function refresh(){
     if(state&&(epoch!==data.epoch||data.memory_revision!==state.memory_revision||data.context_id!==state.context_id||data.history_revision!==state.history_revision))views.clear();
     const initial=!state||data.chat_id!==chat||epoch!==data.epoch||data.memory_revision!==state.memory_revision||data.total<state.total||data.context_id!==state.context_id||data.history_revision!==state.history_revision;
     if(initial)resetMessages();render(data,initial);
-  }catch(error){connected=false;$('connection').textContent=error.code==='device_offline'?'等待手机连接 · 连接后自动同步':'连接中断 · 正在自动恢复';failure(error.message);controls();}
+  }catch(error){connected=false;$('connection').textContent=error.code==='kernel_stopped'?'内核已关闭 · 打开 Capri 后恢复':error.code==='device_offline'?'等待手机连接 · 连接后自动同步':'连接中断 · 正在自动恢复';failure(error.message);controls();}
   finally{polling=false;const delay=refreshAgain?0:!connected?2000:document.hidden?2000:state?.busy?250:750;refreshAgain=false;pollTimer=setTimeout(refresh,delay);}
 }
 $('refresh').onclick=()=>{if(!polling){chat='';state=null;resetMessages();requestRefresh();}};
