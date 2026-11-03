@@ -204,7 +204,7 @@ internal object DebugWebRuntime {
                 val id = UUID.randomUUID().toString(); val file = File(directory, id); check(file.createNewFile()); android.system.Os.chmod(file.path, 384)
                 uploads[id] = Upload(chat, kind, file, size); result(id)
             }
-            "model_select" -> { vm.store.models.select(chat, p.getString("account"), p.getString("model")); result() }
+            "model_select" -> { vm.store.models.selectForNewChats(chat, p.getString("account"), p.getString("model"),vm.sessions.map{it.id}); result() }
             "model_save", "model_discover" -> {
                 idle(vm)
                 val old = vm.store.models.all().firstOrNull { it.id == p.optString("id") }

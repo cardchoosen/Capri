@@ -118,6 +118,7 @@ internal object DebugWebBridge {
                 check(!vm.migrating && !vm.runtimeBusy && !vm.resettingMemory && !vm.memoryResetRequired) { "environment busy" }
                 check(created.size < 1000) { "web create limit; restart Capri" }
                 val chat = Session()
+                vm.store.models.initializeChat(chat.id)
                 vm.sessions.add(0, chat); created[id] = chat.id; vm.persist(); vm.prepareSession(chat.id)
                 if (vm.activeTab == 0) vm.select(chat.id)
                 JSONObject().put("chat_id", chat.id)

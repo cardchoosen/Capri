@@ -222,7 +222,7 @@ class CapriModel(app: Application) : AndroidViewModel(app) {
     private fun snapshot(chat: Session) = chat.copy(messages = chat.messages.toMutableList())
     fun create() {
         if (migrating || runtimeBusy || resettingMemory || memoryResetRequired) return
-        Session().also { sessions.add(0, it); selected = it.id }; browser.selectionChanged(selected); persist(); prepareSession(selected)
+        Session().also { store.models.initializeChat(it.id); sessions.add(0, it); selected = it.id }; browser.selectionChanged(selected); persist(); prepareSession(selected)
     }
     private suspend fun cleanupDeletedSession(chat: String) {
         withContext(Dispatchers.IO) { durableJobs.scopes().filter { HistoryEditing.scope(it).first==chat }.forEach(durableJobs::cancelScope) }

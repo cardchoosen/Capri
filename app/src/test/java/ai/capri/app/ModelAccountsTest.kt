@@ -7,6 +7,48 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ModelAccountsTest {
+    @Test fun webDefaultChangesOnlyCurrentAndFutureChatsIncludingAfterRestart() {
+        var saved:String?=null
+        fun store()=ModelAccounts({saved},{saved=it},{ModelConfig()})
+        var accounts=store()
+        val a=ModelAccount(provider="custom",name="A",endpoint="https://a.example/v1",key="fixture-a",protocol=ModelProtocol.CHAT,models=listOf(ModelOption("a1"),ModelOption("a2")))
+        val b=ModelAccount(provider="custom",name="B",endpoint="https://b.example/v1",key="fixture-b",protocol=ModelProtocol.CHAT,models=listOf(ModelOption("b1")))
+        accounts.save(a);accounts.save(b);accounts.select("explicit",a.id,"a2")
+        accounts.selectForNewChats("current",b.id,"b1",listOf("current","legacy","explicit"))
+        assertEquals("b1",accounts.config("current").model)
+        assertEquals("a1",accounts.config("legacy").model)
+        assertEquals("a2",accounts.config("explicit").model)
+        accounts.initializeChat("new")
+        assertEquals("b1",accounts.config("new").model)
+        accounts=store()
+        accounts.selectForNewChats("current",a.id,"a2",listOf("current","legacy","explicit","new"))
+        assertEquals("b1",accounts.config("new").model)
+        assertEquals("a1",accounts.config("legacy").model)
+        assertEquals("a2",accounts.config("future").model)
+        assertEquals("a2",accounts.config("explicit").model)
+        accounts.remove(b.id)
+        assertNull(accounts.selected("new"))
+    }
+    @Test fun defaultUpdateIsAtomicAndKeepsLegacyChoices() {
+        var saved:String?=null;var failWrite=false
+        val accounts=ModelAccounts({saved},{if(failWrite)error("disk full");saved=it},{ModelConfig()})
+        val a=ModelAccount(provider="custom",name="A",endpoint="https://a.example/v1",key="fixture",protocol=ModelProtocol.CHAT,models=listOf(ModelOption("a1"),ModelOption("a2")))
+        accounts.save(a)
+        accounts.selectForNewChats("current",a.id,"a2",listOf("current","other"))
+        val before=saved;failWrite=true
+        try{accounts.selectForNewChats("current",a.id,"a1",listOf("current","other"));fail()}catch(_:IllegalStateException){}
+        assertEquals(before,saved);assertEquals("a2",accounts.config("current").model);assertEquals("a1",accounts.config("other").model)
+    }
+    @Test fun previouslyUnconfiguredChatDoesNotAdoptTheNewDefault() {
+        var saved:String?=null
+        val accounts=ModelAccounts({saved},{saved=it},{ModelConfig()})
+        val empty=ModelAccount(provider="custom",name="Empty",endpoint="https://empty.example/v1",key="fixture",protocol=ModelProtocol.CHAT,models=emptyList())
+        val ready=ModelAccount(provider="custom",name="Ready",endpoint="https://ready.example/v1",key="fixture",protocol=ModelProtocol.CHAT,models=listOf(ModelOption("ready")))
+        accounts.save(empty);accounts.save(ready)
+        assertNull(accounts.selected("other"))
+        accounts.selectForNewChats("current",ready.id,"ready",listOf("current","other"))
+        assertNull(accounts.selected("other"));assertEquals("ready",accounts.config("new").model)
+    }
     @Test fun migrationSelectionDeletionAndRestartNeverSwitchCredentialsSilently() {
         var saved: String? = null
         var reads = 0

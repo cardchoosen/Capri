@@ -116,7 +116,7 @@ internal class ModelAccounts(private val read: () -> String?, private val write:
         commit(data)
     }
     @Synchronized fun selected(chat: String? = null): Pair<ModelAccount, ModelOption>? {
-        val selection = chat?.let { state().getJSONObject("selections").optJSONObject(it) }
+        val selection = chat?.let { state().getJSONObject("selections").optJSONObject(it) } ?: state().optJSONObject("new_chat_selection")
         val id = selection?.optString("account") ?: state().optString("default")
         val account = all().firstOrNull { it.id == id } ?: return null
         val model = if (selection == null) account.models.firstOrNull() else account.models.firstOrNull { it.id == selection.optString("model") }
@@ -125,6 +125,23 @@ internal class ModelAccounts(private val read: () -> String?, private val write:
     @Synchronized fun select(chat: String, account: String, model: String) {
         require(all().any { it.id == account && it.models.any { m -> m.id == model } }) { "模型或API配置已删除，请重新选择" }
         val data = JSONObject(state().toString()); data.getJSONObject("selections").put(chat, JSONObject().put("account", account).put("model", model)); commit(data)
+    }
+    /** Freeze legacy inherited choices before changing the default, in the same durable write. */
+    @Synchronized fun selectForNewChats(chat:String,account:String,model:String,existingChats:Collection<String>) {
+        require(chat in existingChats) { "Conversation no longer exists." }
+        require(all().any{it.id==account && it.models.any{m->m.id==model}}) { "Model or API configuration was removed; select it again." }
+        val inherited=selected()
+        val previous=JSONObject().put("account",inherited?.first?.id?:"").put("model",inherited?.second?.id?:"")
+        val data=JSONObject(state().toString());val selections=data.getJSONObject("selections")
+        existingChats.forEach{if(!selections.has(it))selections.put(it,JSONObject(previous.toString()))}
+        val next=JSONObject().put("account",account).put("model",model)
+        selections.put(chat,JSONObject(next.toString()));data.put("new_chat_selection",next)
+        commit(data)
+    }
+    @Synchronized fun initializeChat(chat:String) {
+        if(state().getJSONObject("selections").has(chat))return
+        val choice=selected()?:return
+        select(chat,choice.first.id,choice.second.id)
     }
     @Synchronized fun forgetChat(chat: String) {
         val data = JSONObject(state().toString()); data.getJSONObject("selections").remove(chat); commit(data)
