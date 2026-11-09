@@ -7,6 +7,23 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ModelProtocolCompatibilityTest {
+    @Test fun deepSeekReasoningUsesProviderFieldsAndSeparatesDisabledToolHistory() {
+        val config = ModelConfig(endpoint = "https://api.deepseek.com/v1", model = "deepseek-flash", key = "fixture")
+        fun body(c: ModelConfig) = ModelWire.request(c, JSONArray(), JSONArray(), 1024)
+        val disabled = config.copy(reasoningEffort = "none")
+        val maximum = config.copy(reasoningEffort = "max")
+        assertFalse(body(config).has("reasoning_effort"))
+        assertEquals("none", body(disabled).getString("reasoning_effort"))
+        assertEquals("max", body(maximum).getString("reasoning_effort"))
+        assertEquals("max", body(maximum.copy(protocol = "RESPONSES")).getJSONObject("reasoning").getString("effort"))
+        val anthropic = maximum.copy(protocol = "ANTHROPIC", endpoint = "https://api.deepseek.com/anthropic/v1")
+        assertEquals("max", body(anthropic).getJSONObject("output_config").getString("effort"))
+        assertEquals("disabled", body(anthropic.copy(reasoningEffort = "none")).getJSONObject("thinking").getString("type"))
+        assertFalse(body(maximum.copy(endpoint = "https://example.org/v1")).has("reasoning_effort"))
+        assertEquals(ModelWire.scope(config), ModelWire.scope(maximum))
+        assertNotEquals(ModelWire.scope(config), ModelWire.scope(disabled))
+    }
+
     @Test fun responsesRoundTripPreservesEncryptedReasoningAndToolIds() {
         val c = ModelConfig("https://example.com/v1", "test", "key", "RESPONSES")
         val raw = JSONObject("""{"status":"completed","output":[{"type":"reasoning","encrypted_content":"signed"},{"type":"function_call","id":"fc1","call_id":"c1","name":"lookup","arguments":"{}"}],"usage":{"input_tokens":100,"output_tokens":10}}""")

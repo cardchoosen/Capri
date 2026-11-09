@@ -15,6 +15,7 @@
   function close(){catalogLoading=false;generation++;clearTimeout(timer);owner=null;if(dialog.open)dialog.close();}
   function updateControls(){
     $('model-select').disabled=!connected||!state||state.preparing||state.deleting||dispatching||working||!!pending;
+    $('reasoning-select').disabled=$('model-select').disabled;
     $('model-reconcile').hidden=!pending;$('model-reconcile').disabled=!connected||working;
     $('model-query').disabled=working||catalogLoading;for(const b of $('model-options').querySelectorAll('button'))b.disabled=working||!!pending;
   }
@@ -22,6 +23,15 @@
     if(owner&&!same(owner))close();
     const m=data.selected_model;$('model-select').textContent=m?`${m.name||m.id} · ${contextLabel(m)} ⌄`:'选择模型 ⌄';
     $('model-select').title=m?`${m.account_name} · ${m.id}`:'选择当前会话模型';$('model-next-turn').hidden=!data.busy;
+    const effortSelect=$('reasoning-select'), levels=m?.reasoning_options||[];
+    $('reasoning-control').hidden=!levels.length;
+    if(effortSelect.dataset.levels!==levels.join(',')){
+      const labels={default:'默认',none:'关闭',low:'Low',high:'High',max:'Max'};
+      effortSelect.replaceChildren(...levels.map(level=>{const option=node('option',labels[level]||level);option.value=level;return option;}));
+      effortSelect.dataset.levels=levels.join(',');
+    }
+    effortSelect.value=m?.reasoning_effort||'default';
+    effortSelect.title=data.busy?'从下一轮生效':'更改当前会话推理档位';
     for(const b of $('model-options').querySelectorAll('[data-model]')){
       const selected=b.dataset.account===m?.account&&b.dataset.model===m?.id;b.setAttribute('aria-pressed',String(selected));b.querySelector('.model-check').textContent=selected?'✓':'';
     }
@@ -31,7 +41,7 @@
     if(gen!==generation||!same(o)||!dialog.open)return;
     for(const m of d.models){const b=node('button',undefined,'model-option');b.type='button';b.dataset.account=a.id;b.dataset.model=m.id;
       const info=node('span',undefined,'model-name');info.append(node('strong',m.name||m.id));if(m.name!==m.id)info.append(node('small',m.id));
-      b.append(info,node('small',contextLabel(m)),node('span','','model-check'));b.onclick=()=>select(o,a,m);container.append(b);}
+      b.append(info,node('small',contextLabel(m)),node('span','','model-check'));b.onclick=()=>select(o,a.id,m.id);container.append(b);}
     if(d.has_more){const more=node('button','更多模型');more.type='button';more.onclick=async()=>{more.disabled=true;try{await page(a,container,d.next,query,gen,o);more.remove();}catch(e){more.disabled=false;$('model-status').textContent=e.message;}};container.append(more);}
     if(!container.children.length)container.parentElement.remove();if(state)render(state);updateControls();
   }
@@ -50,13 +60,26 @@
     do{op=await rpc(o,'operation',{id});if(op.state!=='running')break;if(Date.now()>deadline)throw Error('选择尚未确认，请核对后再发送。');await new Promise(r=>setTimeout(r,200));}while(true);
     if(op.state!=='completed')throw Error(op.message||'模型选择未完成');return op;
   }
-  async function select(o,a,m){
+  async function select(o,account,model,effort){
     if(!same(o)||working||pending||!connected)return;
-    working=true;const p={...o,id:crypto.randomUUID(),account:a.id,model:m.id};save(p);$('model-status').textContent='正在同步手机…';
-    try{await rpc(o,'model_select',{account:a.id,model:m.id},p.id);await wait(o,p.id);save(null);close();requestRefresh();}
-    catch(e){failure(e.message+' 请先核对模型选择，避免使用错误模型发送。');$('model-status').textContent=e.message;}
+    working=true;const p={...o,id:crypto.randomUUID(),account,model,effort};save(p);$('model-status').textContent='正在同步手机…';
+    const reasoning=effort!==undefined;
+    try{
+      await rpc(o,reasoning?'model_reasoning':'model_select',{account,model,effort},p.id);
+      await wait(o,p.id);
+      if(reasoning&&same(o)&&state?.selected_model?.account===account&&state.selected_model.id===model){
+        state.selected_model.reasoning_effort=effort;
+        render(state);
+      }
+      save(null);if(!reasoning)close();requestRefresh();
+    }
+    catch(e){if(same(o)&&state)render(state);failure(e.message+' 请先核对模型或推理档位再发送。');$('model-status').textContent=e.message;}
     finally{working=false;controls();}
   }
+  $('reasoning-select').onchange=()=>{
+    const m=state?.selected_model;
+    if(m)void select({chat,epoch},m.account,m.id,$('reasoning-select').value);
+  };
   $('model-select').onclick=async()=>{
     if($('model-select').disabled)return;close();owner={chat,epoch};const o=owner,gen=++generation;catalogLoading=true;accounts=[];$('model-query').value='';$('model-options').replaceChildren();$('model-status').textContent='正在读取手机模型…';dialog.showModal();controls();$('model-close').focus();
     try{const d=await rpc(o,'snapshot',{section:'models'});if(gen!==generation||!same(o)||!dialog.open)return;accounts=d.accounts;catalogLoading=false;controls();$('model-query').focus();await search();}catch(e){if(gen===generation){catalogLoading=false;controls();$('model-status').textContent=e.message;}}
@@ -73,7 +96,7 @@
       }
       const data=await api('web_state',{chat_id:p.chat});
       if(data.chat_id!==p.chat)throw Error('原会话已不可用，请在手机核对。');
-      if(data.selected_model?.account!==p.account||data.selected_model?.id!==p.model)failure('已核对手机：当前模型与上次选择不同，请确认当前显示或重新选择。');
+      if(data.selected_model?.account!==p.account||data.selected_model?.id!==p.model||(p.effort!==undefined&&data.selected_model?.reasoning_effort!==p.effort))failure('当前模型或推理档位与上次选择不同，请核对后重新选择。');
       save(null);requestRefresh();
     }catch(e){failure(e.message+' 已保存待核对记录；请检查手机当前模型。');}finally{working=false;controls();}
   };

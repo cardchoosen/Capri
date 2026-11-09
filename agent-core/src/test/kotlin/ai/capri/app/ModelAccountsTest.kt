@@ -7,6 +7,27 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ModelAccountsTest {
+    @Test fun reasoningPersistsPerChatAndRejectsStaleModelUpdates() {
+        var saved: String? = null
+        fun store() = ModelAccounts({ saved }, { saved = it }, { ModelConfig() })
+        val accounts = store()
+        val account = ModelAccount(provider = "deepseek", name = "DeepSeek", endpoint = "https://api.deepseek.com",
+            key = "fixture", protocol = ModelProtocol.CHAT, models = listOf(ModelOption("deepseek-flash"), ModelOption("deepseek-v4-pro")))
+        accounts.save(account)
+        accounts.selectReasoning("first", account.id, "deepseek-flash", "max")
+        assertEquals("max", store().config("first").reasoningEffort)
+        assertNull(accounts.config("second").reasoningEffort)
+        assertNull(accounts.config().reasoningEffort)
+        accounts.selectForNewChats("first", account.id, "deepseek-flash", listOf("first", "second"))
+        assertEquals("max", accounts.config("first").reasoningEffort)
+        accounts.selectReasoning("first", account.id, "deepseek-flash", "default")
+        assertNull(accounts.config("first").reasoningEffort)
+        accounts.select("first", account.id, "deepseek-v4-pro")
+        assertTrue(runCatching { accounts.selectReasoning("first", account.id, "deepseek-flash", "low") }.isFailure)
+        assertTrue(runCatching { accounts.selectReasoning("first", account.id, "deepseek-v4-pro", "ultra") }.isFailure)
+        assertNull(accounts.config("first").reasoningEffort)
+    }
+
     @Test fun webDefaultChangesOnlyCurrentAndFutureChatsIncludingAfterRestart() {
         var saved:String?=null
         fun store()=ModelAccounts({saved},{saved=it},{ModelConfig()})

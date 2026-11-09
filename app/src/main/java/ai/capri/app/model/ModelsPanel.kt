@@ -40,11 +40,17 @@ import kotlinx.coroutines.launch
 @Composable internal fun ModelPicker(store: ModelAccounts, chat: String, busy: Boolean, revision: Int, onChange: () -> Unit, onManage: () -> Unit) {
     var open by remember(chat) { mutableStateOf(false) }
     val selected = remember(chat, revision) { store.selected(chat) }
-    TextButton(onClick = { open = true }, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp), modifier = Modifier.height(36.dp)) {
-        ProviderLogo(selected?.let { Providers.logo(it.first.provider, it.second.id) } ?: "custom"); Spacer(Modifier.width(8.dp))
-        Text(selected?.second?.name ?: "选择模型", maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false), fontSize = 12.sp)
-        if (selected != null) Text(" · ${contextLabel(selected.second)}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Icon(Icons.Outlined.ExpandMore, null, Modifier.size(16.dp))
+    val config = remember(chat, revision) { store.config(chat) }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.weight(1f, fill = false)) {
+            TextButton(onClick = { open = true }, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp), modifier = Modifier.height(36.dp)) {
+                ProviderLogo(selected?.let { Providers.logo(it.first.provider, it.second.id) } ?: "custom"); Spacer(Modifier.width(8.dp))
+                Text(selected?.second?.name ?: "选择模型", maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false), fontSize = 12.sp)
+                if (selected != null) Text(" · ${contextLabel(selected.second)}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Icon(Icons.Outlined.ExpandMore, null, Modifier.size(16.dp))
+            }
+        }
+        ReasoningPicker(store, chat, config, busy, onChange)
     }
     if (open) {
         var query by remember { mutableStateOf("") }
@@ -72,6 +78,40 @@ import kotlinx.coroutines.launch
             Text("容量优先读取接口；≈ 表示内置资料参考值，未知则不推测。", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (busy) Text("当前任务继续使用原模型，新选择从下一轮生效。", fontSize = 11.sp)
             TextButton(onClick = { open = false; onManage() }) { Icon(Icons.Outlined.Add, null, Modifier.size(16.dp)); Text("管理模型 API") }
+        }
+    }
+}
+
+@Composable private fun ReasoningPicker(store: ModelAccounts, chat: String, config: ModelConfig, busy: Boolean, onChange: () -> Unit) {
+    val levels = DeepSeekReasoning.options(config)
+    if (levels.isEmpty()) return
+    val context = LocalContext.current
+    var open by remember(chat, config.accountId, config.model) { mutableStateOf(false) }
+    val current = config.reasoningEffort ?: "default"
+    fun label(level: String) = when (level) {
+        "default" -> "默认"
+        "none" -> "关闭"
+        else -> level.replaceFirstChar { it.uppercaseChar() }
+    }
+    Box {
+        TextButton(onClick = { open = true }, contentPadding = PaddingValues(horizontal = 8.dp), modifier = Modifier.height(36.dp)) {
+            Text("推理 · ${label(current)}", fontSize = 12.sp)
+            Icon(Icons.Outlined.ExpandMore, null, Modifier.size(16.dp))
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            if (busy) DropdownMenuItem(text = { Text("下一轮生效") }, enabled = false, onClick = {})
+            levels.forEach { level ->
+                DropdownMenuItem(
+                    text = { Text(label(level)) },
+                    trailingIcon = if (level == current) {{ Icon(Icons.Outlined.Check, "已选择") }} else null,
+                    onClick = {
+                        open = false
+                        runCatching { store.selectReasoning(chat, config.accountId, config.model, level) }
+                            .onSuccess { onChange() }
+                            .onFailure { android.widget.Toast.makeText(context, "未能保存推理档位，请刷新后重试", android.widget.Toast.LENGTH_SHORT).show() }
+                    }
+                )
+            }
         }
     }
 }

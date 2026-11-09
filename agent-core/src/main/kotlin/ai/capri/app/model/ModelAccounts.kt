@@ -124,7 +124,7 @@ class ModelAccounts(private val read: () -> String?, private val write: (String)
     }
     @Synchronized fun select(chat: String, account: String, model: String) {
         require(all().any { it.id == account && it.models.any { m -> m.id == model } }) { "模型或API配置已删除，请重新选择" }
-        val data = JSONObject(state().toString()); data.getJSONObject("selections").put(chat, JSONObject().put("account", account).put("model", model)); commit(data)
+        val data = JSONObject(state().toString()); data.getJSONObject("selections").put(chat, selectionFor(chat, account, model)); commit(data)
     }
     /** Freeze legacy inherited choices before changing the default, in the same durable write. */
     @Synchronized fun selectForNewChats(chat:String,account:String,model:String,existingChats:Collection<String>) {
@@ -135,7 +135,7 @@ class ModelAccounts(private val read: () -> String?, private val write: (String)
         val data=JSONObject(state().toString());val selections=data.getJSONObject("selections")
         existingChats.forEach{if(!selections.has(it))selections.put(it,JSONObject(previous.toString()))}
         val next=JSONObject().put("account",account).put("model",model)
-        selections.put(chat,JSONObject(next.toString()));data.put("new_chat_selection",next)
+        selections.put(chat, selectionFor(chat, account, model));data.put("new_chat_selection",next)
         commit(data)
     }
     @Synchronized fun initializeChat(chat:String) {
@@ -146,6 +146,30 @@ class ModelAccounts(private val read: () -> String?, private val write: (String)
     @Synchronized fun forgetChat(chat: String) {
         val data = JSONObject(state().toString()); data.getJSONObject("selections").remove(chat); commit(data)
     }
-    fun config(chat: String? = null): ModelConfig = selected(chat)?.let { it.first.config(it.second) } ?: ModelConfig()
+    private fun selectionFor(chat: String, account: String, model: String): JSONObject {
+        val previous = state().getJSONObject("selections").optJSONObject(chat)
+        if (previous?.optString("account") == account && previous.optString("model") == model) {
+            return JSONObject(previous.toString())
+        }
+        return JSONObject().put("account", account).put("model", model)
+    }
+
+    @Synchronized fun selectReasoning(chat: String, account: String, model: String, effort: String) {
+        val current = config(chat)
+        require(current.accountId == account && current.model == model) { "Model selection changed. Refresh and try again." }
+        require(effort in DeepSeekReasoning.options(current)) { "Unsupported reasoning effort for this model." }
+        val data = JSONObject(state().toString())
+        val selection = selectionFor(chat, account, model)
+        if (effort == "default") selection.remove("reasoning_effort") else selection.put("reasoning_effort", effort)
+        data.getJSONObject("selections").put(chat, selection)
+        commit(data)
+    }
+
+    @Synchronized fun config(chat: String? = null): ModelConfig {
+        val (account, model) = selected(chat) ?: return ModelConfig()
+        val config = account.config(model)
+        val effort = chat?.let { state().getJSONObject("selections").optJSONObject(it)?.optString("reasoning_effort") }
+        return config.copy(reasoningEffort = effort?.takeIf { it != "default" && it in DeepSeekReasoning.options(config) })
+    }
     private fun commit(data: JSONObject) { write(data.toString()); state = data; cachedAccounts = null }
 }

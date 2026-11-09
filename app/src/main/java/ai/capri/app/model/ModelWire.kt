@@ -8,8 +8,13 @@ import java.security.MessageDigest
 
 /** Canonical tool exchanges stay in Capri. Private signed blocks only return to the exact model/account. */
 internal object ModelWire {
-    fun scope(c: ModelConfig): String = MessageDigest.getInstance("SHA-256").digest("${c.endpoint}\u0000${c.model}\u0000${c.key}\u0000${c.protocol}".toByteArray())
-        .joinToString("") { "%02x".format(it) }
+    fun scope(c: ModelConfig): String {
+        val identity = "${c.endpoint}\u0000${c.model}\u0000${c.key}\u0000${c.protocol}"
+        // Tool exchanges produced with thinking disabled lack the reasoning required by thinking-mode continuations.
+        val mode = if (c.reasoningEffort == "none" && "none" in DeepSeekReasoning.options(c)) "\u0000thinking_disabled" else ""
+        return MessageDigest.getInstance("SHA-256").digest((identity + mode).toByteArray())
+            .joinToString("") { "%02x".format(it) }
+    }
     private fun array(a: JSONArray) = (0 until a.length()).map { a.getJSONObject(it) }
     private fun images(m: JSONObject): List<JSONObject> = if (m.optString("role") == "user") m.optJSONArray("_capri_images")?.let { array(it) } ?: emptyList() else emptyList()
     private fun imageUrl(image: JSONObject) = "data:${image.getString("mime")};base64,${image.getString("data")}"
@@ -38,6 +43,18 @@ internal object ModelWire {
     }
     fun request(c: ModelConfig, messages: JSONArray, tools: JSONArray, output: Int): JSONObject {
         val body = JSONObject().put("model", c.model)
+        val effort = c.reasoningEffort
+        if (effort != null && effort != "default" && effort in DeepSeekReasoning.options(c)) {
+            when (ModelProtocol.valueOf(c.protocol)) {
+                ModelProtocol.CHAT -> body.put("reasoning_effort", effort)
+                ModelProtocol.RESPONSES -> body.put("reasoning", JSONObject().put("effort", effort))
+                ModelProtocol.ANTHROPIC -> {
+                    body.put("thinking", JSONObject().put("type", if (effort == "none") "disabled" else "enabled"))
+                    if (effort != "none") body.put("output_config", JSONObject().put("effort", effort))
+                }
+                ModelProtocol.GEMINI -> Unit
+            }
+        }
         val scope = scope(c)
         fun raw(m: JSONObject) = m.optJSONObject("_capri_wire")?.takeIf { it.optString("scope") == scope }?.optJSONArray("payload")
         fun functions() = array(tools).map { it.getJSONObject("function") }
