@@ -11,6 +11,7 @@ Android 原生个人 AI Agent，在手机上执行任务。
 - 全局 Git / SSH 配置
 - MCP 扩展与按需加载的 Skills
 - REA 逆向增强：APK / DEX 与资源、JavaScript、原生反编译及 Frida 运行时接入
+- [受管动态分析](docs/DYNAMIC_ANALYSIS.md)：跨调用 Root 服务、Frida 版本校验与认证连接、现有 REA 会话工具复用
 - Tools 能力目录，查看内置与已连接 MCP 工具
 - 免费网页搜索、正文读取与来源引用，可选供应商增强
 - 可追溯的历史摘录、分作用域的长期记忆与文本资料检索

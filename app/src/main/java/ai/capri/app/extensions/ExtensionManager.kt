@@ -250,12 +250,12 @@ internal class ExtensionManager(private val context: Context, private val runtim
         rea.setEnabled(enabled)
         if (!enabled) store.configs().filter { ai.capri.app.rea.ReaIntegration.profile(it.getString("id")) != null }.forEach { disconnectConfig(it.getString("id")) }
     }
-    suspend fun call(chat: String, name: String, args: JSONObject): String {
+    suspend fun call(chat: String, name: String, args: JSONObject, owner: String = chat): String {
         val managed = sessions.entries.any { it.key.startsWith("$chat:") && ai.capri.app.rea.ReaIntegration.profile(it.key.substringAfter(':')) != null && it.value.tools.any { t -> toolName(it.key.substringAfter(':'), t.name) == name } }
-        return if (managed) { require(rea.enabled) { "REA enhancement is disabled." }; ai.capri.app.rea.ReaIntegration.analysisLock.withLock { callConnected(chat, name, args) } }
-        else callConnected(chat, name, args)
+        return if (managed) { require(rea.enabled) { "REA enhancement is disabled." }; ai.capri.app.rea.ReaIntegration.analysisLock.withLock { callConnected(chat, name, args, owner) } }
+        else callConnected(chat, name, args, owner)
     }
-    private suspend fun callConnected(chat: String, name: String, args: JSONObject): String = withContext(Dispatchers.IO) {
+    private suspend fun callConnected(chat: String, name: String, args: JSONObject, owner: String): String = withContext(Dispatchers.IO) {
         require(args.toString().length <= 128_000) { "工具参数超过128KB" }
         val entry = sessions.entries.firstOrNull { it.key.startsWith("$chat:") && it.value.tools.any { t -> toolName(it.key.substringAfter(':'), t.name) == name } } ?: error("扩展工具未加载，请先激活服务")
         val id = entry.key.substringAfter(':'); val lock = locks.getOrPut(entry.key) { Mutex() }
@@ -265,12 +265,20 @@ internal class ExtensionManager(private val context: Context, private val runtim
             val c = sessions[entry.key] ?: error("连接已关闭，请重新激活")
             val config = store.config(id); require(callable(chat, id, c, config)) { "MCP configuration, connection or tool catalog changed; activate the service again before dispatch." }
             val tool = c.tools.first { toolName(id, it.name) == name }
+            val remote = if(id=="capri-rea-runtime" && tool.name in setOf("list_frida_devices","list_frida_processes","start_frida_session"))
+                ai.capri.app.nativebridge.RootServices.get(context).remote(owner) else null
+            val actual = JSONObject(args.toString())
+            if(remote!=null) {
+                require(!actual.has("device_id") && !actual.has("remote")) { "Managed Frida connection is active; omit device_id and remote. Stop it before using another endpoint." }
+                actual.put("remote",remote)
+            }
             c.used = System.nanoTime()
             try {
-                val result = withTimeout(config.optInt("timeout_seconds", 60) * 1000L) { c.client.callTool(CallToolRequest(tool.name, Json.parseToJsonElement(args.toString()) as JsonObject), options = RequestOptions(timeout = config.optInt("timeout_seconds", 60).seconds)) } ?: error("服务未返回结果")
+                val result = withTimeout(config.optInt("timeout_seconds", 60) * 1000L) { c.client.callTool(CallToolRequest(tool.name, Json.parseToJsonElement(actual.toString()) as JsonObject), options = RequestOptions(timeout = config.optInt("timeout_seconds", 60).seconds)) } ?: error("服务未返回结果")
                 val obj = JSONObject(McpJson.encodeToString(CallToolResultBase.serializer(), result))
                 sanitizeContent(chat, obj)
-                val text = credential(config)?.let { obj.toString().replace(it, "[redacted]") } ?: obj.toString()
+                var text = credential(config)?.let { obj.toString().replace(it, "[redacted]") } ?: obj.toString()
+                remote?.optString("token")?.takeIf { it.isNotEmpty() }?.let { text=text.replace(it,"[redacted]") }
                 if (text.length <= 30_000) text else {
                     val path = "mcp-results/${java.util.UUID.randomUUID()}.json"
                     workspace.file(chat, path).apply { parentFile?.mkdirs(); writeText(text) }
@@ -301,6 +309,7 @@ internal class ExtensionManager(private val context: Context, private val runtim
         }
     }
     suspend fun deactivate(chat: String, id: String) { store.setActive(chat, id, false); val key = key(chat, id); locks.getOrPut(key) { Mutex() }.withLock { disconnectKey(key, "未连接") } }
+    suspend fun disconnectRuntime(chat:String) { val k=key(chat,"capri-rea-runtime");locks.getOrPut(k){Mutex()}.withLock { disconnectKey(k,"Runtime session closed; explicit activation required.") } }
     suspend fun disconnectConfig(id: String) { sessions.keys.filter { it.substringAfter(':') == id }.forEach { k -> locks.getOrPut(k) { Mutex() }.withLock { disconnectKey(k, "配置已更改，按需重连") } } }
     private suspend fun disconnectKey(key: String, status: String) {
         val c = sessions.remove(key)

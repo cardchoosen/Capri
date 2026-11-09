@@ -215,7 +215,7 @@ class CapriModel(private val app: Application) {
             finally { runtimeBusy = false; refresh() }
         }
     }
-    internal fun dispose() { taskEngine.dispose(); codingDiagnostics.dispose(); programs.dispose(); browser.dispose(); extensions.dispose(); runtimeScope.cancel() }
+    internal fun dispose() { taskEngine.dispose(); codingDiagnostics.dispose(); programs.dispose(); androidTools.rootServices.requestStopAll(); browser.dispose(); extensions.dispose(); runtimeScope.cancel() }
     fun refresh() { tick.value++ }
     fun current() = sessions.first { it.id == selected }
     internal fun personalSession() = sessions.first { it.kind == SessionKind.PERSONAL }
@@ -250,6 +250,7 @@ class CapriModel(private val app: Application) {
             try {
                 runtime.environment.sessionLock(chat) {
                     withContext(Dispatchers.IO) { codingDiagnostics.cancelChat(chat); programs.closeChat(chat); sessionDeletion.validate(chat); terminals.deleteChat(chat) }
+                    androidTools.rootServices.stopOwner(chat,chat=true)
                     extensions.deleteChat(chat)
                     browser.deleteChat(chat)
                     RuntimeGate.beginChatDeletion(getApplication(), chat)
@@ -288,6 +289,7 @@ class CapriModel(private val app: Application) {
                 withContext(Dispatchers.IO + NonCancellable) {
                     codingDiagnostics.cancelAll()
                     programs.closeAll()
+                    androidTools.rootServices.stopAll()
                     publicSkills.stopAll()
                     durableJobs.scopes().forEach(durableJobs::cancelScope)
                     ai.capri.app.agent.reliability.JobRunner.stopAll()
@@ -324,6 +326,7 @@ class CapriModel(private val app: Application) {
         try {
             store.backupHistory(session)
             HistoryEditing.replaceFrom(session, entry)
+            runtimeScope.launch(Dispatchers.IO) { androidTools.rootServices.stopOwner(HistoryEditing.actualContextKey(saved)) }
             check(sendTo(chat,next, retainedInputs = original.inputs)) { "消息未提交，请核对会话状态" }
             runCatching { taskEvents.emit(HistoryEditing.actualContextKey(session),"history_edit",JSONObject().put("context_id",saved.contextVersion).put("source_id",entry).put("parent_node",recovery.load(HistoryEditing.actualContextKey(saved))?.optJSONObject(0)?.optJSONObject("_capri_lineage")?.optString("event_id")?:"")) }
             return session.contextVersion
@@ -728,7 +731,7 @@ class CapriModel(private val app: Application) {
                         "extensions" -> extensions.execute(session.id, args)
                         "browser" -> browser.execute(session.id, args)
                         "terminal" -> terminals.execute(session.id, args)
-                        "android" -> androidTools.execute(args, store.workspace.folder(session.id, "workspace"))
+                        "android" -> androidTools.execute(args, store.workspace.folder(session.id, "workspace"), conversation)
                         "profile_search" -> store.profile(args.getString("query"))
                         in (ai.capri.app.files.WorkspaceFileTools.names + ai.capri.app.coding.CodingContract.names) -> {
                             val lease = runCatching { RuntimeGate.beginFiles(getApplication(), session.id, "workspace files") }.getOrNull()
@@ -752,7 +755,7 @@ class CapriModel(private val app: Application) {
                             }
                         },call.getString("id"))
                         "python_run" -> shortTasks.execute(session.id, args, trace)
-                        else -> if (name.startsWith("mcp_")) extensions.call(session.id, name, args) else error("Unknown tool.")
+                        else -> if (name.startsWith("mcp_")) extensions.call(session.id, name, args, conversation) else error("Unknown tool.")
                     }
                 }
             } catch (e: CancellationException) { toolStatus = PerformanceTrace.Status.CANCELLED; throw e }
@@ -908,12 +911,17 @@ class CapriModel(private val app: Application) {
         }
         } catch (cancel: CancellationException) {
             outcome = PerformanceTrace.Status.CANCELLED
+            withContext(NonCancellable+Dispatchers.IO) {
+                androidTools.rootServices.stopOwner(conversation)
+                extensions.disconnectRuntime(session.id)
+            }
             currentMessages?.let { m -> if (TurnState.snapshot(m).optString("phase") != TurnState.Phase.CANCELLED.name) {
                 TurnState.phase(m, TurnState.Phase.CANCELLED); turnViews[conversation] = TurnState.snapshot(m)
                 withContext(NonCancellable + Dispatchers.IO) { recovery.save(conversation, m) }
             } }
             throw cancel
         } catch (error: Exception) {
+            androidTools.rootServices.stopOwner(conversation)
             currentMessages?.let { m -> if (TurnState.snapshot(m).optString("phase") != TurnState.Phase.FAILED.name) {
                 val exhausted = error is ModelRequestFailure && error.budgetExhausted
                 if (exhausted) outcome = PerformanceTrace.Status.BUDGET

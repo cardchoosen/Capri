@@ -12,6 +12,7 @@ import java.io.File
 class AndroidTool(private val app: Application) {
     val permissions = NativePermissions(app)
     private val root = RootRuntime(app)
+    internal val rootServices by lazy { RootServices.get(app) }
     private val device = NativeDeviceTools(app, permissions, root::snapshot)
     fun rootStatus(): JSONObject = root.snapshot().also { data ->
         runCatching { ai.capri.app.environment.InstallationEnvironment.get(app).observeAndroid("root_status", result("root_status", "ok", data)) }
@@ -40,16 +41,16 @@ class AndroidTool(private val app: Application) {
             .put("actions", JSONArray(NativeCatalog.actions.map { spec ->
                 val group = permissionGroups[spec.name]
                 val missing = groups[group].orEmpty().filterNot(permissions::granted)
-                val rootAction = spec.name in setOf("root_request", "root_exec", "root_inspect")
+                val rootAction = spec.name in setOf("root_request", "root_exec", "root_inspect", "root_service", "frida_service")
                 val supported = if (rootAction) rootState.getBoolean("su_detected") else hardware[spec.name]?.let { app.packageManager.hasSystemFeature(it) } ?: true
-                JSONObject().put("action", spec.name).put("title", spec.title).put("params", spec.parameters).put("effect", spec.effect).put("requires_root", spec.name in setOf("root_exec", "root_inspect"))
-                    .put("status", if (!supported) "unsupported" else if (spec.name in setOf("root_exec", "root_inspect") && rootState.optString("app_authorization") != "granted") "root_authorization_required" else if (missing.isNotEmpty()) "permission_required" else "available")
+                JSONObject().put("action", spec.name).put("title", spec.title).put("params", spec.parameters).put("effect", spec.effect).put("requires_root", spec.name in setOf("root_exec", "root_inspect", "root_service", "frida_service"))
+                    .put("status", if (!supported) "unsupported" else if (spec.name in setOf("root_exec", "root_inspect", "root_service", "frida_service") && rootState.optString("app_authorization") != "granted") "root_authorization_required" else if (missing.isNotEmpty()) "permission_required" else "available")
                     .put("missing_permissions", JSONArray(missing))
             })).put("permissions", permissions.snapshot())
             .put("not_implemented", JSONArray(listOf("accessibility UI automation", "screen capture", "camera capture", "microphone recording", "notification reading", "SMS", "dedicated native system settings editor")))
             .put("note", "available表示接口已接入；字段、前台状态、硬件、系统开关及厂商限制仍会影响执行，不能声称拥有全部Android权限。打开设置不会授予无障碍权限或自动化能力。")
     }
-    suspend fun execute(arguments: JSONObject, workspace: File? = null): String = withContext(Dispatchers.IO) {
+    suspend fun execute(arguments: JSONObject, workspace: File? = null, owner: String? = null): String = withContext(Dispatchers.IO) {
         val action = arguments.optString("action", "")
         try {
             if (NativeCatalog.find(action) == null) throw NativeFailure("unsupported", "未知或未实现的原生action；请查询capabilities")
@@ -61,6 +62,12 @@ class AndroidTool(private val app: Application) {
                 "permissions" -> permissions.snapshot()
                 "request_permissions" -> permissions.request(params.requiredText("group", 30))
                 "root_status" -> root.snapshot()
+                "root_service", "frida_service" -> {
+                    require(workspace != null && owner != null) { "Managed services require an explicit chat/history scope and workspace." }
+                    // Avoid environment archives: service logs and connection capabilities are task-local.
+                    val response=rootServices.execute(owner,workspace,params,action=="frida_service")
+                    return@withContext response.put("action",action).toString()
+                }
                 "root_inspect" -> {
                     val response = RootInspection(root, ai.capri.app.environment.InstallationEnvironment.get(app)).execute(params, workspace)
                     return@withContext archiveResult(action, response)
@@ -122,6 +129,12 @@ internal fun validateParams(action: String, params: JSONObject) {
     val allowed = when (action) {
         "request_permissions" -> setOf("group")
         "root_exec" -> setOf("command", "timeout_seconds", "output_limit")
+        "root_service", "frida_service" -> when(params.optString("operation")) {
+            "start" -> setOf("operation","request_key","lifetime_seconds",if(action=="frida_service")"server_path" else "command")
+            "status", "stop" -> setOf("operation","service_id")
+            "list" -> setOf("operation")
+            else -> throw NativeFailure("invalid_argument","operation must be start, status, list or stop.")
+        }
         "root_inspect" -> setOf("queries", "refresh", "timeout_seconds")
         "location_current" -> setOf("timeout_ms")
         "sensor_read" -> setOf("sensor_type", "timeout_ms")

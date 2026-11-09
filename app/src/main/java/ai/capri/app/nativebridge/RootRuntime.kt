@@ -14,7 +14,7 @@ import java.util.UUID
 internal class RootRuntime(private val context: Context) {
     private val prefs = context.getSharedPreferences("root-runtime", Context.MODE_PRIVATE)
     companion object { private val mutex = Mutex() }
-    private fun suPath(): String? = (listOf("/system/bin/su", "/system/xbin/su", "/system_ext/bin/su", "/sbin/su", "/su/bin/su", "/debug_ramdisk/su") +
+    internal fun suPath(): String? = (listOf("/system/bin/su", "/system/xbin/su", "/system_ext/bin/su", "/sbin/su", "/su/bin/su", "/debug_ramdisk/su") +
         System.getenv("PATH").orEmpty().split(':').filter { it.startsWith('/') }.map { "$it/su" })
         .distinct().firstOrNull { File(it).isFile && File(it).canExecute() }
 
@@ -43,7 +43,7 @@ internal class RootRuntime(private val context: Context) {
         return runCommand(request, workspace ?: context.filesDir, request = false)
     }
 
-    private fun builder(command: List<String>, directory: File, log: File): ProcessBuilder = ProcessBuilder(command)
+    internal fun builder(command: List<String>, directory: File, log: File): ProcessBuilder = ProcessBuilder(command)
         .directory(directory).redirectErrorStream(true).redirectOutput(log).apply {
             environment().apply {
                 remove("LD_PRELOAD"); remove("PROOT_LOADER"); remove("PROOT_TMP_DIR")
@@ -55,11 +55,11 @@ internal class RootRuntime(private val context: Context) {
         while (total < limit) { val count = input.read(bytes, total, limit - total); if (count < 0) break; total += count }
         String(bytes, 0, total, Charsets.UTF_8)
     }
-    private fun identity(directory: File): String? = runCatching {
+    internal fun identity(directory: File): String? = runCatching {
         read(File(directory, "identity"), 120).trim().takeIf { it.matches(Regex("[1-9][0-9]* [0-9]+ 0")) }
     }.getOrNull()
 
-    private suspend fun cleanup(su: String, directory: File): Boolean = withContext(Dispatchers.IO + NonCancellable) {
+    internal suspend fun cleanup(su: String, directory: File): Boolean = withContext(Dispatchers.IO + NonCancellable) {
         if (identity(directory) == null) return@withContext false
         val process = runCatching { builder(listOf(su, "-c", RootProtocol.cleanup(directory)), directory, File(directory, "cleanup.log")).start() }.getOrNull()
             ?: return@withContext false
