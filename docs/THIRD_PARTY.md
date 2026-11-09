@@ -67,4 +67,4 @@ Markdown使用Markwon 4.6.2（core/tables/strikethrough），源码及许可：h
 
 ## Hermes Agent architectural reference
 
-The Kotlin agent harness described in [AGENT_HARNESS.md](AGENT_HARNESS.md) was independently implemented with reference to [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) (MIT). No Hermes Python source, runtime or dependency is bundled by this change. Reference links and inspected components are recorded in the architecture document.
+The Kotlin agent harness was independently implemented with reference to [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) (MIT). No Hermes Python source, runtime or dependency is bundled by this change. Reference links and inspected components are recorded in the architecture document.

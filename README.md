@@ -3,47 +3,16 @@
 Android 原生个人 AI Agent，在手机上执行任务。
 
 - 多会话与独立工作区
-- [安装环境档案](docs/INSTALLATION_ENVIRONMENT.md)：Markdown查询、自动更新与有效检测复用
-- 固定 Capri 个人对话与任务模式、有来源的个人记忆及跨会话历史回查（[首版说明](docs/PERSONA.md)）
+- 安装环境档案：Markdown查询、自动更新与有效检测复用
+- 固定 Capri 个人对话与任务模式、有来源的个人记忆及跨会话历史回查
 - 多模型 API、会话内模型切换、厂商 Logo 与上下文容量显示
 - Python、Node.js、C/C++ 与持续终端
 - Android 原生工具与浏览器操作，可选宿主 Root 检测、授权与命令执行
 - 全局 Git / SSH 配置
 - MCP 扩展与按需加载的 Skills
 - REA 逆向增强：APK / DEX 与资源、JavaScript、原生反编译及 Frida 运行时接入
-- [受管动态分析](docs/DYNAMIC_ANALYSIS.md)：跨调用 Root 服务、Frida 版本校验与认证连接、现有 REA 会话工具复用
+- 受管动态分析：跨调用 Root 服务、Frida 版本校验与认证连接、现有 REA 会话工具复用
 - Tools 能力目录，查看内置与已连接 MCP 工具
 - 免费网页搜索、正文读取与来源引用，可选供应商增强
 - 可追溯的历史摘录、分作用域的长期记忆与文本资料检索
 - Markdown、文件、图片与 GIF 展示
-
-## 相关文档
-
-- [内核独立专项](docs/KERNEL_INDEPENDENCE.zh-CN.md)：独立 JVM 内核、无页面宿主、后台 Web 接入与定时任务扩展
-
-- [上下文管理](docs/AGENT_CONTEXT.zh-CN.md)：约束原文保护、完整交互归档、类型化预览与微压缩实验
-
-- [响应耗时与人物收尾](docs/AGENT_LATENCY.zh-CN.md)：请求用途与耗时归因、纯 JSON 直接交付、辅助摘要离线评测
-
-- [执行循环与任务控制](docs/AGENT_TURN_CONTROL.zh-CN.md)：任务阶段、执行中补充、澄清接续、请求预算、交付证据和停滞处理
-
-- [Agent 优化待办](docs/AGENT_OPTIMIZATION_TODO.zh-CN.md)：十个方向、60 个子项，逐项讨论与验收
-
-- [Agent harness architecture](docs/AGENT_HARNESS.md): Hermes-inspired execution, deferred tool discovery, recoverable task state and context handoffs
-
-- [电脑网页与 USB 自动连接](docs/USB_WEB.md)：登录自启、设备检测、断线恢复和对话模型选择
-
-- [文件与图片输入](docs/INPUT_ATTACHMENTS.md)：两端附件草稿、图片视觉输入与统一工具折叠
-
-- [工具发现与能力感知](docs/AGENT_DISCOVERY.zh-CN.md)：能力状态、核心工具直供、检索、受控桥接和定义工作集
-
-- [程序化调用与运行效率](docs/AGENT_PROGRAMS.zh-CN.md)：受控 RPC、热内核、批处理、共享并发与可恢复回执
-
-- [可靠性、长期运行与评估](docs/AGENT_RELIABILITY.zh-CN.md)：来源链、持久目标、只读后台分析、触发任务与轨迹回放
-- [Agent 优化专项完成情况](docs/AGENT_OPTIMIZATION_STATUS.zh-CN.md)：已完成范围、实验边界与剩余验收
-- [多 Agent 与复杂任务分工](docs/AGENT_DELEGATION.zh-CN.md)：最小上下文、能力与预算限制、独立提案及保护合并
-- [持续规则（Rules）](docs/AGENT_RULES.zh-CN.md)：全局／对话配置、项目规则、固定快照与子任务约束
-- [公共 Skill 库与用户贡献](docs/PUBLIC_SKILLS.zh-CN.md)：匿名自动更新、原生公开确认与 GitHub PR 回执
-- [记忆、Skills 与经验复用](docs/AGENT_MEMORY_SKILLS.zh-CN.md)：知识归属、精选记忆、历史检索与 Skill 证据／版本闭环
-- [终端与长任务生命周期](docs/AGENT_EXECUTION.zh-CN.md)：统一登记、完成事件、持久回执、输出分页与环境失效
-- [Coding 能力](docs/AGENT_CODING.zh-CN.md)：写后检查、Python LSP 试点、异步诊断、版本快照与精确引用
