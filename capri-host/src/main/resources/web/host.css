@@ -1,0 +1,63 @@
+:root { --chat-font-scale: 1.13; }
+body { line-height: 1.65; }
+#access { align-self: center; padding: 24px; }
+#access input, #device input {
+  font: inherit;
+  color: inherit;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  padding: 6px;
+}
+#device-refresh { margin-top: 8px; }
+aside header { justify-content: flex-start; gap: 10px; }
+main > header strong { font-size: 19px; }
+#messages { min-height: 0; padding-bottom: 12px; }
+#history article { margin-bottom: 20px; font-size: 18px; line-height: 1.65; }
+#history article > label { font-size: 13px; }
+#history article.user {
+  width: fit-content;
+  max-width: min(85%, 68ch);
+  margin-left: auto;
+  padding: 8px 14px 10px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px 14px 4px 14px;
+}
+#history article.user > div { white-space: pre-wrap; }
+#history article.pending { opacity: .7; }
+#history article p:last-child { margin-bottom: 0; }
+#progress:empty { display: none; }
+#composer { padding-top: 8px; }
+.composer-card {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+  box-shadow: 0 6px 20px #0003;
+}
+.composer-card:focus-within { border-color: #66845b; }
+#input {
+  display: block;
+  min-height: 64px;
+  padding: 12px 15px 4px;
+  border: 0;
+  border-radius: 16px 16px 0 0;
+  background: transparent;
+  font-size: 18px;
+}
+#composer .actions { justify-content: flex-end; margin: 0; padding: 6px 10px 10px 15px; }
+#composer .actions > span { font-size: 13px; }
+#composer button { border-radius: 9px; }
+#composer #refresh { background: transparent; color: var(--muted); border-color: transparent; }
+#composer #refresh:hover { border-color: var(--line); color: var(--white); }
+#composer #send { background: var(--green); color: var(--bg); border-color: var(--green); font-weight: 650; }
+#composer #send span { display: inline; color: inherit; font-size: inherit; }
+#composer #send:hover { filter: brightness(1.08); }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+@media (max-width: 550px) {
+  aside { width: 110px; }
+  main > header { flex-wrap: wrap; }
+  #access input { width: 100%; }
+  #history article { font-size: 17px; }
+  #history article.user { max-width: 94%; }
+  #input { font-size: 17px; }
+}

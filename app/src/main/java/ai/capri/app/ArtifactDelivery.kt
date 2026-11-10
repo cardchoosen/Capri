@@ -3,7 +3,6 @@ package ai.capri.app
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
-import java.security.MessageDigest
 import java.util.UUID
 
 /** Turn-scoped final deliveries. Tool success queues a verified version; it does not publish drafts. */
@@ -12,14 +11,9 @@ internal object ArtifactDelivery {
     class Changed:IllegalStateException("Queued artifact changed or disappeared. Validate the final file and call send_file again; do not deliver an obsolete version.")
     fun clear(messages:JSONArray){messages.getJSONObject(0).remove(KEY)}
     fun pending(messages:JSONArray):List<JSONObject> = messages.getJSONObject(0).optJSONArray(KEY)?.let{a->(0 until a.length()).map{JSONObject(a.getJSONObject(it).toString())}}?:emptyList()
-    private fun hash(file:File):String {
-        val digest=MessageDigest.getInstance("SHA-256")
-        file.inputStream().use{input->val buffer=ByteArray(65536);while(true){val count=input.read(buffer);if(count<0)break;digest.update(buffer,0,count)}}
-        return digest.digest().joinToString(""){"%02x".format(it)}
-    }
     fun stage(messages:JSONArray,workspace:Workspace,chat:String,path:String,caption:String):JSONObject {
         val item=Attachments.inspect(workspace,chat,path,caption)
-        item.put("sha256",hash(workspace.file(chat,item.getString("path")))).put("delivery_id",UUID.randomUUID().toString())
+        item.put("sha256",RuntimeFiles.sha(workspace.file(chat,item.getString("path")))).put("delivery_id",UUID.randomUUID().toString())
         val all=pending(messages).filterNot{it.getString("path")==item.getString("path")}
         require(all.size<8){"At most eight final artifacts may be queued per turn."}
         messages.getJSONObject(0).put(KEY,JSONArray(all+item))
@@ -32,7 +26,7 @@ internal object ArtifactDelivery {
     }
     fun prepare(messages:JSONArray,workspace:Workspace,chat:String):List<JSONObject> = pending(messages).map { item ->
         val source=runCatching{workspace.file(chat,item.getString("path"))}.getOrNull()?:throw Changed()
-        if(!source.isFile||source.length()!=item.getLong("size")||hash(source)!=item.getString("sha256"))throw Changed()
+        if(!source.isFile||source.length()!=item.getLong("size")||RuntimeFiles.sha(source)!=item.getString("sha256"))throw Changed()
         val target=workspace.file(chat,"deliveries/${item.getString("delivery_id")}/${source.name}")
         target.parentFile!!.mkdirs()
         if(!target.exists())try {
@@ -42,7 +36,7 @@ internal object ArtifactDelivery {
                 if(input.read()!=-1)throw Changed()
             }}
         }catch(error:Exception){target.delete();throw error}
-        if(target.length()!=item.getLong("size")||hash(target)!=item.getString("sha256")){target.delete();throw Changed()}
+        if(target.length()!=item.getLong("size")||RuntimeFiles.sha(target)!=item.getString("sha256")){target.delete();throw Changed()}
         Attachments.inspect(workspace,chat,target.relativeTo(workspace.folder(chat,"workspace").canonicalFile).invariantSeparatorsPath,item.optString("caption"))
             .put("delivery_id",item.getString("delivery_id")).put("sha256",item.getString("sha256")).put("source_path",item.getString("path"))
     }

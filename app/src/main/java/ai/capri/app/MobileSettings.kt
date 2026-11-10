@@ -30,6 +30,7 @@ import androidx.compose.ui.Modifier
             SettingsRow("规则管理", "分别管理全局与当前对话规则", Icons.Outlined.Rule) { open("rules") }
         }
         SettingsSection("连接与权限") {
+            SettingsRow("远程 Capri", "通过网络使用服务端会话", Icons.Outlined.Devices) { open("remote") }
             SettingsRow("内核与后台运行", "长时间黑屏、电池优化与重启恢复", Icons.Outlined.BatteryChargingFull) { open("kernel") }
             SettingsRow("电脑网页连接", "通过 USB 在电脑继续使用 Capri", Icons.Outlined.Devices) { open("connection") }
             SettingsRow("Android 权限", "设备能力与系统授权状态", Icons.Outlined.PhonelinkSetup) { open("native") }

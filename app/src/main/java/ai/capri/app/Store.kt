@@ -20,30 +20,6 @@ enum class SessionKind { TASK, PERSONAL }
 data class Session(val id: String = UUID.randomUUID().toString(), var title: String = "新会话", val messages: MutableList<Entry> = mutableListOf(), val kind: SessionKind = SessionKind.TASK,
     var contextVersion: String = HistoryEditing.INITIAL, var historyVersion: Long = 0, var historyEdited: Boolean = false, var legacyContext: Boolean = false)
 
-class Workspace(private val base: File) {
-    internal fun sessionDirectory(id: String): File {
-        require(id.matches(Regex("[a-zA-Z0-9-]+"))) { "Invalid workspace identifier." }
-        return File(base, id)
-    }
-    fun root(id: String): File {
-        require(id.matches(Regex("[a-zA-Z0-9-]+")))
-        return File(base, id).apply { mkdirs() }
-    }
-    fun folder(id: String, name: String) = File(root(id), name).apply { mkdirs() }
-    fun file(id: String, path: String): File {
-        val root = folder(id, "workspace").canonicalFile
-        require(path.isNotBlank() && !File(path).isAbsolute) { "仅允许工作区相对路径" }
-        val file = File(root, path).canonicalFile
-        require(file.path.startsWith(root.path + File.separator)) { "路径超出当前会话工作区" }
-        return file
-    }
-    fun list(id: String): List<File> {
-        val root = folder(id, "workspace").canonicalFile
-        return root.walkTopDown().onEnter { it.canonicalPath.startsWith(root.path) && !java.nio.file.Files.isSymbolicLink(it.toPath()) }
-            .filter { it.isFile && !java.nio.file.Files.isSymbolicLink(it.toPath()) && it.canonicalPath.startsWith(root.path + File.separator) }.take(200).toList()
-    }
-}
-
 class Store(val context: Context) {
     val workspace = Workspace(File(context.filesDir, "sessions"))
     private val index = AtomicFile(File(context.filesDir, "sessions.json"))
@@ -114,6 +90,21 @@ class Store(val context: Context) {
             name = provider.name, endpoint = config.endpoint, key = config.key, protocol = ai.capri.app.model.ModelProtocol.valueOf(config.protocol),
             models = listOf(ai.capri.app.model.ModelOption(config.model, manual = true))))
     }
+    internal fun remoteChatConfig(): JSONObject? =
+        prefs.getString("remote_chat", null)?.let { JSONObject(decrypt(it)) }
+
+    internal fun isRemoteMode(): Boolean = prefs.getBoolean("remote_mode", false)
+
+    internal fun setRemoteMode(enabled: Boolean) {
+        prefs.edit().putBoolean("remote_mode", enabled).apply()
+    }
+
+    internal fun saveRemoteChatConfig(config: JSONObject) {
+        check(prefs.edit().putString("remote_chat", encrypt(config.toString())).commit()) {
+            "Remote connection settings could not be saved."
+        }
+    }
+
     private fun encrypt(raw: String): String {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key()) }
         return Base64.encodeToString(cipher.iv, Base64.NO_WRAP) + ":" + Base64.encodeToString(cipher.doFinal(raw.toByteArray()), Base64.NO_WRAP)

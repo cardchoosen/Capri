@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Capri 对话</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/host.css">
+  <script src="/markdown.js" defer></script>
+  <script src="/host.js" defer></script>
+</head>
+<body data-remote="__CAPRI_REMOTE__">
+  <aside>
+    <header><span class="mark">⌁</span> C A P R I</header>
+    <button id="create" disabled>＋ 新建对话</button>
+    <nav id="sessions" aria-label="会话列表"></nav>
+    <footer>Capri 服务端 · 独立工作区</footer>
+  </aside>
+  <main>
+    <header>
+      <div><strong id="title">Capri 对话</strong><small id="connection" role="status">正在连接…</small></div>
+      <div class="header-actions">
+        <button id="device-open" hidden>Android 设备</button>
+        <button id="export" disabled>导出对话</button>
+      </div>
+    </header>
+    <form id="access" hidden>
+      <label>访问令牌 <input name="token" type="password" required autocomplete="off"></label>
+      <button>连接</button>
+    </form>
+    <div id="messages" aria-label="聊天记录" tabindex="0">
+      <div id="history"></div><div id="progress" role="status"></div>
+    </div>
+    <div id="error" role="alert" hidden></div>
+    <form id="composer" hidden>
+      <div class="composer-card">
+        <label for="input" class="visually-hidden">消息</label>
+        <textarea id="input" name="text" rows="2" required maxlength="4000" placeholder="跟 Capri 说点什么…"></textarea>
+        <div class="actions"><span>Enter 发送 · Shift Enter 换行</span><button id="refresh" type="button">刷新</button><button id="send">发送 <span aria-hidden="true">↑</span></button></div>
+      </div>
+    </form>
+  </main>
+  <dialog id="device">
+    <header><h2>Android 局域网验证</h2><button id="device-close" type="button">关闭</button></header>
+    <p>在手机的远程 Capri 页面开启一次接单，再提交应用包名。</p>
+    <form id="launch">
+      <label>应用包名 <input name="packageName" placeholder="com.android.settings" required maxlength="200"></label>
+      <button>打开 App</button>
+    </form>
+    <button id="device-refresh" type="button">刷新设备状态</button>
+    <pre id="device-status" role="status"></pre>
+  </dialog>
+</body>
+</html>

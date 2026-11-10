@@ -303,6 +303,7 @@ def server_for(bridge, port=DEFAULT_PORT, token=None):
                 self.reply(403, {'error': 'Invalid host'}); return
             files = {'/': ('index.html', 'text/html; charset=utf-8'),
                      '/app.js': ('app.js', 'text/javascript; charset=utf-8'),
+                     '/markdown.js': ('markdown.js', 'text/javascript; charset=utf-8'),
                      '/rules.js': ('rules.js', 'text/javascript; charset=utf-8'),
                      '/reliability.js': ('reliability.js', 'text/javascript; charset=utf-8'),
                      '/run.js': ('run.js', 'text/javascript; charset=utf-8'),

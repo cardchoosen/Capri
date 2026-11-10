@@ -1,5 +1,6 @@
 package ai.capri.app.extensions
 
+import ai.capri.app.RuntimeFiles
 import ai.capri.app.knowledge.MemoryPolicy
 import org.json.JSONArray
 import org.json.JSONObject
@@ -28,9 +29,8 @@ internal class SkillVersions(private val root: File) {
         fun requireExpected(directory: File,expected: String) { require(revision(directory)==expected) { "Skill revision conflict; inspect the current definition before restoring." } }
         fun revision(directory: File): String {
             val all=files(directory);val entry=File(directory,"SKILL.md");require(entry.isFile && entry.length()<=128000) { "SKILL.md is absent or too large." }
-            return MemoryPolicy.hash(buildString { append(entry.readText());all.filter { it.canonicalFile!=entry.canonicalFile }.forEach { append('\n').append(it.relativeTo(directory.canonicalFile).invariantSeparatorsPath).append(':').append(hashFile(it)) } })
+            return MemoryPolicy.hash(buildString { append(entry.readText());all.filter { it.canonicalFile!=entry.canonicalFile }.forEach { append('\n').append(it.relativeTo(directory.canonicalFile).invariantSeparatorsPath).append(':').append(RuntimeFiles.sha(it)) } })
         }
-        private fun hashFile(file: File): String = java.security.MessageDigest.getInstance("SHA-256").let { digest -> file.inputStream().use { stream -> val buffer=ByteArray(8192);while(true) { val n=stream.read(buffer);if(n<0)break;digest.update(buffer,0,n) } };digest.digest().joinToString("") { "%02x".format(it) } }
     }
     private fun id(id: String)=ExtensionPolicy.id(id)
     private fun location(id: String,revision: String): File { require(revision.matches(Regex("[a-f0-9]{64}"))) { "Invalid Skill revision." };return File(root,"${id(id)}/$revision") }
@@ -60,7 +60,7 @@ internal class SkillVersions(private val root: File) {
     fun list(id: String,current: String): JSONArray = synchronized(lock) { JSONArray(File(root,id(id)).listFiles().orEmpty().filter { it.isDirectory && it.name.matches(Regex("[a-f0-9]{64}")) }.sortedByDescending { it.lastModified() }.take(8).map { folder -> JSONObject(File(folder,"record.json").readText()).put("current",folder.name==current) }) }
     fun source(id: String,version: String): File = synchronized(lock) { File(location(id,version),id).also { require(it.isDirectory && revision(it)==version) { "Skill revision is missing or damaged." } } }
     fun compare(id: String,before: String,after: String): JSONObject = synchronized(lock) {
-        fun manifest(rev: String)=source(id,rev).let { dir -> files(dir).associate { it.relativeTo(dir.canonicalFile).invariantSeparatorsPath to hashFile(it) } }
+        fun manifest(rev: String)=source(id,rev).let { dir -> files(dir).associate { it.relativeTo(dir.canonicalFile).invariantSeparatorsPath to RuntimeFiles.sha(it) } }
         val a=manifest(before);val b=manifest(after)
         JSONObject().put("before",before).put("after",after).put("files",JSONArray((a.keys+b.keys).sorted().filter { a[it]!=b[it] }.map { path -> JSONObject().put("path",path).put("before_sha256",a[path] ?: JSONObject.NULL).put("after_sha256",b[path] ?: JSONObject.NULL) })).put("notice","Content hashes compare all retained resources; no scripts were executed.")
     }

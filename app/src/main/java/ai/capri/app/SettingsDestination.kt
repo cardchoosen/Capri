@@ -5,12 +5,15 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
 import java.text.NumberFormat
 
-@Composable internal fun SettingsDestination(vm: CapriModel, route: String, onBack: () -> Unit) {
+@Composable internal fun SettingsDestination(vm: CapriModel, route: String, onRemoteMode: () -> Unit, onBack: () -> Unit) {
     val context = LocalContext.current
     val packageInfo = remember { context.packageManager.getPackageInfo(context.packageName,0) }
     val debug = context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0
     when(route) {
         "kernel" -> KernelSettings(onBack)
+        "remote" -> ScrollDetail("远程 Capri", onBack) {
+            ai.capri.app.remote.RemoteChatPanel(vm.store, onRemoteMode = onRemoteMode)
+        }
         "rules" -> ai.capri.app.agent.rules.RulesSettings(vm.userRules, vm.current().id, initiallyOpen = true, onClose = onBack)
         "root" -> ScrollDetail("Root", onBack) { ai.capri.app.nativebridge.RootPanel(vm) }
         "environment" -> ScrollDetail("执行环境", onBack) {

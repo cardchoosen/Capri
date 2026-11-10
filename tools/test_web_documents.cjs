@@ -18,7 +18,7 @@ const scope={document:{createElement:tag=>new Element(tag),createTextNode:text=>
  fetch:async()=>{fetches++;return {ok:true,blob:async()=>blob};},failure(message){scope.error=message;}};
 get('messages').scrollTop=120;get('composer');
 vm.createContext(scope);
-const source=fs.readFileSync(__dirname+'/web/app.js','utf8');vm.runInContext(source.slice(source.indexOf('function inline('),source.indexOf('// Parse Markdown once'))+'\n'+fs.readFileSync(__dirname+'/web/documents.js','utf8'),scope);
+vm.runInContext(fs.readFileSync(__dirname+'/web/markdown.js','utf8')+'\n'+fs.readFileSync(__dirname+'/web/documents.js','utf8'),scope);
 const docs=scope.window.CapriDocuments;
 function find(node,text){if(node.textContent===text)return node;for(const child of node.children||[]){const match=find(child,text);if(match)return match;}}
 async function settle(){await new Promise(r=>setImmediate(r));await new Promise(r=>setImmediate(r));}

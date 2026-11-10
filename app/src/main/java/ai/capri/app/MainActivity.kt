@@ -51,7 +51,6 @@ class MainActivity : ComponentActivity() {
     override fun onPause() { model.androidTools.permissions.detach(this); super.onPause() }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        DebugBridge.attach(model)
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
@@ -61,7 +60,16 @@ class MainActivity : ComponentActivity() {
                 secondaryContainer = Color(0xFF24311F), onSecondaryContainer = Green,
                 background = Ink, surface = Panel, onSurface = White, outline = Line, error = Red),
             shapes = Shapes(extraSmall = RoundedCornerShape(2.dp), small = RoundedCornerShape(2.dp),
-                medium = RoundedCornerShape(4.dp), large = RoundedCornerShape(4.dp), extraLarge = RoundedCornerShape(4.dp))) { Capri(model) } }
+                medium = RoundedCornerShape(4.dp), large = RoundedCornerShape(4.dp), extraLarge = RoundedCornerShape(4.dp))) {
+            val vm = model
+            var remote by remember(vm) { mutableStateOf(vm.store.isRemoteMode()) }
+            fun changeMode(enabled: Boolean) {
+                vm.store.setRemoteMode(enabled)
+                remote = enabled
+            }
+            if (remote) ai.capri.app.remote.RemoteModeHome(vm.store) { changeMode(false) }
+            else Capri(vm) { changeMode(true) }
+        } }
     }
 }
 
@@ -74,7 +82,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
-@Composable private fun Capri(vm: CapriModel) {
+@Composable private fun Capri(vm: CapriModel, onRemoteMode: () -> Unit) {
     val update = vm.updates.collectAsState().value
     val session = vm.current()
     val drawerTasks = remember(update) { vm.sessions.filter { it.kind == SessionKind.TASK }.map { it.copy(messages = mutableListOf()) } }
@@ -332,7 +340,9 @@ class MainActivity : ComponentActivity() {
             SettingsRow("终端", "当前对话的持续终端与执行结果", Icons.Outlined.Terminal) { workbench = false; terminalPanel = true }
         }
     })
-    if(settingsRoute.isNotBlank()) key(session.id,settingsRoute) { SettingsDestination(vm, settingsRoute) { settingsRoute = "" } }
+    if(settingsRoute.isNotBlank()) key(session.id,settingsRoute) {
+        SettingsDestination(vm, settingsRoute, onRemoteMode) { settingsRoute = "" }
+    }
     if(enhancementsPanel) ai.capri.app.retrieval.EnhancementsPanel(vm) { enhancementsPanel = false }
     if(knowledgePanel) key(vm.memoryRevision) { ai.capri.app.knowledge.KnowledgePanel(vm) { knowledgePanel = false } }
     if(extensionsPanel) ai.capri.app.extensions.ExtensionsPanel(vm, initialCategory = extensionCategory) { extensionsPanel = false }
