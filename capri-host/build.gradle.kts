@@ -16,6 +16,10 @@ dependencies {
 application { mainClass.set("ai.capri.host.MainKt") }
 
 tasks.processResources {
+    doFirst {
+        // Drop stale generated rules before copying the current source set.
+        delete(destinationDir.resolve("kernel-rules"))
+    }
     from(rootProject.file("../tools/web")) {
         include("style.css", "markdown.js")
         into("web")

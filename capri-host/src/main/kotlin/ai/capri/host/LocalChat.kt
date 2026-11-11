@@ -665,7 +665,8 @@ internal class LocalChat private constructor(
                 require(entries.length() in 1..16)
                 DocumentExecutors(entries)
             }
-            val kernelRules = KernelRules(data.toAbsolutePath().resolve("kernel-rules"))
+            val sourceRules = System.getenv("CAPRI_KERNEL_RULES_SOURCE_DIR")?.takeIf(String::isNotBlank)?.let(Path::of)
+            val kernelRules = KernelRules(data.toAbsolutePath().resolve("kernel-rules"), sourceRules)
             return LocalChat(endpoint, key, model, HostSessions(data.toAbsolutePath(), legacy), rules,
                 data.toAbsolutePath().resolve("AGENTS.md"), kernelRules, limits, budget,
                 catalog, mcp, transcription, browser, memoryRanking, executors)

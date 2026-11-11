@@ -8,30 +8,34 @@ import java.nio.file.LinkOption.NOFOLLOW_LINKS
 import java.nio.file.Path
 import java.nio.file.attribute.PosixFilePermissions
 
-internal class KernelRules(private val directory: Path) {
+internal class KernelRules(private val directory: Path, private val sourceDirectory: Path? = null) {
     data class Rule(val name: String, val content: String, val source: String)
 
-    private val bundled = bundledRules()
+    private val bundled by lazy { bundledRules() }
 
     init {
         Files.createDirectories(directory, PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")))
     }
 
     fun load(): List<Rule> {
-        require(Files.isDirectory(directory, NOFOLLOW_LINKS)) { "The local kernel rules directory is unavailable." }
-        val files = Files.list(directory).use { paths ->
-            paths.filter { isRule(it.fileName.toString()) && Files.isRegularFile(it, NOFOLLOW_LINKS) }
-                .limit(65).toList().sortedBy { it.fileName.toString() }
-        }
-        require(files.size <= 64) { "The local kernel rules directory exceeds 64 files." }
-        val local = files.mapNotNull { path ->
-            Files.newInputStream(path, NOFOLLOW_LINKS).use { read(it, path.fileName.toString(), "local") }
-        }
-        val rules = bundled + local
+        val defaults = sourceDirectory?.let { directoryRules(it, "source") } ?: bundled
+        val rules = defaults + directoryRules(directory, "local")
         require(rules.sumOf { it.content.toByteArray(Charsets.UTF_8).size } <= 65_536) {
             "Kernel rules exceed the combined 64 KiB limit."
         }
         return rules
+    }
+
+    private fun directoryRules(path: Path, source: String): List<Rule> {
+        require(Files.isDirectory(path, NOFOLLOW_LINKS)) { "The $source kernel rules directory is unavailable." }
+        val files = Files.list(path).use { paths ->
+            paths.filter { isRule(it.fileName.toString()) && Files.isRegularFile(it, NOFOLLOW_LINKS) }
+                .limit(65).toList().sortedBy { it.fileName.toString() }
+        }
+        require(files.size <= 64) { "The $source kernel rules directory exceeds 64 files." }
+        return files.mapNotNull { file ->
+            Files.newInputStream(file, NOFOLLOW_LINKS).use { read(it, file.fileName.toString(), source) }
+        }
     }
 
     fun prompt(): String = load().joinToString("\n\n") { it.content }

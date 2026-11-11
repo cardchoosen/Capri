@@ -262,7 +262,8 @@ function renderRules(container, rules) {
     const file = document.createElement('details');
     const filename = document.createElement('summary');
     const content = document.createElement('pre');
-    filename.textContent = rule.name + (rule.source === 'local' ? ' · 本机' : ' · 内置');
+    const sources = {local: '本机', source: '源码', bundled: '内置'};
+    filename.textContent = rule.name + ' · ' + sources[rule.source];
     content.textContent = rule.content;
     file.append(filename, content);
     kernel.append(file);
