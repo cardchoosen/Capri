@@ -26,6 +26,24 @@ main > header strong { font-size: 19px; }
 #history article.user > div { white-space: pre-wrap; }
 #history article.pending { opacity: .7; }
 #history article p:last-child { margin-bottom: 0; }
+#history .tool-process > summary:focus-visible { outline: 1px solid var(--green); outline-offset: 3px; border-radius: 4px; }
+#history .tool-process > summary.tool-running::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  flex: none;
+  margin-right: 2px;
+  border-radius: 50%;
+  background: var(--green);
+}
+#history .tool-running > span > span { display: inline-block; animation: tool-hint-in 180ms ease-out; }
+@keyframes tool-hint-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  #history .tool-running > span > span { animation: none; }
+}
 #progress:empty { display: none; }
 #composer { padding-top: 8px; }
 .composer-card {
@@ -37,27 +55,101 @@ main > header strong { font-size: 19px; }
 .composer-card:focus-within { border-color: #66845b; }
 #input {
   display: block;
-  min-height: 64px;
+  min-height: 56px;
   padding: 12px 15px 4px;
   border: 0;
   border-radius: 16px 16px 0 0;
   background: transparent;
   font-size: 18px;
 }
-#composer .actions { justify-content: flex-end; margin: 0; padding: 6px 10px 10px 15px; }
-#composer .actions > span { font-size: 13px; }
-#composer button { border-radius: 9px; }
-#composer #refresh { background: transparent; color: var(--muted); border-color: transparent; }
-#composer #refresh:hover { border-color: var(--line); color: var(--white); }
-#composer #send { background: var(--green); color: var(--bg); border-color: var(--green); font-weight: 650; }
-#composer #send span { display: inline; color: inherit; font-size: inherit; }
+#composer .actions { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin: 0; padding: 6px 10px 10px; }
+#chat-image { margin: 4px 12px; max-width: calc(100% - 24px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-radius: 8px; }
+#composer .model-controls, .composer-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.composer-actions { margin-left: auto; }
+#composer .composer-choice { display: inline-flex; align-items: center; border: 1px solid transparent; border-radius: 8px; color: var(--muted); font-size: 13px; }
+#composer .composer-choice[hidden] { display: none; }
+#composer .composer-choice:hover, #composer .composer-choice:focus-within { background: var(--bg); border-color: var(--line); }
+#composer .composer-choice > span:not(.visually-hidden) { margin-left: 8px; color: var(--muted); font-size: inherit; }
+#composer .composer-choice select {
+  appearance: none;
+  color-scheme: dark;
+  max-width: 176px;
+  color: var(--white);
+  font: inherit;
+  border: 0;
+  border-radius: 8px;
+  padding: 6px 22px 6px 8px;
+  background: transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='%2393a097'%3E%3Cpath d='m3 4 3 3 3-3'/%3E%3C/svg%3E") right 6px center / 12px no-repeat;
+}
+#composer .composer-choice option { background: var(--panel); }
+.icon-button svg, .composer-actions svg { width: 16px; height: 16px; display: block; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+.icon-button { display: inline-grid; place-items: center; }
+#composer .composer-actions button { display: inline-flex; gap: 6px; align-items: center; border-radius: 8px; padding: 6px 9px; font-size: 14px; }
+#composer .composer-actions button[hidden] { display: none; }
+#composer #upload { background: transparent; color: var(--muted); border-color: transparent; }
+#composer #upload:hover { border-color: var(--line); color: var(--white); }
+#composer #upload span { color: inherit; font-size: inherit; }
+#composer #send { background: var(--green); color: var(--bg); border-color: var(--green); padding-inline: 12px; font-weight: 650; }
 #composer #send:hover { filter: brightness(1.08); }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.view-switch { display: flex; gap: 4px; border-bottom: 1px solid var(--line); padding-bottom: 8px; }
+.view-switch button { flex: 1; padding: 6px 2px; border-radius: 7px; color: var(--muted); background: transparent; border-color: transparent; }
+.view-switch [aria-pressed=true] { background: var(--panel); border-color: var(--line); color: var(--green); }
+.view-switch button:hover { color: var(--white); }
+body > aside { flex-shrink: 0; }
+body > aside > footer { margin-top: auto; }
+#settings { flex: 1; overflow: auto; padding: clamp(16px, 4vw, 40px); }
+.settings-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
+.settings-heading p { margin: 0; color: var(--muted); overflow-wrap: anywhere; }
+.settings-grid { display: grid; gap: 8px; max-width: 820px; }
+.settings-card { margin: 0; border: 1px solid var(--line); border-radius: 10px; overflow-wrap: anywhere; }
+.settings-card > summary { padding: 10px 14px; color: var(--white); font-size: 15px; font-weight: 600; border-radius: 10px; }
+.settings-card > summary:hover { background: var(--panel); }
+.settings-card summary::marker { color: var(--muted); }
+.settings-details { border-top: 1px solid var(--line); padding: 10px 14px 14px; }
+#session-files h2, #session-dialog h2 { font-size: 16px; color: var(--white); margin: 0; }
+.settings-grid ul { margin: 6px 0 0; padding-left: 20px; color: var(--white); }
+#tools-status ul { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 185px), 1fr)); gap: 4px 18px; }
+#tools-status li { font-family: ui-monospace, monospace; font-size: 13px; }
+.settings-details > details { margin: 0; }
+.settings-details > details > summary { padding: 5px 0; color: var(--white); }
+#rules-status > details > details { margin: 4px 0 4px 14px; }
+.settings-grid pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.rule-editor { display: grid; gap: 8px; padding: 4px 0 8px; }
+.rule-editor textarea { border-radius: 6px; resize: vertical; }
+.rule-editor > div { display: flex; align-items: center; gap: 10px; }
+#skills-open { margin-top: 10px; }
+#session-menu { font-weight: 700; }
+#session-dialog { width: min(420px, 92vw); border-radius: 12px; }
+#session-edit { display: grid; gap: 8px; margin-top: 16px; }
+#session-name { width: 100%; font: inherit; color: inherit; padding: 8px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }
+#session-edit-status { margin: 0; color: var(--red); }
+#session-delete { color: var(--red); margin-right: auto; }
+#files-toggle[aria-expanded=true] { border-color: var(--green); color: var(--green); }
+#session-files { flex: 0 0 clamp(250px, 25vw, 380px); min-width: 0; display: flex; flex-direction: column; background: var(--bg); border-left: 1px solid var(--line); }
+#session-files > header { padding: 14px 16px; border-bottom: 1px solid var(--line); }
+#files-close { background: transparent; border-color: transparent; font-size: 20px; padding: 0 8px; }
+#files-status { padding: 8px 16px 0; margin: 0; color: var(--muted); }
+#files-status:empty { display: none; }
+#file-tree { padding: 12px 10px; overflow: auto; }
+#file-tree details { margin: 0; color: var(--white); }
+#file-tree summary { padding: 5px 6px; overflow-wrap: anywhere; }
+#file-tree details > div { margin-left: 12px; border-left: 1px solid var(--line); padding-left: 5px; }
+.file-row { width: 100%; min-width: 0; display: flex; align-items: baseline; justify-content: space-between; gap: 8px; text-align: left; padding: 5px 6px; border-color: transparent; background: transparent; border-radius: 6px; font-size: 13px; }
+.file-row span { overflow-wrap: anywhere; }
+.file-row small { flex: none; }
+.file-row:hover { background: var(--panel); border-color: var(--line); }
+@media (max-width: 960px) {
+  #session-files { position: fixed; z-index: 4; top: 0; bottom: 0; right: 0; width: min(340px, 88vw); box-shadow: -10px 0 36px #0009; }
+}
 @media (max-width: 550px) {
   aside { width: 110px; }
   main > header { flex-wrap: wrap; }
+  .header-actions, #composer .actions { flex-wrap: wrap; }
   #access input { width: 100%; }
   #history article { font-size: 17px; }
   #history article.user { max-width: 94%; }
   #input { font-size: 17px; }
+  #composer #upload span { display: none; }
+  #composer .composer-choice select { max-width: 142px; }
 }

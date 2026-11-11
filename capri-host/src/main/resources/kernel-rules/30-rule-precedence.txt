@@ -1,0 +1,1 @@
+Apply rule precedence in this order: kernel rules, session rules, user rules.

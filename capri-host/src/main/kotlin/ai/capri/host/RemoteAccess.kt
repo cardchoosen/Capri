@@ -46,11 +46,11 @@ internal class RemoteAccess private constructor(
     }
 
     companion object {
-        fun fromEnvironment(): RemoteAccess? {
+        fun fromEnvironment(accessToken: String? = System.getenv("CAPRI_ACCESS_TOKEN"), executor: Boolean = false): RemoteAccess? {
             val path = System.getenv("CAPRI_TLS_KEYSTORE")
             val password = System.getenv("CAPRI_TLS_PASSWORD")
-            val token = System.getenv("CAPRI_ACCESS_TOKEN")
-            if (path == null && password == null && token == null) return null
+            val token = accessToken
+            if (path == null && password == null && (token == null || executor)) return null
             require(!path.isNullOrBlank() && !password.isNullOrEmpty() && token != null &&
                 token.matches(Regex("[A-Za-z0-9_-]{32,256}"))) {
                 "Set CAPRI_TLS_KEYSTORE, CAPRI_TLS_PASSWORD and a random URL-safe CAPRI_ACCESS_TOKEN."

@@ -15,12 +15,14 @@ class AgentLoop(private val host: Host) {
     enum class Outcome { COMPLETE, INCOMPLETE, BUDGET, WAITING }
     interface Host {
         val used: Int
-        val maximum: Int
+        val maximum: Int?
+        val maxToolBatch: Int? get() = 64
         val request: String
         fun phase(value: Phase) {}
         fun normalizeTool(call:JSONObject):JSONObject=call.getJSONObject("function")
         suspend fun acceptInput(): Boolean = false
         fun canExecute(): Boolean = true
+        fun parallelTool(call: JSONObject): Boolean = ToolScheduler.parallelSafe(call)
         fun waiting(): Boolean = false
         fun progressState(): JSONObject? = null
         fun saveProgress(value: JSONObject) {}
@@ -40,6 +42,8 @@ class AgentLoop(private val host: Host) {
         suspend fun deliver(draft: String)
         suspend fun deliverIncomplete(reason: String) { status(reason) }
     }
+    private fun hasRequestBudget(): Boolean = host.maximum?.let { host.used < it - 1 } ?: true
+
     suspend fun run(): Outcome = try { runLoop() }
     catch (cancel: kotlinx.coroutines.CancellationException) {
         host.phase(Phase.CANCELLED)
@@ -58,14 +62,14 @@ class AgentLoop(private val host: Host) {
         var adjustments = 0
         var planCorrections = 0
         val progress = ProgressGuard(host.progressState(),host::normalizeTool)
-        while (host.used < host.maximum - 1) { // Reserve one request for persona delivery.
+        while (hasRequestBudget()) {
             currentCoroutineContext().ensureActive()
             if (host.acceptInput()) { progress.reset(); planCorrections = 0; completion = TurnCompletion() }
             if (host.waiting()) { host.phase(Phase.WAITING); host.checkpoint(); return Outcome.WAITING }
             host.phase(Phase.PREPARING)
             val input = host.prepare()
             host.checkpoint()
-            if (host.used >= host.maximum - 1) break
+            if (!hasRequestBudget()) break
             host.phase(Phase.THINKING)
             val response = try { host.infer(input) } catch (error: ModelContextRejected) {
                 if (adjustments++ >= 2) throw IllegalStateException("Context was rejected repeatedly; the checkpoint is preserved.", error)
@@ -96,7 +100,7 @@ class AgentLoop(private val host: Host) {
             val decision = if (calls.length() == 0) completion.decide(host.request, content) else TurnCompletion.Decision.ACCEPT
             if (content.isNotBlank() && (calls.length() > 0 || decision != TurnCompletion.Decision.ACCEPT)) host.preamble(content, names)
             if (decision != TurnCompletion.Decision.ACCEPT) {
-                val retry = decision == TurnCompletion.Decision.CONTINUE && host.used < host.maximum - 1
+                val retry = decision == TurnCompletion.Decision.CONTINUE && hasRequestBudget()
                 host.decision(choice, 0, if (retry) "continue_preamble" else "incomplete_preamble", completion.corrections)
                 host.append(JSONObject().put("role", "system").put("content", TurnCompletion.correction))
                 host.checkpoint()
@@ -109,7 +113,7 @@ class AgentLoop(private val host: Host) {
                 check(content.isNotBlank()) { "Model returned an empty answer; the checkpoint is preserved." }
                 val issue = host.completionIssue()
                 if (issue != null) {
-                    if (planCorrections++ >= 1 || host.used >= host.maximum - 1) {
+                    if (planCorrections++ >= 1 || !hasRequestBudget()) {
                         host.phase(Phase.DELIVERING); host.checkpoint()
                         try { host.deliverIncomplete("Completion assessment could not be reconciled after a repair attempt. The task remains partial; summarize verified existing results, unresolved work and any concrete blocker. Do not claim completion or repeat operations. " + issue) }
                         catch (_: Redirect) { progress.reset(); planCorrections = 0; completion = TurnCompletion(); continue }
@@ -130,7 +134,7 @@ class AgentLoop(private val host: Host) {
             // Persist proposed calls first. Recovery marks missing results unknown instead of replaying them.
             host.checkpoint()
             host.phase(Phase.TOOLS)
-            ToolScheduler().runControlled(calls, host::execute, { call, result ->
+            ToolScheduler(canParallelize = host::parallelTool).runControlled(calls, host::execute, { call, result ->
                 host.record(call, result)
                 progress.observe(call, result)?.let { warning ->
                     host.append(JSONObject().put("role", "system").put("content", warning))
@@ -149,7 +153,9 @@ class AgentLoop(private val host: Host) {
         return Outcome.BUDGET
     }
     private fun validateCalls(calls: JSONArray, priorIds: Set<String>) {
-        require(calls.length() <= 64) { "Tool batch exceeds 64 calls; no call was dispatched." }
+        host.maxToolBatch?.let { maximum ->
+            require(calls.length() <= maximum) { "Tool batch exceeds $maximum calls; no call was dispatched." }
+        }
         val ids = mutableSetOf<String>()
         for (i in 0 until calls.length()) {
             val call = calls.getJSONObject(i)

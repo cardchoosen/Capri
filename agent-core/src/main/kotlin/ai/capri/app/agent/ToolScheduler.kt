@@ -11,7 +11,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /** Consecutive known-safe reads may overlap; every other call is an ordered barrier. */
-class ToolScheduler(private val concurrency: Int = 4) {
+class ToolScheduler(private val concurrency: Int = 4, private val canParallelize: (JSONObject) -> Boolean = Companion::parallelSafe) {
     companion object {
         private val disk = Semaphore(4)
         private val network = Semaphore(2)
@@ -37,11 +37,11 @@ class ToolScheduler(private val concurrency: Int = 4) {
         var index = 0
         while (index < calls.length()) {
             val call = calls.getJSONObject(index)
-            if (!parallelSafe(call)) {
+            if (!canParallelize(call)) {
                 record(call, if (canExecute()) limited(call,execute,canExecute) else skipped()); index++; continue
             }
             val group = mutableListOf<JSONObject>()
-            while (index < calls.length() && parallelSafe(calls.getJSONObject(index))) group += calls.getJSONObject(index++)
+            while (index < calls.length() && canParallelize(calls.getJSONObject(index))) group += calls.getJSONObject(index++)
             coroutineScope {
                 val slots = Semaphore(concurrency)
                 group.map { item -> async {

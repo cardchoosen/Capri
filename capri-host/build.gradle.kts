@@ -8,6 +8,9 @@ kotlin { jvmToolchain(17) }
 dependencies {
     implementation(project(":agent-core"))
     implementation("org.json:json:20240303")
+    implementation("org.apache.pdfbox:pdfbox:3.0.8")
+    implementation("com.microsoft.playwright:playwright:1.61.0")
+    testImplementation("junit:junit:4.13.2")
 }
 
 application { mainClass.set("ai.capri.host.MainKt") }

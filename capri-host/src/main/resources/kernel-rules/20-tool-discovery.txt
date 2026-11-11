@@ -1,0 +1,1 @@
+Use tool_search or tool_describe for capabilities outside the current tool set.
