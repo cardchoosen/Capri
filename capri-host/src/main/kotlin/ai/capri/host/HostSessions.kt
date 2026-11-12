@@ -279,7 +279,9 @@ internal class HostSessions(private val root: Path, legacy: Path?) : AutoCloseab
     private fun readReminders(path: Path): JSONArray =
         if (Files.isRegularFile(path, NOFOLLOW_LINKS)) JSONArray(Files.readString(path)) else JSONArray()
 
-    fun workspace(id: String): WorkspaceTools = WorkspaceTools(directory(id).resolve("workspace")) { path, size ->
+    fun workspaceDirectory(id: String): Path = directory(id).resolve("workspace")
+
+    fun workspace(id: String): WorkspaceTools = WorkspaceTools(workspaceDirectory(id)) { path, size ->
         publish(id, path, size)
     }
 
@@ -290,6 +292,38 @@ internal class HostSessions(private val root: Path, legacy: Path?) : AutoCloseab
             file.put("published", file.getString("path") in published)
         }
         return workspace.put("legacy", JSONArray(legacyArtifacts(id)))
+    }
+
+    @Synchronized fun workspaceEditorFile(id: String, path: String): JSONObject {
+        val (bytes, content, revision) = workspace(id).editorFile(path)
+        return JSONObject().put("path", path).put("name", Path.of(path).fileName.toString())
+            .put("size", bytes.size).put("revision", revision).put("text", content)
+            .put("textual", runCatching { Charsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(bytes)) }.isSuccess)
+            .put("editable", runCatching { Charsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(bytes)) }.isSuccess)
+    }
+
+    @Synchronized fun artifactEditorFile(id: String, artifact: String): JSONObject? {
+        val (name, bytes) = artifact(id, artifact) ?: return null
+        if (bytes.size > WorkspaceTools.maxBytes) throw WorkspaceFailure("file_too_large", "The file exceeds the 1 MiB preview limit.")
+        val decoded = runCatching { Charsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(bytes)).toString() }
+        return JSONObject().put("artifact", artifact).put("name", name).put("size", bytes.size)
+            .put("revision", "").put("text", decoded.getOrNull() ?: "").put("textual", decoded.isSuccess).put("editable", false)
+    }
+
+    @Synchronized fun saveWorkspaceEditorFile(id: String, path: String, content: String, revision: String): JSONObject {
+        val next = workspace(id).saveEditorFile(path, content, revision)
+        return JSONObject().put("path", path).put("revision", next)
+    }
+
+    @Synchronized fun workspacePreview(id: String, path: String): Pair<String, ByteArray> = workspace(id).preview(path)
+
+    @Synchronized fun artifactPreview(id: String, artifact: String): Pair<String, ByteArray>? = artifact(id, artifact)?.let { (name, bytes) ->
+        val type = when (name.substringAfterLast('.', "").lowercase()) {
+            "png" -> "image/png"; "jpg", "jpeg" -> "image/jpeg"; "gif" -> "image/gif"; "webp" -> "image/webp"
+            "pdf" -> "application/pdf"; "mp4" -> "video/mp4"; "webm" -> "video/webm"; "mp3" -> "audio/mpeg"; "wav" -> "audio/wav"
+            "html", "htm" -> "text/html"; else -> "application/octet-stream"
+        }
+        type to bytes
     }
 
     @Synchronized fun records(id: String, kind: String, args: JSONObject): JSONObject {

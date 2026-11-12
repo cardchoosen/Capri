@@ -9,7 +9,7 @@
   <script src="/markdown.js" defer></script>
   <script src="/host.js" defer></script>
 </head>
-<body data-remote="__CAPRI_REMOTE__">
+<body data-remote="__CAPRI_REMOTE__" data-finder="__CAPRI_FINDER__">
   <aside>
     <header><span class="mark">⌁</span> C A P R I</header>
     <div class="view-switch" role="group" aria-label="页面">
@@ -28,13 +28,18 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 6M20 5v6h-6"/></svg>
         </button>
         <button id="device-open" hidden>Android 设备</button>
-        <button id="session-menu" type="button" title="管理会话" aria-label="管理会话" disabled>⋯</button>
+        <button id="session-menu" type="button" title="重命名会话" aria-label="重命名会话" disabled>⋯</button>
         <button id="export" disabled>导出对话</button>
         <button id="files-toggle" class="icon-button" type="button" aria-label="展开会话文件" title="展开会话文件" aria-controls="session-files" aria-expanded="false" disabled>
           <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M15 5v14"/></svg>
         </button>
       </div>
     </header>
+    <nav id="workspace-tabs" class="workspace-tabs" role="tablist" aria-label="工作标签" hidden>
+      <button id="workspace-chat-tab" class="workspace-tab-button" type="button" role="tab" aria-selected="true">对话</button>
+      <div id="workspace-file-tabs"></div>
+    </nav>
+    <section id="ide-view" aria-label="文件 IDE" hidden></section>
     <form id="access" hidden>
       <label>访问令牌 <input name="token" type="password" required autocomplete="off"></label>
       <button>连接</button>
@@ -114,18 +119,34 @@
     <pre id="device-status" role="status"></pre>
   </dialog>
   <section id="session-files" aria-label="会话文件" hidden>
-    <header><h2>会话文件</h2><button id="files-close" type="button" aria-label="收起会话文件" title="收起会话文件">×</button></header>
+    <header>
+      <h2>会话文件</h2>
+      <div class="files-actions">
+        <button id="files-open-finder" type="button" hidden>在 Finder 中打开</button>
+        <button id="files-close" type="button" aria-label="收起会话文件" title="收起会话文件">×</button>
+      </div>
+    </header>
     <p id="files-status" role="status"></p>
     <div id="file-tree"></div>
   </section>
+  <dialog id="reply-image-preview" aria-labelledby="reply-image-name">
+    <header>
+      <h2 id="reply-image-name"></h2>
+      <button id="reply-image-close" type="button">关闭</button>
+    </header>
+    <div class="reply-image-canvas"><img id="reply-image-full" alt="" hidden></div>
+    <footer>
+      <p id="reply-image-status" role="status"></p>
+      <button id="reply-image-download" type="button" disabled>下载原图</button>
+    </footer>
+  </dialog>
   <dialog id="session-dialog" aria-labelledby="session-dialog-title">
-    <header><h2 id="session-dialog-title">管理会话</h2><button id="session-close" type="button">关闭</button></header>
+    <header><h2 id="session-dialog-title">重命名会话</h2><button id="session-close" type="button">关闭</button></header>
     <form id="session-edit">
       <label for="session-name">会话名称</label>
       <input id="session-name" required maxlength="80" autocomplete="off">
       <p id="session-edit-status" role="status"></p>
       <div class="dialog-actions">
-        <button id="session-delete" type="button">删除会话</button>
         <button id="session-save" type="submit">保存名称</button>
       </div>
     </form>

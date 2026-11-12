@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Capri · HTML 预览</title>
+  <link rel="stylesheet" href="/style.css">
+  <style>
+    body { flex-direction: column; }
+    header { padding: 10px 16px; border-bottom: 1px solid var(--line); }
+    strong { overflow-wrap: anywhere; }
+    button { flex: none; }
+    p { margin: 12px 16px; color: var(--muted); }
+    iframe { flex: 1; min-height: 0; border: 0; background: white; }
+  </style>
+  <script src="/html-preview.js" defer></script>
+</head>
+<body>
+  <header>
+    <strong id="preview-name">HTML 预览</strong>
+    <button id="preview-download" type="button" disabled>下载原文件</button>
+  </header>
+  <p id="preview-status" role="status">正在读取 HTML…</p>
+  <iframe id="preview-frame" title="HTML 预览" sandbox="allow-scripts" referrerpolicy="no-referrer" hidden></iframe>
+</body>
+</html>

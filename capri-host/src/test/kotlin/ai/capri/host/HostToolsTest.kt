@@ -26,7 +26,7 @@ class HostToolsTest {
             val input = JSONArray().put(JSONObject().put("role", "user").put("content", "Inspect the host."))
             var requests = 0
             val result = runTurn("Inspect the host.", input, HostTools(sessions, HostSessions.DEFAULT)) { request ->
-                assertEquals(21, request.tools.length())
+                assertEquals(22, request.tools.length())
                 val message = if (requests++ == 0) {
                     JSONObject().put("role", "assistant").put("content", JSONObject.NULL)
                         .put("tool_calls", JSONArray()

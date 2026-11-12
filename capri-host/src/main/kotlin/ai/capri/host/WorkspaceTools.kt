@@ -57,6 +57,14 @@ internal class WorkspaceTools(private val root: Path, private val publish: (Stri
             "apply_patch" -> patch(args)
             "skill" -> skill(args)
             "audio_info" -> wavInfo(bytes(relative)).put("path", relative)
+            "render_bar_animation" -> {
+                if (!relative.endsWith(".gif", ignoreCase = true))
+                    fail("invalid_animation_path", "Use a workspace output path ending in .gif.")
+                val target = root.relativize(resolve(relative)).toString()
+                val content = renderBarAnimation(args)
+                save(target, content)
+                JSONObject().put("attachment", publish(target, content.size.toLong()).put("mime", "image/gif"))
+            }
             "document_extract" -> {
                 val path = resolve(relative)
                 if (!Files.isRegularFile(path, NOFOLLOW_LINKS)) fail("file_not_found", "The path is not a regular file.")
@@ -70,7 +78,9 @@ internal class WorkspaceTools(private val root: Path, private val publish: (Stri
             "message" -> {
                 val path = root.relativize(attachmentPath(relative)).toString()
                 val content = attachmentBytes(path)
-                JSONObject().put("attachment", publish(path, content.size.toLong()))
+                val attachment = publish(path, content.size.toLong())
+                    .putOpt("mime", attachmentMediaType(Path.of(path)))
+                JSONObject().put("attachment", attachment)
             }
             else -> error("Workspace tool dispatch is missing.")
         }.put("status", "ok")
@@ -141,20 +151,69 @@ internal class WorkspaceTools(private val root: Path, private val publish: (Stri
     private fun attachmentPath(relative: String): Path {
         val path = resolve(relative)
         val extension = path.fileName.toString().substringAfterLast('.', "").lowercase()
-        if (extension !in setOf("md", "txt", "csv", "json", "yaml", "yml"))
-            fail("unsupported_media", "Publish a Markdown, text, CSV, JSON, or YAML file.")
+        if (extension !in setOf("md", "txt", "csv", "json", "yaml", "yml", "html", "htm") && extension !in imageExtensions)
+            fail("unsupported_media", "Publish a supported text file, HTML document, or PNG, JPEG, GIF, or WebP image.")
         if (!Files.isRegularFile(path, NOFOLLOW_LINKS)) fail("file_not_found", "The path is not a regular file.")
         return path
     }
 
     fun attachmentBytes(relative: String): ByteArray {
-        attachmentPath(relative)
-        return bytes(relative).also { text(it) }
+        val path = attachmentPath(relative)
+        val content = bytes(relative)
+        val expected = attachmentMediaType(path)
+        if (expected == null || expected == "text/html") text(content)
+        else if (imageMime(content) != expected)
+            fail("invalid_image", "The image contents do not match its file extension.")
+        return content
     }
+
+    private fun attachmentMediaType(path: Path): String? =
+        when (path.fileName.toString().substringAfterLast('.', "").lowercase()) {
+            "html", "htm" -> "text/html"
+            "png" -> "image/png"
+            "jpg", "jpeg" -> "image/jpeg"
+            "gif" -> "image/gif"
+            "webp" -> "image/webp"
+            else -> null
+        }
 
     fun attachmentSize(relative: String): Long = Files.size(attachmentPath(relative))
 
     fun sourceRevision(relative: String): String = revision(bytes(relative))
+
+    fun editorFile(relative: String): Triple<ByteArray, String, String> {
+        val content = bytes(relative)
+        val decoded = runCatching { Charsets.UTF_8.newDecoder().decode(ByteBuffer.wrap(content)).toString() }.getOrNull()
+        return Triple(content, decoded ?: "", revision(content))
+    }
+
+    fun saveEditorFile(relative: String, content: String, expectedRevision: String): String {
+        val current = bytes(relative)
+        if (revision(current) != expectedRevision) fail("edit_conflict", "The file changed after it was opened. Reload before saving.")
+        val encoded = content.toByteArray(Charsets.UTF_8)
+        if (encoded.size > maxBytes) fail("file_too_large", "The file exceeds the 1 MiB limit.")
+        save(relative, encoded)
+        return revision(encoded)
+    }
+
+    fun preview(relative: String): Pair<String, ByteArray> {
+        val path = resolve(relative)
+        val content = bytes(relative)
+        val type = when (path.fileName.toString().substringAfterLast('.', "").lowercase()) {
+            "png" -> "image/png"
+            "jpg", "jpeg" -> "image/jpeg"
+            "gif" -> "image/gif"
+            "webp" -> "image/webp"
+            "pdf" -> "application/pdf"
+            "mp4" -> "video/mp4"
+            "webm" -> "video/webm"
+            "mp3" -> "audio/mpeg"
+            "wav" -> "audio/wav"
+            "html", "htm" -> "text/html"
+            else -> "application/octet-stream"
+        }
+        return type to content
+    }
 
     fun inventory(): JSONObject {
         val files = mutableListOf<JSONObject>()
@@ -546,9 +605,21 @@ internal class WorkspaceTools(private val root: Path, private val publish: (Stri
             ToolContracts.spec("grep", "Find case-sensitive literal text in UTF-8 workspace files. Results are bounded.",
                 JSONObject().put("pattern", string("Literal text to find.", 1, 512)).put("path", path)
                     .put("limit", integer("Maximum matches. Default: 50.", 100)), listOf("pattern")),
-            ToolContracts.spec("message", "Attach a workspace text document to the current conversation. Downloads read the current workspace file.",
+            ToolContracts.spec("message", "Attach an existing workspace text document, HTML document, or PNG, JPEG, GIF, or WebP image (up to 1 MiB) to the current reply. Images appear inline. HTML opens in an isolated tab. Use a self-contained HTML file with inline CSS and JavaScript. Downloads read the current workspace file.",
                 JSONObject().put("action", JSONObject().put("type", "string").put("enum", JSONArray().put("send")))
                     .put("media", path), listOf("action", "media")),
+            ToolContracts.spec("render_bar_animation",
+                "Render and attach an inline animated GIF from numeric bar-chart frames, such as a sorting demonstration. For a requested animated image, use this tool rather than returning an HTML page or script. The GIF loops and needs no external runtime.",
+                JSONObject().put("path", string("Workspace output path ending in .gif.", 1, 512))
+                    .put("delayMs", integer("Milliseconds per frame. Default: 250.", 2000).put("minimum", 80))
+                    .put("frames", JSONObject().put("type", "array").put("minItems", 2).put("maxItems", 48)
+                        .put("items", JSONObject().put("type", "object").put("required", JSONArray().put("values"))
+                            .put("additionalProperties", false).put("properties", JSONObject()
+                                .put("values", JSONObject().put("type", "array").put("minItems", 2).put("maxItems", 24)
+                                    .put("items", integer("Nonnegative bar height.", 1000).put("minimum", 0)))
+                                .put("highlight", integer("Optional zero-based index of the highlighted bar.", 23).put("minimum", 0))
+                                .put("caption", string("Optional short description of this frame.", 1, 80))))),
+                listOf("path", "frames")),
             ToolContracts.spec("project", "Detect project types from manifest names in a workspace directory.",
                 JSONObject().put("path", path), emptyList()),
             ToolContracts.spec("coding_reference", "Read a bounded source excerpt and return its file revision and line range.",

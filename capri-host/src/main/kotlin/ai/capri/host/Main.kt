@@ -41,12 +41,16 @@ fun main(args: Array<String>) {
     }
     val device = DeviceLaunch()
     fun configure(listener: HttpServer, access: RemoteAccess?) {
+        val finderAvailable = access == null && listener.address.address.isLoopbackAddress &&
+            System.getProperty("os.name") == "Mac OS X"
         listener.executor = workers
         listener.createContext("/") { exchange ->
             exchange.use {
                 when {
                     exchange.requestURI.path == "/" && exchange.requestMethod == "GET" ->
-                        exchange.reply(200, "text/html", if (chat == null) page else hostPage.replace("__CAPRI_REMOTE__", (access != null).toString()))
+                        exchange.reply(200, "text/html", if (chat == null) page else hostPage
+                            .replace("__CAPRI_REMOTE__", (access != null).toString())
+                            .replace("__CAPRI_FINDER__", finderAvailable.toString()))
                     exchange.requestMethod == "GET" && exchange.requestURI.path in hostAssets -> {
                         val (type, content) = hostAssets.getValue(exchange.requestURI.path)
                         exchange.reply(200, type, content)
@@ -72,6 +76,8 @@ fun main(args: Array<String>) {
                     }
                     chat != null && (exchange.requestURI.path in setOf("/api/chat", "/api/chat/status", "/api/chat/events", "/api/chat/reading", "/api/chat/cancel", "/api/chat/steer", "/api/chat/options", "/api/sessions", "/api/sessions/export",
                         "/api/workspace/upload", "/api/workspace/transcribe", "/api/workspace/files", "/api/workspace/file",
+                        "/api/workspace/editor", "/api/workspace/save", "/api/workspace/preview",
+                        "/api/workspace/open-finder",
                         "/api/settings", "/api/settings/mcp", "/api/skills/catalog", "/api/artifacts") || exchange.requestURI.path.startsWith("/api/artifacts/")) &&
                         exchange.requestHeaders.getFirst("X-Capri-Chat") == "1" -> {
                         val authorized = if (access != null) access.authorized(exchange) || access.browserAuthorized(exchange)
@@ -82,6 +88,9 @@ fun main(args: Array<String>) {
                             exchange.requestURI.path.startsWith("/api/chat/") -> exchange.handleTurnControl(chat)
                             exchange.requestURI.path == "/api/skills/catalog" -> exchange.handleSkillCatalog(chat)
                             exchange.requestURI.path.startsWith("/api/settings") -> exchange.handleIntegrationSettings(chat)
+                            exchange.requestURI.path == "/api/workspace/open-finder" ->
+                                if (finderAvailable) exchange.handleOpenFinder(chat.sessions)
+                                else exchange.reply(404, "application/json", """{"error":"not_found"}""")
                             exchange.requestURI.path == "/api/workspace/transcribe" -> exchange.handleTranscription(chat)
                             exchange.requestURI.path.startsWith("/api/artifacts") || exchange.requestURI.path.startsWith("/api/workspace/") ->
                                 exchange.handleWorkspace(chat.sessions)
@@ -117,6 +126,11 @@ private val hostAssets by lazy {
     mapOf("/style.css" to ("text/css" to webAsset("style.css")),
         "/host.css" to ("text/css" to webAsset("host.css")),
         "/host.js" to ("text/javascript" to webAsset("host.js")),
+        "/ide" to ("text/html" to webAsset("ide.html")),
+        "/ide.css" to ("text/css" to webAsset("ide.css")),
+        "/ide.js" to ("text/javascript" to webAsset("ide.js")),
+        "/html-preview" to ("text/html" to webAsset("html-preview.html")),
+        "/html-preview.js" to ("text/javascript" to webAsset("html-preview.js")),
         "/markdown.js" to ("text/javascript" to webAsset("markdown.js")))
 }
 
@@ -230,6 +244,7 @@ internal suspend fun runTurn(
                 .put("id", call.getString("id"))
                 .put("status", toolResult.getString("status"))
                 .putOpt("error", toolResult.opt("error"))
+                .putOpt("attachment", toolResult.optJSONObject("attachment"))
             receipts.put(receipt)
             recordCheckpoint()
             emit?.invoke(JSONObject(receipt.toString()).put("type", "tool_end").put("id", call.getString("id"))

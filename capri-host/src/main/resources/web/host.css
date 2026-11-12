@@ -11,6 +11,19 @@ body { line-height: 1.65; }
 #device-refresh { margin-top: 8px; }
 aside header { justify-content: flex-start; gap: 10px; }
 main > header strong { font-size: 19px; }
+.workspace-tabs { display: flex; flex: none; align-items: stretch; gap: 4px; min-height: 44px; padding: 4px 14px 0; overflow-x: auto; border-bottom: 1px solid var(--line); }
+.workspace-tab-button { flex: none; width: auto; min-width: 76px; margin: 0; padding: 6px 12px; border: 1px solid transparent; border-bottom: 0; border-radius: 7px 7px 0 0; color: var(--muted); background: transparent; white-space: nowrap; }
+.workspace-tab-button[aria-selected=true] { color: var(--green); border-color: var(--line); background: var(--panel); }
+#workspace-file-tabs { display: flex; flex: none; gap: 4px; min-width: 0; }
+.workspace-file-tab { display: flex; flex: none; align-items: stretch; max-width: 280px; }
+.workspace-file-tab > [role=tab] { width: auto; min-width: 70px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-file-tab > [role=tab][aria-selected=true] { color: var(--green); border-color: var(--line); background: var(--panel); }
+.workspace-file-tab > button:last-child { width: auto; padding: 4px 8px; color: var(--muted); }
+#ide-view { flex: 1; min-height: 0; display: flex; overflow: hidden; }
+.workspace-ide-active #chat-actions { display: none; }
+.workspace-ide-active #messages, .workspace-ide-active #access, .workspace-ide-active #error,
+.workspace-ide-active #settings, .workspace-ide-active #composer { display: none !important; }
+.workspace-ide-frame { flex: 1; width: 100%; min-width: 0; height: 100%; border: 0; background: var(--bg); }
 #messages { min-height: 0; padding-bottom: 12px; }
 #history article { margin-bottom: 20px; font-size: 18px; line-height: 1.65; }
 #history article > label { font-size: 13px; }
@@ -124,10 +137,24 @@ body > aside > footer { margin-top: auto; }
 #session-edit { display: grid; gap: 8px; margin-top: 16px; }
 #session-name { width: 100%; font: inherit; color: inherit; padding: 8px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }
 #session-edit-status { margin: 0; color: var(--red); }
-#session-delete { color: var(--red); margin-right: auto; }
 #files-toggle[aria-expanded=true] { border-color: var(--green); color: var(--green); }
 #session-files { flex: 0 0 clamp(250px, 25vw, 380px); min-width: 0; display: flex; flex-direction: column; background: var(--bg); border-left: 1px solid var(--line); }
 #session-files > header { padding: 14px 16px; border-bottom: 1px solid var(--line); }
+.reply-attachments { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+.reply-image { display: grid; justify-items: start; gap: 6px; max-width: min(100%, 340px); padding: 6px; border-radius: 8px; text-align: left; }
+.reply-image img { display: block; max-width: 100%; max-height: 230px; border-radius: 4px; }
+.reply-image span, .reply-html span { overflow-wrap: anywhere; font-size: 13px; }
+.reply-html { display: grid; align-self: flex-start; gap: 4px; padding: 8px 12px; color: var(--white); text-decoration: none; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+.reply-html:hover, .reply-html:focus-visible { border-color: var(--green); }
+.reply-html small { color: var(--green); }
+#reply-image-preview { width: min(94vw, 1080px); max-width: none; max-height: 94dvh; border-radius: 12px; padding: 16px; }
+#reply-image-preview h2 { font-size: 16px; margin: 0; overflow-wrap: anywhere; }
+#reply-image-preview footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+#reply-image-preview footer p { margin: 0; }
+.reply-image-canvas { display: grid; place-items: center; margin: 12px 0; }
+#reply-image-full { max-width: 100%; max-height: 70dvh; object-fit: contain; }
+.files-actions { display: flex; align-items: center; gap: 4px; }
+#files-open-finder { padding: 4px 6px; border-radius: 6px; font-size: 12px; }
 #files-close { background: transparent; border-color: transparent; font-size: 20px; padding: 0 8px; }
 #files-status { padding: 8px 16px 0; margin: 0; color: var(--muted); }
 #files-status:empty { display: none; }

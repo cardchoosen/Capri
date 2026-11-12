@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Capri IDE</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/ide.css">
+  <script src="/ide.js" defer></script>
+</head>
+<body class="ide-page">
+  <header class="ide-toolbar">
+    <a class="ide-brand" href="/" aria-label="返回 Capri">⌁ <span>CAPRI</span></a>
+    <div class="ide-file-title"><strong id="file-name">正在打开…</strong><small id="file-path"></small></div>
+    <span id="file-status" role="status">读取文件中</span>
+    <div class="ide-actions">
+      <button id="preview-toggle" type="button" hidden>预览</button>
+      <button id="reload-file" type="button">重新载入</button>
+      <button id="download-file" type="button" disabled>下载</button>
+      <button id="save-file" class="primary" type="button" disabled>保存</button>
+    </div>
+  </header>
+  <main id="ide-main">
+    <section id="editor-pane" class="editor-pane" aria-label="文件编辑器" hidden>
+      <pre id="line-numbers" aria-hidden="true"></pre>
+      <div class="editor-surface">
+        <pre id="highlighted-code" aria-hidden="true"></pre>
+        <textarea id="editor" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="文件内容"></textarea>
+      </div>
+    </section>
+    <section id="preview-pane" class="preview-pane" aria-label="文件预览" hidden>
+      <img id="image-preview" alt="" hidden>
+      <iframe id="document-preview" title="文件预览" sandbox="" hidden></iframe>
+      <video id="video-preview" controls hidden></video>
+      <audio id="audio-preview" controls hidden></audio>
+      <p id="preview-message" hidden></p>
+    </section>
+    <section id="empty-pane" class="empty-pane" hidden></section>
+  </main>
+</body>
+</html>

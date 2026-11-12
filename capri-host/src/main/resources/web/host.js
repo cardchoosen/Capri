@@ -11,6 +11,8 @@ let loading = false;
 let selection = 0;
 let modelOptions;
 let settingsView = false;
+let workspaceTabs = [];
+let activeWorkspaceTab = 'chat';
 const drafts = new Map();
 const draftImages = new Map();
 const draftAudio = new Map();
@@ -22,6 +24,7 @@ const turnLabels = {
 const toolHints = {
   ls: '正在查看目录', read: '正在读取文件', write: '正在写入文件', edit: '正在编辑文件',
   grep: '正在搜索工作区', message: '正在交付文件', session_artifacts: '正在查看已交付文件',
+  render_bar_animation: 'Rendering bar animation',
   project: '正在识别项目', coding_reference: '正在查看源码', coding_diagnostics: '正在检查代码',
   coding_restore: '正在恢复版本', apply_patch: '正在应用补丁', document_extract: '正在提取文档正文',
   web_search: '正在搜索网页', web_read: '正在读取网页', skill: '正在查看 Skill',
@@ -55,8 +58,8 @@ async function api(path, options = {}) {
   return response;
 }
 
-function sessionPath(path) {
-  return path + '?session=' + encodeURIComponent(selected);
+function sessionPath(path, session = selected) {
+  return path + '?session=' + encodeURIComponent(session);
 }
 
 function controls() {
@@ -177,14 +180,26 @@ el('skills-rollback').onclick = () => updateSkill('rollback', {restoreRevision: 
 
 function renderSessions() {
   el('sessions').replaceChildren(...sessions.map(session => {
+    const row = document.createElement('div');
+    row.className = 'session-row';
     const button = document.createElement('button');
+    button.type = 'button';
     button.textContent = session.title;
     button.classList.toggle('selected', session.id === selected);
     button.setAttribute('aria-current', session.id === selected ? 'true' : 'false');
     button.onclick = () => select(session.id);
-    return button;
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'session-delete';
+    remove.textContent = '×';
+    remove.title = '删除会话';
+    remove.setAttribute('aria-label', '删除会话：' + session.title);
+    remove.onclick = () => deleteSession(session);
+    row.append(button, remove);
+    return row;
   }));
-  el('title').textContent = settingsView ? '设置' : currentTitle();
+  el('title').textContent = activeWorkspaceTab === 'chat' ? (settingsView ? '设置' : currentTitle()) :
+    workspaceTabs.find(tab => tab.id === activeWorkspaceTab)?.name ?? currentTitle();
   controls();
 }
 
@@ -350,7 +365,107 @@ function messageRow(role, text, receipts = []) {
     row.append(process.node);
   }
   row.append(content);
+  appendReplyAttachments(row, receipts, selected);
   return row;
+}
+
+const replyImageTypes = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+const replyImageDialog = el('reply-image-preview');
+const replyImageFull = el('reply-image-full');
+const replyImageStatus = el('reply-image-status');
+const replyImageDownload = el('reply-image-download');
+let replyImageUrl;
+let replyImageRequest = 0;
+
+function clearReplyImage() {
+  replyImageFull.hidden = true;
+  replyImageFull.removeAttribute('src');
+  replyImageFull.onerror = null;
+  replyImageDownload.disabled = true;
+  replyImageDownload.onclick = null;
+  if (replyImageUrl) URL.revokeObjectURL(replyImageUrl);
+  replyImageUrl = undefined;
+}
+
+el('reply-image-close').onclick = () => replyImageDialog.close();
+replyImageDialog.addEventListener('close', () => { if (!replyImageDialog.open) clearReplyImage(); });
+
+async function openReplyImage(load, name) {
+  const request = ++replyImageRequest;
+  clearReplyImage();
+  el('reply-image-name').textContent = name;
+  replyImageStatus.textContent = '正在读取图片…';
+  replyImageDialog.showModal();
+  try {
+    const blob = await load();
+    if (request !== replyImageRequest || !replyImageDialog.open) return;
+    replyImageUrl = URL.createObjectURL(blob);
+    replyImageFull.alt = name;
+    replyImageFull.onerror = () => {
+      replyImageFull.hidden = true;
+      replyImageStatus.textContent = '无法预览此图片。';
+    };
+    replyImageFull.src = replyImageUrl;
+    replyImageFull.hidden = false;
+    replyImageStatus.textContent = '';
+    replyImageDownload.onclick = () => saveDownload(blob, name);
+    replyImageDownload.disabled = false;
+  } catch (_) {
+    if (request === replyImageRequest && replyImageDialog.open)
+      replyImageStatus.textContent = '无法读取图片。文件可能已移动或删除。';
+  }
+}
+
+function appendReplyAttachments(row, receipts, session) {
+  const attachments = document.createElement('div');
+  attachments.className = 'reply-attachments';
+  const ids = new Set();
+  for (const {attachment, status} of receipts) {
+    if (status !== 'ok' || (!replyImageTypes.has(attachment?.mime) && attachment?.mime !== 'text/html') ||
+        typeof attachment.id !== 'string' ||
+        typeof attachment.name !== 'string' || ids.has(attachment.id)) continue;
+    ids.add(attachment.id);
+    const {id, name, mime} = attachment;
+    if (mime === 'text/html') {
+      const link = document.createElement('a');
+      const label = document.createElement('span');
+      const action = document.createElement('small');
+      link.className = 'reply-html';
+      link.href = sessionPath('/html-preview', session) + '&artifact=' + encodeURIComponent(id);
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      label.textContent = name;
+      action.textContent = '在新标签页打开 ↗';
+      link.append(label, action);
+      attachments.append(link);
+      continue;
+    }
+    const path = sessionPath('/api/artifacts/' + encodeURIComponent(id), session);
+    const load = async () => {
+      const response = await api(path);
+      return new Blob([await response.blob()], {type: mime});
+    };
+    const button = document.createElement('button');
+    const thumbnail = document.createElement('img');
+    const label = document.createElement('span');
+    button.type = 'button';
+    button.className = 'reply-image';
+    button.title = '查看大图：' + name;
+    label.textContent = name;
+    thumbnail.alt = '';
+    thumbnail.hidden = true;
+    button.append(thumbnail, label);
+    attachments.append(button);
+    button.onclick = () => openReplyImage(load, name);
+    load().then(blob => {
+      if (!thumbnail.isConnected) return;
+      const url = URL.createObjectURL(blob);
+      thumbnail.onload = () => { thumbnail.hidden = false; URL.revokeObjectURL(url); };
+      thumbnail.onerror = () => URL.revokeObjectURL(url);
+      thumbnail.src = url;
+    }).catch(() => {});
+  }
+  if (ids.size) row.append(attachments);
 }
 
 function toolProcess() {
@@ -606,44 +721,57 @@ el('session-edit').onsubmit = event => {
     el('session-edit-status').textContent = '请输入会话名称。';
     return;
   }
-  mutateSession('PATCH', title);
-};
-el('session-delete').onclick = () => {
-  if (confirm('删除「' + currentTitle() + '」及其会话文件？此操作无法撤销。')) mutateSession('DELETE');
+  renameSession(title);
 };
 
-async function mutateSession(method, title) {
+async function renameSession(title) {
   if (loading || busy) return;
   loading = true;
   controls();
-  el('session-save').disabled = el('session-delete').disabled = true;
+  el('session-save').disabled = true;
   el('session-edit-status').textContent = '';
   try {
     const response = await api(sessionPath('/api/sessions'), {
-      method, ...(title ? {body: JSON.stringify({title})} : {}),
+      method: 'PATCH', body: JSON.stringify({title}),
     });
     const data = await response.json();
     sessionDialog.close();
-    if (method === 'PATCH') {
-      sessions = sessions.map(session => session.id === data.id ? {...session, title: data.title} : session);
-      renderSessions();
-    } else {
-      sessions = data.sessions;
-      clearTimeout(readingTimers.get(selected));
-      readingTimers.delete(selected);
-      sessionStorage.removeItem('capri-reading:' + selected);
-      drafts.delete(selected);
-      draftImages.delete(selected);
-      draftAudio.delete(selected);
-      el('input').value = '';
-      loading = false;
-      await select(sessions.find(session => session.id !== selected)?.id ?? 'default', false);
-    }
+    sessions = sessions.map(session => session.id === data.id ? {...session, title: data.title} : session);
+    renderSessions();
   } catch (failure) {
-    el('session-edit-status').textContent = failure.status === 409 ? '会话仍有任务在运行，请稍后重试。' : failure.message;
+    el('session-edit-status').textContent = failure.message;
   } finally {
     loading = false;
-    el('session-save').disabled = el('session-delete').disabled = false;
+    el('session-save').disabled = false;
+    controls();
+  }
+}
+
+async function deleteSession(session) {
+  if (loading || busy || !confirm('删除「' + session.title + '」及其会话文件？此操作无法撤销。')) return;
+  loading = true;
+  controls();
+  error();
+  try {
+    const response = await api(sessionPath('/api/sessions', session.id), {method: 'DELETE'});
+    sessions = (await response.json()).sessions;
+    clearTimeout(readingTimers.get(session.id));
+    readingTimers.delete(session.id);
+    sessionStorage.removeItem('capri-reading:' + session.id);
+    drafts.delete(session.id);
+    draftImages.delete(session.id);
+    draftAudio.delete(session.id);
+    if (session.id !== selected) {
+      renderSessions();
+      return;
+    }
+    el('input').value = '';
+    loading = false;
+    await select(sessions.find(item => item.id !== session.id)?.id ?? 'default', false);
+  } catch (failure) {
+    error(failure.status === 409 ? '会话仍有任务在运行，请稍后重试。' : failure.message);
+  } finally {
+    loading = false;
     controls();
   }
 }
@@ -797,6 +925,7 @@ el('composer').onsubmit = async event => {
         if (!process.has(id)) process.update({...receipt, id});
       }
       if (result.tool_receipts?.length) process.node.hidden = false;
+      appendReplyAttachments(live, result.tool_receipts ?? [], selected);
       live.hidden = false;
       process.finish();
     });
@@ -881,6 +1010,20 @@ function showFiles(open) {
 
 el('files-toggle').onclick = () => showFiles(el('session-files').hidden);
 el('files-close').onclick = () => showFiles(false);
+el('workspace-chat-tab').onclick = () => switchWorkspaceTab('chat');
+const finderButton = el('files-open-finder');
+finderButton.hidden = document.body.dataset.finder !== 'true';
+finderButton.onclick = async () => {
+  const session = selected;
+  finderButton.disabled = true;
+  try {
+    await api(sessionPath('/api/workspace/open-finder', session), {method: 'POST'});
+  } catch (failure) {
+    if (selected === session) el('files-status').textContent = '无法在 Finder 中打开工作区。' + failure.message;
+  } finally {
+    finderButton.disabled = false;
+  }
+};
 
 async function loadFiles() {
   const request = ++filesRequest;
@@ -910,13 +1053,11 @@ async function loadFiles() {
         }
         parent = path;
       }
-      const download = sessionPath('/api/workspace/file') + '&path=' + encodeURIComponent(file.path);
-      folders.get(parent).append(fileRow(name, file, download));
+      folders.get(parent).append(fileRow(name, file, {path: file.path}));
     }
     if (legacy.length) {
       const directory = fileFolder('历史产物', ':legacy', open.has(':legacy'));
-      for (const file of legacy) directory.lastElementChild.append(fileRow(file.name, file,
-        sessionPath('/api/artifacts/' + encodeURIComponent(file.id))));
+      for (const file of legacy) directory.lastElementChild.append(fileRow(file.name, file, {artifact: file.id}));
       tree.append(directory);
     }
   } catch (failure) {
@@ -934,7 +1075,7 @@ function fileFolder(name, path, open) {
   return directory;
 }
 
-function fileRow(name, file, download) {
+function fileRow(name, file, source) {
   const button = document.createElement('button');
   const label = document.createElement('span');
   const meta = document.createElement('small');
@@ -943,15 +1084,83 @@ function fileRow(name, file, download) {
     style: 'unit', unit: file.size >= 1024 ? 'kilobyte' : 'byte', maximumFractionDigits: 1,
   }).format(file.size >= 1024 ? file.size / 1024 : file.size);
   button.className = 'file-row';
-  button.title = '下载 ' + (file.path ?? name);
+  button.title = '在 Capri IDE 中打开 ' + (file.path ?? name);
   button.append(label, meta);
-  button.onclick = async () => {
-    button.disabled = true;
-    try { saveDownload(await (await api(download)).blob(), name); }
-    catch (failure) { error(failure.message); }
-    finally { button.disabled = false; }
+  button.onclick = () => {
+    openWorkspaceFile(name, selected, source);
   };
   return button;
+}
+
+function openWorkspaceFile(name, session, source) {
+  const key = session + ':' + (source.path ?? ('artifact:' + source.artifact));
+  let tab = workspaceTabs.find(item => item.id === key);
+  if (!tab) {
+    const query = new URLSearchParams({session, ...source});
+    const frame = document.createElement('iframe');
+    frame.className = 'workspace-ide-frame';
+    frame.title = name + ' · Capri IDE';
+    frame.src = '/ide?' + query.toString();
+    frame.hidden = true;
+    el('ide-view').append(frame);
+    tab = {id: key, name, frame};
+    workspaceTabs.push(tab);
+    renderWorkspaceTabs();
+  }
+  showFiles(false);
+  switchWorkspaceTab(tab.id);
+}
+
+function renderWorkspaceTabs() {
+  const list = el('workspace-file-tabs');
+  list.replaceChildren(...workspaceTabs.map(tab => {
+    const item = document.createElement('div');
+    item.className = 'workspace-file-tab';
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.setAttribute('role', 'tab');
+    open.setAttribute('aria-selected', String(tab.id === activeWorkspaceTab));
+    open.title = tab.name;
+    open.textContent = tab.name;
+    open.onclick = () => switchWorkspaceTab(tab.id);
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.textContent = '×';
+    close.title = '关闭 ' + tab.name;
+    close.setAttribute('aria-label', close.title);
+    close.onclick = () => closeWorkspaceTab(tab.id);
+    item.append(open, close);
+    return item;
+  }));
+  el('workspace-tabs').hidden = workspaceTabs.length === 0;
+  el('workspace-chat-tab').setAttribute('aria-selected', String(activeWorkspaceTab === 'chat'));
+}
+
+function switchWorkspaceTab(id) {
+  if (id !== 'chat' && !workspaceTabs.some(tab => tab.id === id)) return;
+  activeWorkspaceTab = id;
+  const isIde = id !== 'chat';
+  document.querySelector('main').classList.toggle('workspace-ide-active', isIde);
+  el('ide-view').hidden = !isIde;
+  for (const tab of workspaceTabs) tab.frame.hidden = tab.id !== id;
+  if (isIde) {
+    const tab = workspaceTabs.find(item => item.id === id);
+    el('title').textContent = tab.name;
+    el('connection').textContent = 'Capri IDE · 文件工作区';
+  } else {
+    el('title').textContent = settingsView ? '设置' : currentTitle();
+    el('connection').textContent = connected ? '服务端在线' : '正在连接…';
+  }
+  renderWorkspaceTabs();
+}
+
+function closeWorkspaceTab(id) {
+  const index = workspaceTabs.findIndex(tab => tab.id === id);
+  if (index < 0) return;
+  workspaceTabs[index].frame.remove();
+  workspaceTabs.splice(index, 1);
+  if (activeWorkspaceTab === id) switchWorkspaceTab(workspaceTabs[index - 1]?.id ?? workspaceTabs[index]?.id ?? 'chat');
+  else renderWorkspaceTabs();
 }
 
 el('export').onclick = async () => {
