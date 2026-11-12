@@ -4,6 +4,8 @@ import ai.capri.app.ModelConfig
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 object DeepSeekReasoning {
+    const val DEFAULT_EFFORT = "high"
+
     private val models = setOf("deepseek-flash", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp", "deepseek-v4-pro")
     private val levels = listOf("default", "none", "low", "high", "max")
 

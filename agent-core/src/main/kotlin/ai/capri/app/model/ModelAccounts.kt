@@ -169,7 +169,10 @@ class ModelAccounts(private val read: () -> String?, private val write: (String)
         val (account, model) = selected(chat) ?: return ModelConfig()
         val config = account.config(model)
         val effort = chat?.let { state().getJSONObject("selections").optJSONObject(it)?.optString("reasoning_effort") }
-        return config.copy(reasoningEffort = effort?.takeIf { it != "default" && it in DeepSeekReasoning.options(config) })
+        val options = DeepSeekReasoning.options(config)
+        val selectedEffort = effort?.takeIf { it != "default" && it in options }
+            ?: DeepSeekReasoning.DEFAULT_EFFORT.takeIf { it in options }
+        return config.copy(reasoningEffort = selectedEffort)
     }
     private fun commit(data: JSONObject) { write(data.toString()); state = data; cachedAccounts = null }
 }

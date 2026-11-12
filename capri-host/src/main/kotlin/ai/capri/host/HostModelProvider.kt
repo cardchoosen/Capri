@@ -1,6 +1,7 @@
 package ai.capri.host
 
 import ai.capri.app.agent.AgentLoop
+import ai.capri.app.model.DeepSeekReasoning
 import okhttp3.HttpUrl
 import org.json.JSONArray
 import org.json.JSONObject
@@ -11,13 +12,14 @@ internal class HostModelProvider(endpoint: HttpUrl, private val defaultModel: St
     val deepSeek = endpoint.isHttps && endpoint.host == "api.deepseek.com" && endpoint.port == 443
     private val models = if (deepSeek) listOf(defaultModel, "deepseek-flash", "deepseek-v4-pro").distinct() else listOf(defaultModel)
     private val efforts = if (deepSeek) listOf("none", "low", "high", "max") else listOf("none")
+    private val defaultEffort = if (deepSeek) DeepSeekReasoning.DEFAULT_EFFORT else "none"
 
     fun options(): JSONObject = JSONObject().put("models", JSONArray(models)).put("efforts", JSONArray(efforts))
-        .put("defaultModel", defaultModel).put("defaultEffort", "none")
+        .put("defaultModel", defaultModel).put("defaultEffort", defaultEffort)
 
     fun selection(request: JSONObject): HostModelSelection? {
         val modelId = if (request.has("model")) request.opt("model") else defaultModel
-        val effort = if (request.has("effort")) request.opt("effort") else "none"
+        val effort = if (request.has("effort")) request.opt("effort") else defaultEffort
         if (modelId !is String || modelId !in models || effort !is String || effort !in efforts) return null
         return HostModelSelection(modelId, effort, limits[modelId])
     }

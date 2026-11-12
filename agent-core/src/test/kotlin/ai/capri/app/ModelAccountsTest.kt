@@ -16,16 +16,18 @@ class ModelAccountsTest {
         accounts.save(account)
         accounts.selectReasoning("first", account.id, "deepseek-flash", "max")
         assertEquals("max", store().config("first").reasoningEffort)
-        assertNull(accounts.config("second").reasoningEffort)
-        assertNull(accounts.config().reasoningEffort)
+        assertEquals("high", accounts.config("second").reasoningEffort)
+        assertEquals("high", accounts.config().reasoningEffort)
         accounts.selectForNewChats("first", account.id, "deepseek-flash", listOf("first", "second"))
         assertEquals("max", accounts.config("first").reasoningEffort)
         accounts.selectReasoning("first", account.id, "deepseek-flash", "default")
-        assertNull(accounts.config("first").reasoningEffort)
+        assertEquals("high", accounts.config("first").reasoningEffort)
         accounts.select("first", account.id, "deepseek-v4-pro")
         assertTrue(runCatching { accounts.selectReasoning("first", account.id, "deepseek-flash", "low") }.isFailure)
         assertTrue(runCatching { accounts.selectReasoning("first", account.id, "deepseek-v4-pro", "ultra") }.isFailure)
-        assertNull(accounts.config("first").reasoningEffort)
+        assertEquals("high", accounts.config("first").reasoningEffort)
+        accounts.selectReasoning("first", account.id, "deepseek-v4-pro", "none")
+        assertEquals("none", store().config("first").reasoningEffort)
     }
 
     @Test fun webDefaultChangesOnlyCurrentAndFutureChatsIncludingAfterRestart() {
