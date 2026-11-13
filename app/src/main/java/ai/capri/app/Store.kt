@@ -105,6 +105,24 @@ class Store(val context: Context) {
         }
     }
 
+    internal fun remoteDeviceConfig(): JSONObject? =
+        prefs.getString("remote_device", null)?.let { JSONObject(decrypt(it)) }
+
+    internal fun saveRemoteDeviceConfig(config: JSONObject?) {
+        val edit = prefs.edit()
+        if (config == null) edit.remove("remote_device")
+        else edit.putString("remote_device", encrypt(config.toString()))
+        check(edit.commit()) { "Remote device configuration could not be saved." }
+    }
+
+    internal fun remoteDeviceEnabled(): Boolean = prefs.getBoolean("remote_device_enabled", false)
+
+    internal fun setRemoteDeviceEnabled(enabled: Boolean) {
+        check(prefs.edit().putBoolean("remote_device_enabled", enabled).commit()) {
+            "Remote device state could not be saved."
+        }
+    }
+
     private fun encrypt(raw: String): String {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key()) }
         return Base64.encodeToString(cipher.iv, Base64.NO_WRAP) + ":" + Base64.encodeToString(cipher.doFinal(raw.toByteArray()), Base64.NO_WRAP)

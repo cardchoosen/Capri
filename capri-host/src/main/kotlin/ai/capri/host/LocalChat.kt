@@ -45,9 +45,12 @@ internal class LocalChat private constructor(
     private val skillCatalog: HostSkillCatalog?,
     private val mcpResources: HostMcpResources?,
     private val transcription: HostTranscription?,
-    private val browser: HostBrowser?,
     private val memoryRanking: HostMemoryRanking?,
     private val documentExecutors: DocumentExecutors?,
+    private val integrations: HostIntegrations,
+    val remoteDevices: RemoteDevices,
+    private val agentBrowser: HostAgentBrowser?,
+    private val uiUxProMax: HostUiUxProMax?,
 ) {
     private class Turn(val session: String, val job: Job, val id: String) {
         var phase = "preparing"
@@ -70,6 +73,7 @@ internal class LocalChat private constructor(
     }
     private val client = OkHttpClient.Builder().followRedirects(false).followSslRedirects(false)
         .retryOnConnectionFailure(false).callTimeout(120, TimeUnit.SECONDS).build()
+    private val browserSessions = java.util.concurrent.ConcurrentHashMap<String, HostBrowser>()
 
     private val provider = HostModelProvider(url, model, modelOutputLimits)
 
@@ -96,7 +100,8 @@ internal class LocalChat private constructor(
         }
         return JSONObject().put("rules", rules).put("skills", skills)
             .put("mcpConfigured", mcpResources != null)
-            .put("tools", JSONArray(hostTools(session, checkNotNull(selection(JSONObject())), RuleSnapshot("", null), JSONArray()).availableNames()))
+            .put("integrations", integrations.settings(session))
+            .put("tools", JSONArray(hostTools(session, checkNotNull(selection(JSONObject())), RuleSnapshot("", null), JSONArray(), "settings").availableNames()))
     }
 
     private fun ruleSettings(file: Path?): JSONObject =
@@ -116,6 +121,23 @@ internal class LocalChat private constructor(
             JSONObject().put("status", "unavailable")
         }
     }
+
+    fun integrationState(session: String): JSONObject = integrations.settings(session)
+
+    fun saveGitHub(token: String?) = integrations.configureGitHub(token)
+
+    fun saveSsh(entries: JSONArray) = integrations.configureSsh(entries)
+
+    fun savePrivateRoots(roots: JSONArray) = integrations.configurePrivateRoots(roots)
+
+    fun privateLibrarySettings(): JSONObject = integrations.librarySettings()
+
+    fun importPrivateLibraryFile(name: String, bytes: ByteArray): JSONObject = integrations.importLibraryFile(name, bytes)
+
+    fun privateLibraryDownload(path: String): Pair<String, ByteArray> = integrations.downloadLibraryFile(path)
+
+    fun decidePrivateApproval(session: String, id: String, approve: Boolean): JSONObject =
+        integrations.decideApproval(session, id, approve)
 
     fun deleteSession(session: String) = synchronized(turnLock) {
         if (active?.session == session) throw WorkspaceFailure("chat_busy", "A turn is running in this session.")
@@ -146,22 +168,26 @@ internal class LocalChat private constructor(
 
     fun selection(request: JSONObject): HostModelSelection? = provider.selection(request)
 
-    private fun hostTools(session: String, selection: HostModelSelection, rules: RuleSnapshot, modelUsage: JSONArray): HostTools =
+    private fun hostTools(session: String, selection: HostModelSelection, rules: RuleSnapshot, modelUsage: JSONArray, taskId: String): HostTools =
         HostTools(sessions, session, selection.model, rules.custom,
             webSearch = if (provider.deepSeek) ::searchWeb else null,
             webRead = if (provider.deepSeek) ::readWeb else null, effort = selection.effort, outputTokens = selection.outputTokens,
             delegate = { args -> delegateAnalyses(session, args, selection, modelUsage, rules) }, skillCatalog = skillCatalog,
-            mcpResources = mcpResources, browser = browser, memoryRanking = memoryRanking,
+            mcpResources = mcpResources, browser = browserSessions.computeIfAbsent(session) { HostBrowser() },
+            agentBrowser = agentBrowser, uiUxProMax = uiUxProMax, memoryRanking = memoryRanking,
             documentExecutors = documentExecutors,
+            integrations = integrations,
+            remoteDevices = remoteDevices,
             plan = { args -> childPlans.execute(session, args) { step, inputs ->
                 val usage = JSONArray()
                 try { analyzePlanStep(session, step, inputs, selection, usage, rules) }
                 finally { jsonObjects(usage).forEach { modelUsage.put(it) } }
-            } })
+            } }, taskId = taskId)
 
     suspend fun send(session: String, text: String, id: String, selection: HostModelSelection,
                      image: String? = null, emit: ((JSONObject) -> Unit)? = null): JSONObject {
         val turn = Turn(session, checkNotNull(currentCoroutineContext()[Job]), id)
+        var taskId = id
         synchronized(turnLock) {
             if (active != null) throw ChatBusy()
             active = turn
@@ -179,6 +205,7 @@ internal class LocalChat private constructor(
             val answering = prior?.optString("state") == "waiting" && prior.has("messages") &&
                 transcript.optJSONObject(transcript.length() - 1)?.optBoolean("awaitingInput") == true
             val continuing = resume || answering
+            if (continuing) taskId = checkNotNull(prior).optString("id", id)
             if (image != null && (!provider.deepSeek || selection.model != "deepseek-flash"))
                 throw WorkspaceFailure("vision_model_required", "Select DeepSeek Flash to send an image.")
             if (image != null) sessions.workspace(session).uploadedImage(image)
@@ -233,7 +260,7 @@ internal class LocalChat private constructor(
             persist(messages, priorReceipts, emptySet())
             val modelUsage = JSONArray()
             val publish: ((JSONObject) -> Unit)? = emit?.let { sink -> { event -> sink(turn.events.publish(event)) } }
-            val tools = hostTools(session, selection, rules, modelUsage)
+            val tools = hostTools(session, selection, rules, modelUsage, taskId)
             var finalReasoning: String? = null
             val result = withTimeoutOrNull(TURN_TIMEOUT_SECONDS * 1000L) {
                 runTurn(originalPrompt, messages, tools, outputTokens = selection.outputTokens ?: 0, onPhase = { phase ->
@@ -260,6 +287,7 @@ internal class LocalChat private constructor(
             synchronized(turnLock) {
                 turn.job.ensureActive()
                 val outcome = result.getString("outcome")
+                if (outcome != "waiting") integrations.finishTask(session, taskId)
                 if (outcome == "complete" || outcome == "waiting") {
                     val reply = message("assistant", result.getString("reply"))
                     reply.put("turnId", id)
@@ -277,6 +305,7 @@ internal class LocalChat private constructor(
             return result
         } catch (failure: Exception) {
             synchronized(turnLock) {
+                integrations.finishTask(session, taskId)
                 finishTurn(turn, JSONObject().put("outcome", if (failure is CancellationException) "cancelled" else "failed"))
             }
             throw failure
@@ -368,7 +397,9 @@ internal class LocalChat private constructor(
                     if (path.isEmpty()) item else {
                         if (!provider.deepSeek || selection.model != "deepseek-flash")
                             throw WorkspaceFailure("vision_model_required", "Select DeepSeek Flash to continue this image request.")
-                        val (mime, bytes) = sessions.workspace(session).uploadedImage(path)
+                        val (mime, bytes) = if (path.startsWith("private-library:"))
+                            integrations.privateLibraryImage(path.removePrefix("private-library:"))
+                        else sessions.workspace(session).uploadedImage(path)
                         val data = java.util.Base64.getEncoder().encodeToString(bytes)
                         JSONObject(item.toString()).apply {
                             remove("_capri_image")
@@ -645,14 +676,6 @@ internal class LocalChat private constructor(
                 }
                 HostTranscription(integrationUrl(address), speechModel, System.getenv("CAPRI_AUDIO_TOKEN")?.takeIf(String::isNotBlank))
             }
-            val browser = System.getenv("CAPRI_BROWSER_PAGES")?.takeIf(String::isNotBlank)?.let { raw ->
-                val entries = JSONObject(raw)
-                require(entries.length() in 1..30)
-                HostBrowser(entries.keys().asSequence().associateWith { name ->
-                    require(name.matches(Regex("[a-zA-Z0-9_-]{1,64}")))
-                    integrationUrl(entries.getString(name))
-                })
-            }
             val memoryRanking = System.getenv("CAPRI_MEMORY_EMBEDDING_ENDPOINT")?.takeIf(String::isNotBlank)?.let { address ->
                 val embeddingModel = requireNotNull(System.getenv("CAPRI_MEMORY_EMBEDDING_MODEL")?.takeIf(String::isNotBlank)) {
                     "Set CAPRI_MEMORY_EMBEDDING_MODEL for the configured embedding endpoint."
@@ -667,9 +690,13 @@ internal class LocalChat private constructor(
             }
             val sourceRules = System.getenv("CAPRI_KERNEL_RULES_SOURCE_DIR")?.takeIf(String::isNotBlank)?.let(Path::of)
             val kernelRules = KernelRules(data.toAbsolutePath().resolve("kernel-rules"), sourceRules)
-            return LocalChat(endpoint, key, model, HostSessions(data.toAbsolutePath(), legacy), rules,
+            val uiUxProMax = HostUiUxProMax(HostUiUxProMax.installBundled(data.toAbsolutePath()))
+            val agentBrowser = HostAgentBrowser.fromEnvironment(data.toAbsolutePath())
+            val absoluteData = data.toAbsolutePath()
+            return LocalChat(endpoint, key, model, HostSessions(absoluteData, legacy), rules,
                 data.toAbsolutePath().resolve("AGENTS.md"), kernelRules, limits, budget,
-                catalog, mcp, transcription, browser, memoryRanking, executors)
+                catalog, mcp, transcription, memoryRanking, executors, HostIntegrations(absoluteData),
+                RemoteDevices(absoluteData.resolve("devices")), agentBrowser, uiUxProMax)
         }
 
         private fun message(role: String, content: String) = JSONObject().put("role", role).put("content", content)

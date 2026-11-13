@@ -5,6 +5,9 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
+import org.json.JSONArray
 import org.json.JSONObject
 import java.security.KeyStore
 import java.security.cert.CertificateFactory
@@ -59,6 +62,22 @@ internal class RemoteChatClient(address: String, private val token: String, cert
         require(operation == "poll" || operation == "result")
         val url = endpoint.newBuilder().removePathSegment(1).addPathSegments("device/$operation").build()
         return request(body, url)
+    }
+
+    fun pairDevice(pairingToken: String, capabilities: JSONArray): JSONObject {
+        val url = endpoint.newBuilder().removePathSegment(1).addPathSegments("device/pair").build()
+        return request(JSONObject().put("pairing_token", pairingToken).put("name", android.os.Build.MANUFACTURER + " " + android.os.Build.MODEL)
+            .put("platform", "android").put("version", android.os.Build.VERSION.RELEASE).put("capabilities", capabilities), url)
+    }
+
+    fun connectDevice(socketUrl: String, deviceToken: String, listener: WebSocketListener): WebSocket {
+        require(deviceToken.matches(Regex("[A-Za-z0-9_-]{40,64}"))) { "The paired device token is invalid." }
+        val url = requireNotNull(socketUrl.toHttpUrlOrNull()) { "The device WSS URL is invalid." }
+        require(url.isHttps && url.encodedPath == "/api/devices/v1" && url.query == null && url.fragment == null) {
+            "The device executor must use the Capri WSS endpoint."
+        }
+        val socketClient = client.newBuilder().pingInterval(60, TimeUnit.SECONDS).build()
+        return socketClient.newWebSocket(Request.Builder().url(url).header("Authorization", "Bearer $deviceToken").build(), listener)
     }
 
     private fun request(body: JSONObject? = null, url: okhttp3.HttpUrl = endpoint): JSONObject {

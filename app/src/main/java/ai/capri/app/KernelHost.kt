@@ -15,5 +15,9 @@ internal object KernelHost {
         ContextCompat.startForegroundService(context,Intent(context,AgentTaskService::class.java))
         ai.capri.app.agent.reliability.ReliabilityAndroid.schedule(context,true)
     }
+    fun stopForRemoteMode(context:Context){
+        runCatching { context.startService(Intent(context,AgentTaskService::class.java).setAction(AgentTaskService.STOP_HOST)) }
+        disable(context)
+    }
     fun disable(context:Context){prefs(context).edit().putBoolean("enabled",false).apply();ai.capri.app.agent.reliability.ReliabilityAndroid.cancelAll(context)}
 }

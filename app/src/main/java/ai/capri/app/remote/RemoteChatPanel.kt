@@ -15,20 +15,20 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Switch
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import ai.capri.app.Store
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import org.json.JSONArray
 
 @Composable
 internal fun RemoteModeHome(store: Store, onLocalMode: () -> Unit) {
@@ -51,7 +51,6 @@ internal fun RemoteModeHome(store: Store, onLocalMode: () -> Unit) {
 internal fun RemoteChatPanel(store: Store, autoConnect: Boolean = false, onRemoteMode: (() -> Unit)? = null) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
     val saved = remember(store) { runCatching { store.remoteChatConfig() }.getOrNull() }
     var address by remember { mutableStateOf(saved?.optString("address").orEmpty()) }
     var token by remember { mutableStateOf(saved?.optString("token").orEmpty()) }
@@ -65,6 +64,9 @@ internal fun RemoteChatPanel(store: Store, autoConnect: Boolean = false, onRemot
     var draft by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("") }
+    var pairingCode by remember { mutableStateOf("") }
+    var deviceConfig by remember(store) { mutableStateOf(runCatching { store.remoteDeviceConfig() }.getOrNull()) }
+    var deviceEnabled by remember(store) { mutableStateOf(store.remoteDeviceEnabled()) }
     fun perform(failure: String, action: suspend () -> Unit) {
         busy = true
         status = ""
@@ -138,16 +140,61 @@ internal fun RemoteChatPanel(store: Store, autoConnect: Boolean = false, onRemot
             perform("无法读取远程会话。") { messages = withContext(Dispatchers.IO) { connected.history() } }
         }, enabled = !busy) { Text("刷新会话") }
         if (autoConnect) {
-            TextButton(onClick = { context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) },
-                enabled = !busy) { Text("授权读取前台应用") }
+            Text("设备执行器使用持久 WSS 通道接收云端任务；空闲时不轮询、不持有 CPU 唤醒锁。")
+            OutlinedTextField(pairingCode, { pairingCode = it.trim() }, Modifier.fillMaxWidth(),
+                enabled = !busy && deviceConfig == null, singleLine = true, label = { Text("一次性配对码") },
+                visualTransformation = PasswordVisualTransformation())
             Button(onClick = {
-                if (!RemoteAppLaunch.hasUsageAccess(context)) status = "请先在系统设置中为 Capri 开启使用情况访问权限。"
-                else perform("设备接单或结果回传失败，请在网页核对状态。") {
-                    status = RemoteAppLaunch(context, connected).waitForLaunch {
-                        lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
+                perform("配对失败，请检查配对码是否过期及服务端连接。") {
+                    val cap = withContext(Dispatchers.IO) {
+                        ai.capri.app.nativebridge.AndroidTool(context.applicationContext as android.app.Application).capabilities()
                     }
+                    val actions = cap.optJSONArray("actions") ?: JSONArray()
+                    val names = JSONArray().put("device.describe")
+                    for (index in 0 until actions.length()) {
+                        val item = actions.getJSONObject(index)
+                        if (item.optString("status") != "unsupported") names.put("android." + item.getString("action"))
+                    }
+                    val paired = withContext(Dispatchers.IO) { connected.pairDevice(pairingCode, names) }
+                    val savedConfig = JSONObject().put("device_id", paired.getString("device_id"))
+                        .put("device_token", paired.getString("device_token"))
+                        .put("socket_url", paired.getString("socket_url"))
+                    store.saveRemoteDeviceConfig(savedConfig)
+                    deviceConfig = savedConfig
+                    pairingCode = ""
+                    status = "设备已配对，可以启用接管。"
                 }
-            }, enabled = !busy) { Text("等待一次网页启动指令") }
+            }, enabled = !busy && deviceConfig == null && pairingCode.isNotBlank()) { Text("配对设备") }
+            if (deviceConfig != null) {
+                Text("已配对 · ${deviceConfig?.optString("device_id")}")
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(if (deviceEnabled) "允许 Capri 云端接管此手机" else "设备接管已关闭")
+                    Switch(checked = deviceEnabled, enabled = !busy, onCheckedChange = { enabled ->
+                        perform(if (enabled) "无法启动设备执行器。" else "无法停止设备执行器。") {
+                            if (enabled) {
+                                store.setRemoteDeviceEnabled(true)
+                                try { DeviceNodeService.start(context); deviceEnabled = true; status = "设备执行器正在连接。" }
+                                catch (error: Exception) { store.setRemoteDeviceEnabled(false); throw error }
+                            } else {
+                                store.setRemoteDeviceEnabled(false)
+                                DeviceNodeService.stop(context)
+                                deviceEnabled = false
+                                status = "已关闭设备接管。"
+                            }
+                        }
+                    })
+                }
+                TextButton(onClick = {
+                    perform("无法解除设备配对。") {
+                        if (deviceEnabled) { store.setRemoteDeviceEnabled(false); DeviceNodeService.stop(context) }
+                        store.saveRemoteDeviceConfig(null)
+                        deviceConfig = null
+                        deviceEnabled = false
+                    }
+                }, enabled = !busy) { Text("解除本机配对") }
+            }
+            if (!RemoteAppLaunch.hasUsageAccess(context)) TextButton(onClick = { context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) },
+                enabled = !busy) { Text("授权读取当前前台应用状态") }
         }
         messages.forEach { Text((if (it.role == "user") "你：" else "Capri：") + it.content) }
         OutlinedTextField(draft, { if (it.length <= 4_000) draft = it }, Modifier.fillMaxWidth(),

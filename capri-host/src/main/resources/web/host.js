@@ -13,6 +13,7 @@ let modelOptions;
 let settingsView = false;
 let workspaceTabs = [];
 let activeWorkspaceTab = 'chat';
+let integrationSettings = {ssh: [], privateRoots: [], approvals: []};
 const drafts = new Map();
 const draftImages = new Map();
 const draftAudio = new Map();
@@ -28,13 +29,15 @@ const toolHints = {
   project: '正在识别项目', coding_reference: '正在查看源码', coding_diagnostics: '正在检查代码',
   coding_restore: '正在恢复版本', apply_patch: '正在应用补丁', document_extract: '正在提取文档正文',
   web_search: '正在搜索网页', web_read: '正在读取网页', skill: '正在查看 Skill',
-  browser: '正在读取浏览器快照', mcp_resources: '正在读取 MCP 资料', agent_jobs: '正在管理计划任务',
+  browser: 'Controlling browser', agent_browser: 'Using agent-browser', playwright: 'Running Playwright plan',
+  ui_ux_design: 'Searching UI UX design guidance', mcp_resources: '正在读取 MCP 资料', agent_jobs: '正在管理计划任务',
   skill_hub: '正在查看 Skill 目录', audio_info: '正在检查音频',
   knowledge: '正在查找或保存知识', task_experience: '正在查找或保存任务经验',
   personal_memory: '正在查找或保存记忆', conversation_history: '正在查看对话记录',
   context_history: '正在检查上下文', host_environment: '正在检查工作环境',
   agent_rules: '正在查看规则', model_info: '正在查看模型设置', extensions: '正在检查扩展',
   tool_search: '正在查找工具', tool_describe: '正在查看工具用法', tool_invoke: '正在调用工具',
+  github: '正在管理 GitHub', ssh: '正在连接 SSH 服务器', private_files: '正在访问私人文件', private_library: '正在整理 Capri 资料库',
   clarify: '正在准备澄清问题',
 };
 
@@ -246,21 +249,249 @@ async function loadSettings() {
     appendNames(tools, state.tools);
     if (!state.mcpConfigured) {
       mcp.textContent = '尚未配置 MCP';
-      return;
+    } else {
+      const status = await (await api('/api/settings/mcp')).json();
+      if (request !== settingsRequest || !settingsView) return;
+      if (status.status === 'connected') {
+        mcp.textContent = '已连接 · ' + status.approvedCount + ' 个授权资源';
+        appendNames(mcp, status.resources);
+        if (status.more) mcp.append('仅显示服务端返回的首批资源。');
+      } else mcp.textContent = '已配置 · 暂时无法连接';
     }
-    const status = await (await api('/api/settings/mcp')).json();
-    if (request !== settingsRequest || !settingsView) return;
-    if (status.status === 'connected') {
-      mcp.textContent = '已连接 · ' + status.approvedCount + ' 个授权资源';
-      appendNames(mcp, status.resources);
-      if (status.more) mcp.append('仅显示服务端返回的首批资源。');
-    } else mcp.textContent = '已配置 · 暂时无法连接';
+    renderIntegrationSettings(state.integrations || {});
+    await loadRemoteDevices(request);
   } catch (failure) {
     if (request !== settingsRequest || !settingsView) return;
     for (const node of [rules, skills, mcp, tools]) {
       if (node.textContent === '正在读取…') node.textContent = failure.message;
     }
   }
+}
+
+async function loadRemoteDevices(request = settingsRequest) {
+  const target = el('remote-devices');
+  const status = el('device-status');
+  try {
+    const state = await (await api('/api/devices')).json();
+    if (request !== settingsRequest || !settingsView) return;
+    target.replaceChildren();
+    for (const device of state.devices || []) {
+      const row = document.createElement('div');
+      row.className = 'ssh-server-row';
+      const label = document.createElement('span');
+      const icon = device.platform === 'android' ? '📱' : '🖥️';
+      label.textContent = `${icon} ${device.name} · ${device.platform} · ${device.online ? '在线' : '离线'}`;
+      row.append(label);
+      if (device.id !== 'host') {
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.textContent = '撤销配对';
+        remove.onclick = async () => {
+          if (!confirm(`撤销 ${device.name} 的配对？`)) return;
+          await api('/api/devices/revoke', {method: 'POST', body: JSON.stringify({device_id: device.id})});
+          await loadRemoteDevices(request);
+        };
+        row.append(remove);
+      }
+      target.append(row);
+    }
+    if (!state.devices?.length) target.textContent = '暂无已连接设备。';
+  } catch (failure) {
+    status.textContent = failure.message;
+  }
+}
+
+el('device-pair-create').onclick = async () => {
+  const status = el('device-status');
+  const output = el('device-pairing');
+  status.textContent = '正在生成一次性配对码…';
+  try {
+    const result = await (await api('/api/devices/pairing', {method: 'POST', body: '{}'})).json();
+    output.hidden = false;
+    output.textContent = `配对码（10 分钟内有效）\n${result.pairing_token}\n\n设备 WSS 地址\n${result.socket_url}`;
+    status.textContent = '在 Capri Android 客户端中粘贴配对码。';
+  } catch (failure) {
+    status.textContent = failure.message;
+  }
+};
+
+function renderIntegrationSettings(state) {
+  const github = state.github || {};
+  el('github-status').textContent = github.connected ? '已连接 · ' + (github.login || 'GitHub 用户') : '尚未连接';
+  el('github-token').value = '';
+  integrationSettings = state;
+  const serverList = el('ssh-servers');
+  serverList.replaceChildren();
+  if (!state.ssh?.length) serverList.textContent = '尚未配置 SSH 服务器。';
+  for (const [index, server] of (state.ssh || []).entries()) {
+    const row = document.createElement('div');
+    row.className = 'ssh-server-row';
+    const label = document.createElement('span');
+    label.textContent = `${server.name} · ${server.user}@${server.host}:${server.port} · ${server.hasIdentityFile ? 'Capri 已保管私钥副本' : '未导入私钥'}`;
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.textContent = '移除';
+    remove.onclick = () => {
+      integrationSettings.ssh.splice(index, 1);
+      renderIntegrationSettings(integrationSettings);
+      void saveSshServers();
+    };
+    row.append(label, remove);
+    serverList.append(row);
+  }
+  el('private-roots').value = (state.privateRoots || []).join('\n');
+  renderPrivateApprovals(state.approvals || []);
+  renderPrivateLibrary(state.library || {});
+}
+
+function renderPrivateLibrary(library) {
+  el('private-library-path').textContent = library.path || '';
+  const container = el('private-library-files');
+  container.replaceChildren();
+  if (!library.files?.length) {
+    container.textContent = '资料库目前为空。';
+    return;
+  }
+  const list = document.createElement('ul');
+  for (const file of library.files) {
+    const item = document.createElement('li');
+    const label = document.createElement('span');
+    label.textContent = file.path + ' · ' + formatBytes(file.size);
+    const download = document.createElement('button');
+    download.type = 'button';
+    download.textContent = '下载';
+    download.onclick = async () => {
+      try {
+        const response = await api(sessionPath('/api/private-library/file?path=' + encodeURIComponent(file.path)));
+        saveDownload(await response.blob(), file.path.split('/').pop());
+      } catch (failure) { el('private-library-status').textContent = failure.message; }
+    };
+    item.append(label, download);
+    list.append(item);
+  }
+  container.append(list);
+  if (library.truncated) {
+    const note = document.createElement('small');
+    note.textContent = '只显示前 500 个文件。';
+    container.append(note);
+  }
+}
+
+function formatBytes(size) {
+  if (size < 1024) return size + ' B';
+  if (size < 1024 * 1024) return (size / 1024).toFixed(1) + ' KiB';
+  return (size / (1024 * 1024)).toFixed(1) + ' MiB';
+}
+
+el('private-library-import').onclick = () => el('private-library-input').click();
+el('private-library-input').onchange = async event => {
+  const input = event.currentTarget;
+  const files = [...(input.files || [])];
+  input.value = '';
+  if (!files.length) return;
+  const status = el('private-library-status');
+  let imported = 0;
+  for (const [index, file] of files.entries()) {
+    if (file.size > 50 * 1024 * 1024) {
+      status.textContent = `${file.name} 超过 50 MiB，已跳过。`;
+      continue;
+    }
+    status.textContent = `正在导入 ${index + 1}/${files.length}：${file.name}`;
+    try {
+      await api(sessionPath('/api/private-library/upload'), {method: 'POST', body: file,
+        headers: {'Content-Type': 'application/octet-stream', 'X-Capri-Filename': encodeURIComponent(file.name)}});
+      imported++;
+    } catch (failure) {
+      status.textContent = `${file.name} 导入失败：${failure.message}`;
+    }
+  }
+  status.textContent = `已导入 ${imported}/${files.length} 个文件。`;
+  if (settingsView) await loadSettings();
+};
+
+function renderPrivateApprovals(requests) {
+  const container = el('private-approvals');
+  container.replaceChildren();
+  if (!requests.length) return;
+  const heading = document.createElement('h3');
+  heading.textContent = '待处理的私人文件授权';
+  container.append(heading);
+  for (const request of requests) {
+    const row = document.createElement('div');
+    row.className = 'approval-row';
+    const description = document.createElement('span');
+    description.textContent = `${request.action} · ${request.path}`;
+    const approve = document.createElement('button');
+    approve.type = 'button';
+    approve.textContent = '批准';
+    const deny = document.createElement('button');
+    deny.type = 'button';
+    deny.textContent = '拒绝';
+    approve.onclick = () => decidePrivateApproval(request.id, true);
+    deny.onclick = () => decidePrivateApproval(request.id, false);
+    row.append(description, approve, deny);
+    container.append(row);
+  }
+}
+
+async function saveIntegrations(payload, statusId) {
+  const status = el(statusId);
+  status.textContent = '正在保存…';
+  try {
+    const response = await api(sessionPath('/api/settings/integrations'), {method: 'PUT', body: JSON.stringify(payload)});
+    const state = await response.json();
+    renderIntegrationSettings(state);
+    status.textContent = statusId === 'github-status' && state.github?.connected ?
+      '已连接 · ' + (state.github.login || 'GitHub 用户') : '已保存。';
+    return true;
+  } catch (failure) { status.textContent = failure.message; return false; }
+}
+
+el('github-form').onsubmit = event => {
+  event.preventDefault();
+  void saveIntegrations({kind: 'github', token: el('github-token').value}, 'github-status');
+};
+el('github-disconnect').onclick = () => void saveIntegrations({kind: 'github', disconnect: true}, 'github-status');
+
+el('ssh-add-form').onsubmit = async event => {
+  event.preventDefault();
+  const values = new FormData(event.currentTarget);
+  const key = values.get('identityKey');
+  const server = {name: values.get('name'), host: values.get('host'), user: values.get('user'), port: Number(values.get('port'))};
+  if (key?.size) {
+    if (key.size > 128 * 1024) { el('ssh-status').textContent = '私钥文件不能超过 128 KiB。'; return; }
+    const bytes = new Uint8Array(await key.arrayBuffer());
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
+    server.identityKey = btoa(binary);
+  }
+  const next = [...(integrationSettings.ssh || []), server];
+  if (await saveSshServers(next)) {
+    event.currentTarget.reset();
+    event.currentTarget.elements.port.value = '22';
+  }
+};
+el('ssh-save').onclick = () => void saveSshServers();
+function saveSshServers(servers = integrationSettings.ssh || []) {
+  return saveIntegrations({kind: 'ssh', servers: servers.map(server => ({...server,
+    keepIdentityFile: server.hasIdentityFile || Boolean(server.identityFile)}))}, 'ssh-status');
+}
+
+el('private-roots-save').onclick = () => {
+  const roots = el('private-roots').value.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
+  void saveIntegrations({kind: 'privateRoots', roots}, 'private-status');
+};
+
+async function decidePrivateApproval(id, approve) {
+  try {
+    const response = await api(sessionPath('/api/settings/approval'), {method: 'POST', body: JSON.stringify({id, approve})});
+    const decision = await response.json();
+    const input = el('input');
+    input.value = approve ? `我已批准 ${decision.action} ${decision.path}，请继续执行该操作并完成任务。` :
+      `我拒绝了对 ${decision.path} 的 ${decision.action} 操作，请继续任务并寻找不执行该操作的方案。`;
+    switchView(false);
+    el('composer').requestSubmit();
+  } catch (failure) { el('private-status').textContent = failure.message; }
 }
 
 function renderRules(container, rules) {
@@ -366,7 +597,41 @@ function messageRow(role, text, receipts = []) {
   }
   row.append(content);
   appendReplyAttachments(row, receipts, selected);
+  appendApprovalControls(row, receipts);
   return row;
+}
+
+function appendApprovalControls(row, receipts) {
+  for (const receipt of receipts) {
+    if (!receipt.approval?.id) continue;
+    const card = document.createElement('div');
+    card.className = 'private-approval-card';
+    const label = document.createElement('span');
+    const operation = receipt.approval.action === 'read' ? (receipt.approval.directory ? '列出文件夹内容' : '读取文件') : receipt.approval.action === 'delete' ? '删除原文件' :
+      receipt.approval.existing ? '覆盖原文件' : '新建文件';
+    label.textContent = `需要批准：${operation} · ${receipt.approval.path}`;
+    const approve = document.createElement('button');
+    approve.type = 'button';
+    approve.textContent = '批准';
+    const deny = document.createElement('button');
+    deny.type = 'button';
+    deny.textContent = '拒绝';
+    approve.onclick = () => decidePrivateApproval(receipt.approval.id, true);
+    deny.onclick = () => decidePrivateApproval(receipt.approval.id, false);
+    card.append(label);
+    if (receipt.approval.preview) {
+      const preview = document.createElement('pre');
+      preview.textContent = receipt.approval.preview;
+      card.append(preview);
+    }
+    if (receipt.approval.previewTruncated) {
+      const notice = document.createElement('small');
+      notice.textContent = '变更内容超过预览范围，仅显示前 2000 个字符。';
+      card.append(notice);
+    }
+    card.append(approve, deny);
+    row.append(card);
+  }
 }
 
 const replyImageTypes = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
@@ -926,6 +1191,7 @@ el('composer').onsubmit = async event => {
       }
       if (result.tool_receipts?.length) process.node.hidden = false;
       appendReplyAttachments(live, result.tool_receipts ?? [], selected);
+      appendApprovalControls(live, result.tool_receipts ?? []);
       live.hidden = false;
       process.finish();
     });

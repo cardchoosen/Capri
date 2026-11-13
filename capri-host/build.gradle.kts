@@ -10,6 +10,7 @@ dependencies {
     implementation("org.json:json:20240303")
     implementation("org.apache.pdfbox:pdfbox:3.0.8")
     implementation("com.microsoft.playwright:playwright:1.61.0")
+    implementation("org.java-websocket:Java-WebSocket:1.4.0")
     testImplementation("junit:junit:4.13.2")
 }
 

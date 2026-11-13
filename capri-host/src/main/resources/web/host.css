@@ -128,6 +128,27 @@ body > aside > footer { margin-top: auto; }
 .settings-details > details > summary { padding: 5px 0; color: var(--white); }
 #rules-status > details > details { margin: 4px 0 4px 14px; }
 .settings-grid pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.integration-settings { display: grid; gap: 10px; }
+.integration-settings p { margin: 0; color: var(--muted); }
+.integration-settings form { display: grid; gap: 8px; }
+.integration-settings input, .integration-settings textarea { width: 100%; min-width: 0; padding: 8px 10px; color: var(--white); font: inherit; background: var(--panel); border: 1px solid var(--line); border-radius: 7px; }
+.integration-settings textarea { resize: vertical; font-family: ui-monospace, monospace; }
+.integration-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.ssh-entry-form { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 10px 0; border-top: 1px solid var(--line); }
+.ssh-entry-form label { display: grid; gap: 4px; color: var(--muted); }
+.ssh-entry-form label:last-of-type, .ssh-entry-form .integration-actions { grid-column: 1 / -1; }
+.ssh-server-row, .approval-row, .private-approval-card { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.ssh-server-row span, .approval-row span, .private-approval-card span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.settings-details #device-pairing { white-space: pre-wrap; overflow-wrap: anywhere; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.private-approval-card { margin-top: 10px; padding: 10px; border: 1px solid #856b36; border-radius: 8px; background: #211c10; }
+.private-approval-card pre { flex-basis: 100%; max-height: 220px; overflow: auto; margin: 0; padding: 8px; background: #111; border-radius: 6px; }
+#private-approvals h3 { margin: 8px 0 2px; font-size: 14px; }
+.private-library { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
+.private-library h3 { margin: 0; font-size: 15px; }
+#private-library-path { overflow-wrap: anywhere; color: var(--muted); }
+#private-library-files ul { display: grid; gap: 4px; max-height: 320px; overflow: auto; margin: 0; padding: 0; list-style: none; }
+#private-library-files li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--line); }
+#private-library-files li span { min-width: 0; overflow-wrap: anywhere; }
 .rule-editor { display: grid; gap: 8px; padding: 4px 0 8px; }
 .rule-editor textarea { border-radius: 6px; resize: vertical; }
 .rule-editor > div { display: flex; align-items: center; gap: 10px; }

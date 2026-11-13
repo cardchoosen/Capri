@@ -1,0 +1,4 @@
+Repository: https://github.com/nextlevelbuilder/ui-ux-pro-max-skill
+Commit: 6ae86f61f520d6ca229d2f40e070410638c908c5
+Runtime: src/ui-ux-pro-max/scripts and src/ui-ux-pro-max/data
+License: MIT

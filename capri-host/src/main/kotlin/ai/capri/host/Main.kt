@@ -32,6 +32,13 @@ fun main(args: Array<String>) {
     System.setProperty("sun.net.httpserver.maxRspTime", "180")
     val server = remote?.listen(bind) ?: HttpServer.create(bind, 8)
     val localServer = localPort?.let { checkNotNull(remote).listen(InetSocketAddress("127.0.0.1", it)) }
+    val devicePort = System.getenv("CAPRI_DEVICE_WS_PORT")?.toIntOrNull()
+        ?: if (remote != null) port + 1 else null
+    require(devicePort == null || remote != null && devicePort in 1..65535 && devicePort != port && devicePort != localPort) {
+        "The device WebSocket listener requires remote TLS and a port distinct from the web listeners."
+    }
+    val deviceSocket = devicePort?.let { DeviceSocketServer(InetSocketAddress(address, it), checkNotNull(remote).tls,
+        checkNotNull(chat).remoteDevices).apply { connectionLostTimeout = 150 } }
     val workers = Executors.newFixedThreadPool(16)
     val reminders = chat?.let { host ->
         host.sessions.recoverReports()
@@ -68,6 +75,17 @@ fun main(args: Array<String>) {
                             exchange.reply(200, "application/json", """{"status":"connected"}""")
                         } else exchange.reply(401, "application/json", """{"error":"unauthorized"}""")
                     }
+                    access != null && chat != null && exchange.requestURI.path.startsWith("/api/devices") &&
+                        exchange.requestHeaders.getFirst("X-Capri-Chat") == "1" -> {
+                        val authorized = access.authorized(exchange) || access.browserAuthorized(exchange)
+                        if (!authorized) exchange.reply(401, "application/json", """{"error":"unauthorized"}""")
+                        else exchange.handleDeviceManagement(chat, devicePort, System.getenv("CAPRI_DEVICE_WS_URL"))
+                    }
+                    access != null && chat != null && exchange.requestURI.path == "/api/device/pair" &&
+                        exchange.requestMethod == "POST" && exchange.requestHeaders.getFirst("X-Capri-Chat") == "1" -> {
+                        if (!access.authorized(exchange)) exchange.reply(401, "application/json", """{"error":"unauthorized"}""")
+                        else exchange.handleDevicePair(chat)
+                    }
                     access != null && exchange.requestURI.path.startsWith("/api/device/") &&
                         exchange.requestHeaders.getFirst("X-Capri-Chat") == "1" -> {
                         if (access.authorized(exchange) || exchange.requestURI.path == "/api/device/launch" &&
@@ -78,7 +96,9 @@ fun main(args: Array<String>) {
                         "/api/workspace/upload", "/api/workspace/transcribe", "/api/workspace/files", "/api/workspace/file",
                         "/api/workspace/editor", "/api/workspace/save", "/api/workspace/preview",
                         "/api/workspace/open-finder",
-                        "/api/settings", "/api/settings/mcp", "/api/skills/catalog", "/api/artifacts") || exchange.requestURI.path.startsWith("/api/artifacts/")) &&
+                        "/api/settings", "/api/settings/mcp", "/api/settings/integrations", "/api/settings/approval",
+                        "/api/private-library/files", "/api/private-library/upload", "/api/private-library/file",
+                        "/api/skills/catalog", "/api/artifacts") || exchange.requestURI.path.startsWith("/api/artifacts/")) &&
                         exchange.requestHeaders.getFirst("X-Capri-Chat") == "1" -> {
                         val authorized = if (access != null) access.authorized(exchange) || access.browserAuthorized(exchange)
                         else exchange.requestHeaders["Host"]?.singleOrNull() in loopbackHosts(listener.address.port)
@@ -88,6 +108,7 @@ fun main(args: Array<String>) {
                             exchange.requestURI.path.startsWith("/api/chat/") -> exchange.handleTurnControl(chat)
                             exchange.requestURI.path == "/api/skills/catalog" -> exchange.handleSkillCatalog(chat)
                             exchange.requestURI.path.startsWith("/api/settings") -> exchange.handleIntegrationSettings(chat)
+                            exchange.requestURI.path.startsWith("/api/private-library/") -> exchange.handlePrivateLibrary(chat)
                             exchange.requestURI.path == "/api/workspace/open-finder" ->
                                 if (finderAvailable) exchange.handleOpenFinder(chat.sessions)
                                 else exchange.reply(404, "application/json", """{"error":"not_found"}""")
@@ -107,16 +128,19 @@ fun main(args: Array<String>) {
     Runtime.getRuntime().addShutdownHook(Thread {
         server.stop(0)
         localServer?.stop(0)
+        deviceSocket?.stop(1000)
         workers.shutdownNow()
         reminders?.shutdownNow()
         chat?.sessions?.close()
     })
     server.start()
     localServer?.start()
+    deviceSocket?.start()
     val scheme = if (remote == null) "http" else "https"
     val host = if (':' in address) "[$address]" else address
     println("Capri host listening at $scheme://$host:${server.address.port}/")
     if (localPort != null) println("Capri local chat listening at https://localhost:$localPort/")
+    if (deviceSocket != null) println("Capri device executor listening at wss://$host:$devicePort/api/devices/v1")
 }
 
 private fun loopbackHosts(port: Int) = setOf("127.0.0.1:$port", "localhost:$port", "[::1]:$port")
@@ -233,8 +257,10 @@ internal suspend fun runTurn(
             else available.execute(call)
         }
         override suspend fun record(call: JSONObject, result: String) {
-            messages.put(JSONObject().put("role", "tool").put("tool_call_id", call.getString("id")).put("content", result))
             val toolResult = JSONObject(result)
+            val toolMessage = JSONObject().put("role", "tool").put("tool_call_id", call.getString("id")).put("content", result)
+            toolResult.optString("visionImage").takeIf(String::isNotBlank)?.let { toolMessage.put("_capri_image", "private-library:$it") }
+            messages.put(toolMessage)
             val key = toolCallKey(call)
             if (toolResult.optString("status") == "error" && toolResult.optString("error") != "repeated_tool_error") {
                 val prior = failures[key]
@@ -244,6 +270,7 @@ internal suspend fun runTurn(
                 .put("id", call.getString("id"))
                 .put("status", toolResult.getString("status"))
                 .putOpt("error", toolResult.opt("error"))
+                .putOpt("approval", toolResult.optJSONObject("approval"))
                 .putOpt("attachment", toolResult.optJSONObject("attachment"))
             receipts.put(receipt)
             recordCheckpoint()

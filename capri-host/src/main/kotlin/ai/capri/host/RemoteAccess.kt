@@ -14,7 +14,7 @@ import javax.net.ssl.KeyManagerFactory
 import javax.net.ssl.SSLContext
 
 internal class RemoteAccess private constructor(
-    private val tls: SSLContext,
+    internal val tls: SSLContext,
     private val tokenDigest: ByteArray,
 ) {
     private val browserSession = Base64.getUrlEncoder().withoutPadding()

@@ -73,6 +73,66 @@
           <summary>Tools</summary>
           <div class="settings-details" id="tools-status" aria-live="polite"></div>
         </details>
+        <details class="settings-card">
+          <summary>已连接设备</summary>
+          <div class="settings-details integration-settings">
+            <p>服务端和已配对的执行设备。新设备使用一次性配对码，启用接管后可在对话中调用该设备上报的能力。</p>
+            <div id="remote-devices" aria-live="polite"></div>
+            <div class="integration-actions"><button id="device-pair-create" type="button">生成配对码</button></div>
+            <pre id="device-pairing" hidden></pre>
+            <p id="device-status" role="status"></p>
+          </div>
+        </details>
+        <details class="settings-card">
+          <summary>GitHub</summary>
+          <div class="settings-details integration-settings">
+            <p>完成连接后，可直接在对话中让 Capri 查看和管理仓库、分支、Issue、PR 及文件。</p>
+            <p id="github-status" role="status"></p>
+            <form id="github-form">
+              <label for="github-token">个人访问令牌</label>
+              <p>令牌权限决定 Capri 能执行的 GitHub 操作；仅保存到本机 Capri 数据目录。</p>
+              <input id="github-token" type="password" autocomplete="new-password" placeholder="粘贴 GitHub token">
+              <div class="integration-actions"><button type="submit">连接 / 更新</button><button id="github-disconnect" type="button">断开</button></div>
+            </form>
+          </div>
+        </details>
+        <details class="settings-card">
+          <summary>SSH 服务器</summary>
+          <div class="settings-details integration-settings">
+            <p>添加后可在对话中让 Capri 连接和管理服务器。导入的私钥会复制到 Capri 的本地凭据目录并限制为当前用户可读；首次连接前需在终端确认服务器主机指纹。</p>
+            <div id="ssh-servers"></div>
+            <form id="ssh-add-form" class="ssh-entry-form">
+              <label>名称 <input name="name" required maxlength="40" pattern="[A-Za-z0-9_-]+" placeholder="home-server"></label>
+              <label>主机 <input name="host" required maxlength="253" placeholder="host.example.com"></label>
+              <label>用户 <input name="user" required maxlength="64" placeholder="username"></label>
+              <label>端口 <input name="port" type="number" min="1" max="65535" value="22" required></label>
+              <label>导入私钥副本（可选） <input name="identityKey" type="file" accept=".pem,.key,.pubkey,application/x-pem-file"></label>
+              <div class="integration-actions"><button type="submit">添加服务器</button></div>
+            </form>
+            <button id="ssh-save" type="button">保存服务器列表</button>
+            <p id="ssh-status" role="status"></p>
+          </div>
+        </details>
+        <details class="settings-card">
+          <summary>私人文件</summary>
+          <div class="settings-details integration-settings">
+            <p>添加后可直接在对话中管理这些文件。读取需按任务批准；修改或删除原文件需单独批准。</p>
+            <label for="private-roots">允许的文件夹（每行一个绝对路径）</label>
+            <textarea id="private-roots" rows="4" spellcheck="false" placeholder="/Users/you/Documents/Private"></textarea>
+            <div class="integration-actions"><button id="private-roots-save" type="button">保存文件夹</button></div>
+            <p id="private-status" role="status"></p>
+            <section class="private-library">
+              <h3>Capri 私人资料库</h3>
+              <p>导入的文件会作为 Capri 管理的副本保存。你可以在对话中让 Capri 分类、改名和整理；外部原文件不会被导入操作删除。</p>
+              <code id="private-library-path"></code>
+              <input id="private-library-input" type="file" multiple hidden>
+              <button id="private-library-import" type="button">导入文件</button>
+              <p id="private-library-status" role="status"></p>
+              <div id="private-library-files"></div>
+            </section>
+            <div id="private-approvals"></div>
+          </div>
+        </details>
       </div>
     </section>
     <form id="composer" hidden>
