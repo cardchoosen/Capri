@@ -126,6 +126,8 @@ body > aside > footer { margin-top: auto; }
 #tools-status li { font-family: ui-monospace, monospace; font-size: 13px; }
 .settings-details > details { margin: 0; }
 .settings-details > details > summary { padding: 5px 0; color: var(--white); }
+.skill-scope + .skill-scope { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.skill-scope h3 { margin: 0 0 8px; color: var(--white); font-size: 14px; font-weight: 600; }
 #rules-status > details > details { margin: 4px 0 4px 14px; }
 .settings-grid pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .integration-settings { display: grid; gap: 10px; }

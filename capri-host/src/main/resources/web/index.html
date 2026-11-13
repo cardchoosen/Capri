@@ -61,7 +61,14 @@
         <details class="settings-card">
           <summary>Skills</summary>
           <div class="settings-details">
-            <div id="installed-skills" aria-live="polite"></div>
+            <section class="skill-scope" aria-labelledby="kernel-skills-heading">
+              <h3 id="kernel-skills-heading">内核级 · Skill Hub 可用</h3>
+              <div id="kernel-skills" aria-live="polite"></div>
+            </section>
+            <section class="skill-scope" aria-labelledby="user-skills-heading">
+              <h3 id="user-skills-heading">用户级 · 当前会话已接入</h3>
+              <div id="user-skills" aria-live="polite"></div>
+            </section>
             <button id="skills-open" hidden type="button">Skill 库</button>
           </div>
         </details>

@@ -233,19 +233,32 @@ let settingsRequest = 0;
 async function loadSettings() {
   const request = ++settingsRequest;
   const rules = el('rules-status');
-  const skills = el('installed-skills');
+  const kernelSkills = el('kernel-skills');
+  const userSkills = el('user-skills');
   const mcp = el('mcp-status');
   const tools = el('tools-status');
   el('settings-session').textContent = '当前会话 · ' + currentTitle();
-  rules.textContent = skills.textContent = mcp.textContent = tools.textContent = '正在读取…';
+  rules.textContent = kernelSkills.textContent = userSkills.textContent = mcp.textContent = tools.textContent = '正在读取…';
   try {
     const state = await (await api(sessionPath('/api/settings'))).json();
     if (request !== settingsRequest || !settingsView) return;
     renderRules(rules, state.rules);
-    skills.textContent = state.skills.status === 'unavailable' ? '无法读取会话 Skills' :
+    try {
+      const catalogState = await catalog('list');
+      if (request !== settingsRequest || !settingsView) return;
+      const available = catalogState.skills || [];
+      kernelSkills.textContent = available.length
+        ? `Skill Hub 中有 ${available.length} 个可用项；它们由内核提供，可按需安装到会话。`
+        : '内核 Skill Hub 当前没有可用项。';
+      appendNames(kernelSkills, available.map(skill => `${skill.name} · ${(skill.versions || []).length} 个版本`));
+      if (catalogState.truncated) kernelSkills.append('仅显示前 100 项。');
+    } catch (_failure) {
+      kernelSkills.textContent = '无法读取内核 Skill Hub。';
+    }
+    userSkills.textContent = state.skills.status === 'unavailable' ? '无法读取当前会话的 Skills' :
       state.skills.skills.length ? '' : '当前会话尚未接入 Skill';
-    appendNames(skills, state.skills.skills || []);
-    if (state.skills.truncated) skills.append('仅显示前 100 项。');
+    appendNames(userSkills, state.skills.skills || []);
+    if (state.skills.truncated) userSkills.append('仅显示前 100 项。');
     tools.textContent = state.tools.length + ' 个可用工具';
     appendNames(tools, state.tools);
     if (!state.mcpConfigured) {
@@ -263,7 +276,7 @@ async function loadSettings() {
     await loadRemoteDevices(request);
   } catch (failure) {
     if (request !== settingsRequest || !settingsView) return;
-    for (const node of [rules, skills, mcp, tools]) {
+    for (const node of [rules, kernelSkills, userSkills, mcp, tools]) {
       if (node.textContent === '正在读取…') node.textContent = failure.message;
     }
   }
