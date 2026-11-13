@@ -38,6 +38,7 @@ const toolHints = {
   agent_rules: '正在查看规则', model_info: '正在查看模型设置', extensions: '正在检查扩展',
   tool_search: '正在查找工具', tool_describe: '正在查看工具用法', tool_invoke: '正在调用工具',
   github: '正在管理 GitHub', ssh: '正在连接 SSH 服务器', private_files: '正在访问私人文件', private_library: '正在整理 Capri 资料库',
+  host_exec: '正在运行本机会话命令',
   clarify: '正在准备澄清问题',
 };
 
@@ -258,7 +259,7 @@ async function loadSettings() {
         if (status.more) mcp.append('仅显示服务端返回的首批资源。');
       } else mcp.textContent = '已配置 · 暂时无法连接';
     }
-    renderIntegrationSettings(state.integrations || {});
+    renderIntegrationSettings({...state.integrations, hostExecution: state.hostExecution});
     await loadRemoteDevices(request);
   } catch (failure) {
     if (request !== settingsRequest || !settingsView) return;
@@ -342,6 +343,40 @@ function renderIntegrationSettings(state) {
   el('private-roots').value = (state.privateRoots || []).join('\n');
   renderPrivateApprovals(state.approvals || []);
   renderPrivateLibrary(state.library || {});
+  renderHostExecution(state.hostExecution || {});
+}
+
+function renderHostExecution(state) {
+  el('host-execution-mode').value = state.mode || 'approval';
+  el('host-execution-allowlist').value = (state.allowlist || []).join('\n');
+  el('host-execution-backend').textContent = state.sandbox === 'macos-sandbox-exec' ?
+    '已检测到 macOS 系统沙箱；工作区外的文件访问、写入和网络请求将被限制。' :
+    state.sandbox === 'linux-bwrap' ? '已检测到 bubblewrap；工作区外文件访问、写入和网络请求将被限制。' :
+    '未检测到受支持的系统沙箱；本机命令执行保持关闭。';
+  const approvals = el('host-execution-approvals');
+  approvals.replaceChildren();
+  if (state.approvals?.length) {
+    const heading = document.createElement('h3'); heading.textContent = '待审批的本机命令'; approvals.append(heading);
+    for (const request of state.approvals) {
+      const row = document.createElement('div'); row.className = 'approval-row';
+      const command = document.createElement('code'); command.textContent = `${request.command} · ${request.cwd || '.'}`;
+      const approve = document.createElement('button'); approve.type = 'button'; approve.textContent = '批准';
+      const deny = document.createElement('button'); deny.type = 'button'; deny.textContent = '拒绝';
+      approve.onclick = () => decidePrivateApproval(request.id, true, 'hostExecution');
+      deny.onclick = () => decidePrivateApproval(request.id, false, 'hostExecution');
+      row.append(command, approve, deny); approvals.append(row);
+    }
+  }
+  const receipts = el('host-execution-receipts');
+  receipts.replaceChildren();
+  if (state.receipts?.length) {
+    const heading = document.createElement('h3'); heading.textContent = '最近执行回执'; receipts.append(heading);
+    for (const item of [...state.receipts].reverse()) {
+      const row = document.createElement('div'); row.className = 'approval-row';
+      const label = document.createElement('span'); label.textContent = `${item.state} · ${item.command} · ${item.cwd || '.'}`;
+      row.append(label); receipts.append(row);
+    }
+  }
 }
 
 function renderPrivateLibrary(library) {
@@ -482,13 +517,28 @@ el('private-roots-save').onclick = () => {
   void saveIntegrations({kind: 'privateRoots', roots}, 'private-status');
 };
 
-async function decidePrivateApproval(id, approve) {
+el('host-execution-save').onclick = async () => {
+  const allowlist = el('host-execution-allowlist').value.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
+  const status = el('host-execution-status');
+  status.textContent = '正在保存…';
   try {
-    const response = await api(sessionPath('/api/settings/approval'), {method: 'POST', body: JSON.stringify({id, approve})});
+    const response = await api(sessionPath('/api/settings/integrations'), {method: 'PUT', body: JSON.stringify({
+      kind: 'hostExecution', mode: el('host-execution-mode').value, allowlist,
+    })});
+    renderIntegrationSettings(await response.json());
+    status.textContent = '执行策略已保存。';
+  } catch (failure) { status.textContent = failure.message; }
+};
+
+async function decidePrivateApproval(id, approve, kind = 'privateFiles') {
+  try {
+    const response = await api(sessionPath('/api/settings/approval'), {method: 'POST', body: JSON.stringify({id, approve, kind})});
     const decision = await response.json();
     const input = el('input');
-    input.value = approve ? `我已批准 ${decision.action} ${decision.path}，请继续执行该操作并完成任务。` :
-      `我拒绝了对 ${decision.path} 的 ${decision.action} 操作，请继续任务并寻找不执行该操作的方案。`;
+    input.value = kind === 'hostExecution' ? approve ? `我已批准运行命令：${decision.command}，请继续执行并完成任务。` :
+      `我拒绝运行命令：${decision.command}，请继续任务并寻找不执行该命令的方案。` :
+      approve ? `我已批准 ${decision.action} ${decision.path}，请继续执行该操作并完成任务。` :
+        `我拒绝了对 ${decision.path} 的 ${decision.action} 操作，请继续任务并寻找不执行该操作的方案。`;
     switchView(false);
     el('composer').requestSubmit();
   } catch (failure) { el('private-status').textContent = failure.message; }

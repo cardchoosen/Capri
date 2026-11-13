@@ -48,6 +48,7 @@ internal class LocalChat private constructor(
     private val memoryRanking: HostMemoryRanking?,
     private val documentExecutors: DocumentExecutors?,
     private val integrations: HostIntegrations,
+    private val hostExecution: HostExecution,
     val remoteDevices: RemoteDevices,
     private val agentBrowser: HostAgentBrowser?,
     private val uiUxProMax: HostUiUxProMax?,
@@ -101,6 +102,7 @@ internal class LocalChat private constructor(
         return JSONObject().put("rules", rules).put("skills", skills)
             .put("mcpConfigured", mcpResources != null)
             .put("integrations", integrations.settings(session))
+            .put("hostExecution", hostExecution.settings(session))
             .put("tools", JSONArray(hostTools(session, checkNotNull(selection(JSONObject())), RuleSnapshot("", null), JSONArray(), "settings").availableNames()))
     }
 
@@ -122,7 +124,13 @@ internal class LocalChat private constructor(
         }
     }
 
-    fun integrationState(session: String): JSONObject = integrations.settings(session)
+    fun integrationState(session: String): JSONObject = integrations.settings(session).put("hostExecution", hostExecution.settings(session))
+
+    fun configureHostExecution(payload: JSONObject) = hostExecution.configure(payload)
+
+    fun decideHostExecution(session: String, id: String, approve: Boolean): JSONObject = hostExecution.decide(session, id, approve)
+
+    fun close() = hostExecution.close()
 
     fun saveGitHub(token: String?) = integrations.configureGitHub(token)
 
@@ -141,6 +149,7 @@ internal class LocalChat private constructor(
 
     fun deleteSession(session: String) = synchronized(turnLock) {
         if (active?.session == session) throw WorkspaceFailure("chat_busy", "A turn is running in this session.")
+        if (hostExecution.hasRunning(session)) throw WorkspaceFailure("execution_running", "Stop active host commands before deleting this conversation.")
         sessions.delete(session)
     }
 
@@ -177,6 +186,7 @@ internal class LocalChat private constructor(
             agentBrowser = agentBrowser, uiUxProMax = uiUxProMax, memoryRanking = memoryRanking,
             documentExecutors = documentExecutors,
             integrations = integrations,
+            hostExecution = hostExecution,
             remoteDevices = remoteDevices,
             plan = { args -> childPlans.execute(session, args) { step, inputs ->
                 val usage = JSONArray()
@@ -371,6 +381,7 @@ internal class LocalChat private constructor(
     fun cancel(session: String, id: String): Boolean = synchronized(turnLock) {
         val turn = active?.takeIf { it.session == session && it.id == id } ?: return@synchronized false
         turn.phase = "cancelling"
+        hostExecution.cancelSession(session)
         turn.job.cancel()
         true
     }
@@ -695,7 +706,7 @@ internal class LocalChat private constructor(
             val absoluteData = data.toAbsolutePath()
             return LocalChat(endpoint, key, model, HostSessions(absoluteData, legacy), rules,
                 data.toAbsolutePath().resolve("AGENTS.md"), kernelRules, limits, budget,
-                catalog, mcp, transcription, memoryRanking, executors, HostIntegrations(absoluteData),
+                catalog, mcp, transcription, memoryRanking, executors, HostIntegrations(absoluteData), HostExecution(absoluteData),
                 RemoteDevices(absoluteData.resolve("devices")), agentBrowser, uiUxProMax)
         }
 

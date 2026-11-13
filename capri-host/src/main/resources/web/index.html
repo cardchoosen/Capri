@@ -74,6 +74,26 @@
           <div class="settings-details" id="tools-status" aria-live="polite"></div>
         </details>
         <details class="settings-card">
+          <summary>本机执行与权限</summary>
+          <div class="settings-details integration-settings">
+            <p>命令只在当前会话工作区内启动，并由操作系统沙箱限制文件访问、写入和网络。默认每条命令都需审批；审批绑定命令与工作目录。取消会终止命令进程树；服务重启后不会自动重跑，只保留中断回执。</p>
+            <p id="host-execution-backend" role="status"></p>
+            <label for="host-execution-mode">执行策略</label>
+            <select id="host-execution-mode">
+              <option value="disabled">关闭</option>
+              <option value="approval">每次审批</option>
+              <option value="allowlist">精确命令白名单，其余需审批</option>
+              <option value="full">直接执行，不询问</option>
+            </select>
+            <label for="host-execution-allowlist">精确命令白名单（每行一条）</label>
+            <textarea id="host-execution-allowlist" rows="4" spellcheck="false" placeholder="例如：git status --short"></textarea>
+            <div class="integration-actions"><button id="host-execution-save" type="button">保存执行策略</button></div>
+            <p id="host-execution-status" role="status"></p>
+            <div id="host-execution-approvals"></div>
+            <div id="host-execution-receipts"></div>
+          </div>
+        </details>
+        <details class="settings-card">
           <summary>已连接设备</summary>
           <div class="settings-details integration-settings">
             <p>服务端和已配对的执行设备。新设备使用一次性配对码，启用接管后可在对话中调用该设备上报的能力。</p>

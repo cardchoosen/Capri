@@ -181,6 +181,7 @@ private fun HttpExchange.handleSaveIntegrations(chat: LocalChat, session: String
             }
             "ssh" -> chat.saveSsh(payload.getJSONArray("servers"))
             "privateRoots" -> chat.savePrivateRoots(payload.getJSONArray("roots"))
+            "hostExecution" -> chat.configureHostExecution(payload)
             else -> throw IllegalArgumentException("Choose a supported integration.")
         }
         reply(200, "application/json", chat.integrationState(session).toString())
@@ -200,7 +201,9 @@ private fun HttpExchange.handlePrivateApproval(chat: LocalChat, session: String)
     }
     try {
         val payload = JSONObject(bytes.toString(Charsets.UTF_8))
-        val result = chat.decidePrivateApproval(session, payload.getString("id"), payload.getBoolean("approve"))
+        val result = if (payload.optString("kind") == "hostExecution")
+            chat.decideHostExecution(session, payload.getString("id"), payload.getBoolean("approve"))
+        else chat.decidePrivateApproval(session, payload.getString("id"), payload.getBoolean("approve"))
         reply(200, "application/json", result.toString())
     } catch (failure: WorkspaceFailure) {
         reply(409, "application/json", JSONObject().put("error", failure.code).put("message", failure.message).toString())

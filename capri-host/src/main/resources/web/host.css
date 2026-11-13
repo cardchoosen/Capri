@@ -143,6 +143,9 @@ body > aside > footer { margin-top: auto; }
 .private-approval-card { margin-top: 10px; padding: 10px; border: 1px solid #856b36; border-radius: 8px; background: #211c10; }
 .private-approval-card pre { flex-basis: 100%; max-height: 220px; overflow: auto; margin: 0; padding: 8px; background: #111; border-radius: 6px; }
 #private-approvals h3 { margin: 8px 0 2px; font-size: 14px; }
+#host-execution-approvals h3, #host-execution-receipts h3 { margin: 14px 0 6px; font-size: 14px; }
+#host-execution-approvals code { flex: 1; min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+#host-execution-mode { max-width: 420px; }
 .private-library { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
 .private-library h3 { margin: 0; font-size: 15px; }
 #private-library-path { overflow-wrap: anywhere; color: var(--muted); }

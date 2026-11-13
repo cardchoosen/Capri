@@ -25,6 +25,7 @@ internal class HostTools(
     private val documentExecutors: DocumentExecutors? = null,
     private val plan: (suspend (JSONObject) -> JSONObject)? = null,
     private val integrations: HostIntegrations,
+    private val hostExecution: HostExecution,
     private val remoteDevices: RemoteDevices,
     private val taskId: String,
 ) {
@@ -90,6 +91,9 @@ internal class HostTools(
                 "host_environment" -> JSONObject().put("status", "ok")
                     .put("runtime", "Capri JVM host").put("path_scope", "session workspace")
                     .put("workspace", "workspace/").put("delivery", "workspace file references")
+                    .put("executionPolicy", hostExecution.settings(session).optString("mode"))
+                    .put("executionSandbox", hostExecution.settings(session).optString("sandbox"))
+                "host_exec" -> hostExecution.execute(session, taskId, sessions.workspaceDirectory(session), arguments) { question = it }
                 "session_artifacts" -> JSONObject().put("status", "ok").put("files", sessions.artifacts(session))
                 "conversation_history" -> {
                     val history = sessions.history(session)
@@ -232,7 +236,7 @@ internal class HostTools(
     }
 
     companion object {
-        private val deferred = setOf("coding_diagnostics", "coding_restore", "knowledge", "personal_memory",
+        private val deferred = setOf("host_exec", "coding_diagnostics", "coding_restore", "knowledge", "personal_memory",
             "task_experience", "agent_rules", "extensions", "agent_delegate", "skill_hub", "agent_jobs", "mcp_resources", "browser", "agent_browser", "playwright", "ui_ux_design", "remote_document", "agent_plan", "private_library")
         private fun text(description: String, max: Int) =
             JSONObject().put("type", "string").put("description", description).put("maxLength", max)
@@ -287,6 +291,14 @@ internal class HostTools(
         private val registry = ToolRegistry(JSONArray()
             .put(ToolContracts.spec("host_environment",
                 "Read the Capri runtime type, path scope, and session directory roles.", JSONObject(), emptyList()))
+            .put(ToolContracts.spec("host_exec",
+                "Run a command in the current conversation workspace under the operating system sandbox. By default each command needs approval; commands use a minimal environment, have bounded output, and can be listed, read, or stopped. This does not access Android devices or configured SSH servers.",
+                JSONObject().put("action", JSONObject().put("type", "string").put("enum", JSONArray(listOf("run", "list", "read", "stop"))))
+                    .put("command", text("Shell command to run. Required for run; the exact command is shown for approval.", 4000))
+                    .put("cwd", text("Optional existing directory relative to this conversation workspace. Defaults to workspace root.", 512))
+                    .put("timeoutMs", JSONObject().put("type", "integer").put("minimum", 250).put("maximum", 60_000)
+                        .put("description", "How long to wait before returning a running execution ID. Defaults to 15000."))
+                    .put("id", text("Execution receipt ID. Required for read or stop.", 36)), listOf("action")))
             .put(ToolContracts.spec("session_artifacts",
                 "List files attached to the current session with relative paths and byte sizes.", JSONObject(), emptyList()))
             .put(ToolContracts.spec("conversation_history", "Read recent saved messages from the current conversation.",

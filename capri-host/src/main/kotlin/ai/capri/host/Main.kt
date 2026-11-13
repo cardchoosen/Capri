@@ -131,6 +131,7 @@ fun main(args: Array<String>) {
         deviceSocket?.stop(1000)
         workers.shutdownNow()
         reminders?.shutdownNow()
+        chat?.close()
         chat?.sessions?.close()
     })
     server.start()
